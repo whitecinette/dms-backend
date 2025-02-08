@@ -95,6 +95,43 @@ exports.loginSuperAdmin = async (req, res) => {
     }
 };
 
+// 📌 Delete a User (Only Super Admin)
+// User can be MDD, Dealer, Employee or Admin
+exports.deleteUser = async (req, res) => {
+    try {
+        const { id } = req.params; // User ID to delete
+        const token = req.headers.authorization?.split(" ")[1]; // Extract JWT Token
+
+        if (!token) {
+            return res.status(401).json({ message: "Unauthorized: No token provided" });
+        }
+
+        // Verify the token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const superAdmin = await User.findById(decoded.id);
+
+        // Check if requester is a Super Admin
+        if (!superAdmin || superAdmin.role !== "super_admin") {
+            return res.status(403).json({ message: "Forbidden: Only Super Admin can delete users" });
+        }
+
+        // Check if the user exists
+        const userToDelete = await User.findById(id);
+        if (!userToDelete) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Delete the user (Only the user record, NOT related work)
+        await User.findByIdAndDelete(id);
+
+        res.status(200).json({ message: "User deleted successfully" });
+
+    } catch (error) {
+        console.error("Delete User Error:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
 /////////////// SUPER ADMIN ///////////////////////////
 
 
@@ -135,6 +172,57 @@ exports.registerAdmin = async (req, res) => {
         console.log("Error:", error);
     }
 };
+
+// 📌 Edit Admin Profile
+exports.editAdminProfile = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, password, contact, email } = req.body;
+
+        // Check if user exists
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        // Ensure only Admins can be updated
+        if (user.role !== "admin") {
+            return res.status(403).json({ message: "Unauthorized: Only admins can be updated" });
+        }
+
+        // Prevent duplicate email update
+        if (email && email !== user.email) {
+            if (await User.findOne({ email })) {
+                return res.status(400).json({ message: "Email already in use" });
+            }
+        }
+
+        // Prepare update object
+        const updateData = {};
+        if (name) updateData.name = name;
+        if (contact) updateData.contact = contact;
+        if (email) updateData.email = email;
+        if (password) {
+            updateData.password = await bcrypt.hash(password, 10);
+        }
+        // Only hash password if it's different from the existing one
+        if (password && !(await bcrypt.compare(password, user.password))) {
+            updateData.password = await bcrypt.hash(password, 10);
+        }
+        // Update user with validation
+        const updatedUser = await User.findByIdAndUpdate(id, updateData, {
+            new: true,
+            runValidators: true, // Enforce validation
+        });
+
+        res.status(200).json({ message: "User updated successfully", user: updatedUser });
+    } catch (error) {
+        console.error("Edit Admin Profile Error:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+
 
 
 
