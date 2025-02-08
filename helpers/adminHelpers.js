@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const Firm = require("../model/Firm");
+const User = require("../model/User");
 
 // Function to generate firmId from name
 exports.generateFirmId = async (name) => {
@@ -20,7 +21,7 @@ exports.generateFirmId = async (name) => {
 
 // Function to generate a unique Admin Code
 exports.generateAdminCode = async () => {
-    const lastAdmin = await User.findOne({ role: "Admin" }).sort({ createdAt: -1 });
+    const lastAdmin = await User.findOne({ role: "admin" }).sort({ createdAt: -1 });
 
     if (!lastAdmin) {
         return "ADMIN-001";

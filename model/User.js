@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema(
         password: { type: String, required: true }, // Hashed password
         contact: { type: String, required: true },
         email: { type: String, required: true, unique: true },
-        status: { type: String, enum: ["Active", "Inactive"], default: "Active" },
+        status: { type: String, enum: ["active", "inactive"], default: "active" },
         role: { type: String, required: true }, // Example: "Admin", "Employee", etc.
         isVerified: { type: Boolean, default: false },
         version: { type: Number, default: 1 } // Track changes

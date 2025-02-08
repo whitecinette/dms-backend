@@ -1,15 +1,24 @@
+const jwt  = require("jsonwebtoken");
 const User = require("../model/User");
+const mongoose = require("mongoose");
 
 exports.superAdminAuth = async (req, res, next) => {
-    try {
-      const user  = req;
-      console.log("Token: ", token)
+    try {  
+      const token = req.header("Authorization")
+      if(!token){
+        return res.status(401).send({message: "Access Denied. No token provided."})
+      }
+      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      console.log(decoded);
+      const user = await User.findOne({ _id:decoded.id, role: "super_admin" });
+      
+      if(!user){
+        return res.status(401).send({message: "Access Denied. You are not a super Admin"})
+      }
+      req.user = user
+      next();
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-
-
-    } catch (error) {
-      console.log(error);
-      res.status(500).send({ error: "Internal Server Error" });
+    }catch(err){
+      console.log(err)
     }
   };

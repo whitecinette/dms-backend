@@ -101,19 +101,12 @@ exports.loginSuperAdmin = async (req, res) => {
 /////////////// ADMIN ///////////////////////////
 exports.registerAdmin = async (req, res) => {
     try {
-        const {user} = req;
-        console.log("User: ", user);
         const { name, contact, email, password } = req.body;
 
         // Check if email is already taken
         const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(400).json({ message: "Email already in use" });
-        }
-
-        // Ensure that only Super Admin can create an Admin
-        if (req.user.role !== "super-admin") {
-            return res.status(403).json({ message: "Only Super Admin can create an Admin" });
         }
 
         // Generate unique Admin Code
