@@ -131,6 +131,22 @@ exports.deleteUser = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+// Edit admin profile for super admin
+exports.editAdminProfileForSuperAdmin = async (req, res) => {
+    try {
+        const { id } = req.params; // Admin ID to edit
+        const update = req.body;
+        const admin = await User.findByIdAndUpdate(id,update,{new:true})
+        if(!admin){
+            return res.status(404).json({ message: "Admin not found" });
+        }
+        res.status(200).json({ message: "Admin profile updated successfully" });
+    } catch (error) {
+        console.error("Edit Admin Profile Error:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
 
 /////////////// SUPER ADMIN ///////////////////////////
 
@@ -227,3 +243,22 @@ exports.editAdminProfile = async (req, res) => {
 
 
 /////////////// ADMIN ///////////////////////////
+
+
+//////Edit profile for employee, dealer, mdd////
+exports.editProfileForUser = async(req,res) => {
+    try{
+        const user = req.user;
+        console.log("user: ",user)
+        const update = req.body;
+        const data = await User.findByIdAndUpdate(user._id,update,{new:true})
+        if(!data){
+            return res.status(404).json({message:"Failed to update user profile"})
+        }
+        res.status(200).json({message:"User profile updated successfully",user:data})
+    }catch(err){
+        console.error("Error updating user profile:",err)
+        res.status(500).json({message:"Internal Server Error"})
+    }
+}
+//////Edit profile for employee, dealer, mdd////
