@@ -1,5 +1,5 @@
 const express = require("express");
-const { registerSuperAdmin, loginSuperAdmin, editAdminProfile, deleteUserBySuperAdmin, deactivateUserBySuperAdmin, deleteUserByAdmin, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin } = require("../controllers/admin/userController");
+const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deleteUserBySuperAdmin, deactivateUserBySuperAdmin, deleteUserByAdmin, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, editUserBySuperAdmin, editUserByAdmin, getUsersForAdmin, getUsersForSuperAdmin } = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser } = require("../controllers/common/userController");
 const router = express.Router();
@@ -12,6 +12,8 @@ router.patch("/deactivate-user-by-super-admin/:id", superAdminAuth, deactivateUs
 router.post("/register-user-by-super-admin", superAdminAuth, registerUserBySuperAdmin);
 router.post("/register-admin-by-super-admin", superAdminAuth, registerAdminForSuperAdmin);
 router.put("/edit-admin-profile-by-super-admin/:id", superAdminAuth, editAdminProfile );
+router.put("/user/edit-by-super-admin/:id", superAdminAuth, editUserBySuperAdmin );
+router.get("/user/get-by-super-admin", superAdminAuth, getUsersForSuperAdmin);
 // ============================ /SUPER ADMIN ================================
 
 
@@ -22,6 +24,8 @@ router.put("/edit-admin-profile/:id", editAdminProfile );
 router.post("/register-user-by-admin", adminAuth, registerUserByAdmin);
 router.patch("/deactivate-user-by-admin/:id", adminAuth, deactivateUserByAdmin);
 router.delete("/delete-User-by-admin/:id", adminAuth, deleteUserByAdmin);
+router.put("/user/edit-by-admin/:id", adminAuth, editUserByAdmin);
+router.get("/user/get-by-admin", adminAuth, getUsersForAdmin);
 //  =========================== /ADMIN ================================
 
 //user

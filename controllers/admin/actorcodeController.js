@@ -2,7 +2,7 @@ const fs = require("fs");
 const csvParser = require("csv-parser");
 const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
-const { assignActorToUser } = require("../../helpers/actorToUserHelper");
+const { assignActorToUser, unassignActorToUser } = require("../../helpers/actorToUserHelper");
 
 ///upload aotor codes in bulks
 exports.uploadBulkActorCodes = async (req, res) => {
@@ -185,3 +185,27 @@ exports.getActorCodeForAdminAndSuperAdmin = async (req, res) => {
     return res.status(500).json({ message: "Internal server error." });
   }
 };
+
+exports.deleteActorCode = async (req, res) => {
+  try {
+      const actorId = req.params.id;
+
+      // Find the actor code
+      const actor = await ActorCode.findById(actorId);
+      if (!actor) {
+          return res.status(404).json({ message: "Actor code not found." });
+      }
+      if(actor.status === "active"){
+        await unassignActorToUser(actor.code)
+      }
+
+      // Delete the actor code
+      await ActorCode.findByIdAndDelete(actorId);
+
+      return res.status(200).json({ message: "Actor code deleted successfully." });
+  } catch (error) {
+      console.error("Error deleting actor code:", error);
+      return res.status(500).json({ message: "Internal server error." });
+  }
+};
+

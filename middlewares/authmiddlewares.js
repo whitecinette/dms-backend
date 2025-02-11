@@ -27,7 +27,7 @@ exports.superAdminAuth = async (req, res, next) => {
     next();
   } catch (err) {
     console.error("Error in superAdminAuth middleware:", err);
-    res.status(500).send({ message: "Internal Server Error", error: err });
+    return res.status(500).json({ message: "Invalid or expired token." });
   }
 };
 
@@ -67,8 +67,8 @@ exports.adminOrSuperAdminAuth = async (req, res, next) => {
     //const tokenWithoutBearer = token.startsWith("Bearer ") ? token.slice(7) : token;
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log("Token received:", token);
-    console.log("Decoded Token:", decoded);
+    //console.log("Token received:", token);
+    // console.log("Decoded Token:", decoded);
 
     // Find user and check role
     const user = await User.findById(decoded.id);
@@ -76,7 +76,7 @@ exports.adminOrSuperAdminAuth = async (req, res, next) => {
     if (!user) {
       return res.status(401).json({ message: "Access Denied. User not found." });
     }
-    console.log(user)
+    // console.log(user)
     if (!["admin", "super_admin"].includes(user.role)) {
       return res.status(403).json({ message: "Access Denied. You are not authorized." });
     }
@@ -85,7 +85,7 @@ exports.adminOrSuperAdminAuth = async (req, res, next) => {
     next(); // Proceed to the next middleware or controller
   } catch (err) {
     console.log(err);
-    res.status(500).send({ message: "Server Error" });
+    return res.status(500).json({ message: "Invalid or expired token." });
   }
 };
 
@@ -112,7 +112,7 @@ exports.findUserWithToken = async (req, res, next) => {
     next();
   } catch (err) {
     console.log(err);
-    return res.status(401).json({ message: "Invalid or expired token." });
+    return res.status(500).json({ message: "Invalid or expired token." });
   }
 };
 

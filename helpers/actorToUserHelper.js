@@ -7,12 +7,12 @@ exports.assignActorToUser = async (code) => {
   //console.log("entering assign code");
   try {
     const actor = await ActorCode.findOne({ code });
-    console.log("Actor found:", actor);
+    //console.log("Actor found:", actor);
     if (!actor) {
       console.error(`Actor code '${code}' not found.`);
       return { success: false, message: "Actor code not found." };
     }
-    console.log("actor is", actor);
+    //console.log("actor is", actor);
 
     // Check if a user with this actor code already exists
     const existingUser = await User.findOne({ code });
@@ -28,7 +28,9 @@ exports.assignActorToUser = async (code) => {
     const hashedPassword = await bcrypt.hash("123456", 10);
     //create default email
     const formattedName = actor.name.replace(/\s+/g, "").toLowerCase(); // Remove spaces and lowercase
-    const formattedPosition = actor.position ? actor.position.replace(/\s+/g, "").toLowerCase() : "unknown"; // Default if position is missing
+    const formattedPosition = actor.position
+      ? actor.position.replace(/\s+/g, "").toLowerCase()
+      : "unknown"; // Default if position is missing
     // Create a new user and associate the actorCode
     const newUser = await User.create({
       name: actor.name,
@@ -39,7 +41,7 @@ exports.assignActorToUser = async (code) => {
       role: actor.role,
       isVerified: true,
       email: `${formattedName}_${formattedPosition}@example.com`,
-      actorCode: actor._id, 
+      actorCode: actor._id,
     });
     //console.log("new user is", newUser);
     //console.log(`Successfully saved user: ${newUser.name}`);
@@ -50,34 +52,31 @@ exports.assignActorToUser = async (code) => {
   }
 };
 
-
-
 exports.unassignActorToUser = async (code) => {
-  //console.log("Entering unassignActorToUser...");
+  console.log("Entering unassignActorToUser...");
 
   try {
     // Check if the user exists
     const existingUser = await User.findOne({ code });
     if (!existingUser) {
-      //console.log(`❌ User with code '${code}' not found.`);
+      console.log(`❌ User with code '${code}' not found.`);
       return { success: false, message: "User not found." };
     }
 
-    //console.log("🔹 User found, deleting...");
+    console.log("🔹 User found, deleting...");
 
     // Delete the user
     const deletedUser = await User.findOneAndDelete({ code });
 
     if (!deletedUser) {
-      //console.error(`⚠️ Failed to delete user with code '${code}'.`);
+      console.error(`⚠️ Failed to delete user with code '${code}'.`);
       return { success: false, message: "User deletion failed." };
     }
 
-    //console.log("✅ User deleted:", deletedUser);
+    console.log("✅ User deleted:", deletedUser);
     return { success: true, message: "User deleted successfully." };
   } catch (error) {
-    // console.error("❌ Error in unassignActorToUser:", error);
+    console.error("❌ Error in unassignActorToUser:", error);
     return { success: false, message: "Internal server error." };
   }
 };
-

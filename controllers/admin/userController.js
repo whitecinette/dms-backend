@@ -311,6 +311,47 @@ exports.registerUserBySuperAdmin = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
+//============= /edit user by Super Admin ================
+
+exports.editUserBySuperAdmin = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, contact, email, status, role, isVerified, password, code } = req.body;
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // Allow super admin to update any field except 'code' and 'password'
+        user.name = name || user.name;
+        user.contact = contact || user.contact;
+        user.email = email || user.email;
+        user.password = user.password || hashedPassword;
+        user.code = user.code || code;
+        if (status) user.status = status; // Super admin can change user status
+        if (role) user.role = role; // Super admin can change roles
+        if (isVerified !== undefined) user.isVerified = isVerified; // Verification control
+
+        await user.save();
+        res.status(200).json({ message: "User updated successfully", user });
+
+    } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+    }
+};
+
+//============= /get user by super Admin ================
+exports.getUsersForSuperAdmin = async (req, res) => {
+    try {
+        // Fetch all users
+        const users = await User.find({ role: { $ne: "super_admin" } });
+
+        res.status(200).json({ message: "All users fetched successfully", users });
+    } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+    }
+};
+
 /////////////// SUPER ADMIN ///////////////////////////
 
 
@@ -564,6 +605,48 @@ exports.registerUserByAdmin = async (req, res) => {
     }
 };
 
+//============= /edit user by Admin ================
+exports.editUserByAdmin = async (req, res) => {
+    try {
+        console.log(req.params)
+        const { id } = req.params;
+        const { name, contact, email, isVerified, status } = req.body;
+
+        const user = await User.findById(id);
+        console.log(user)
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // Restrict normal admin from editing other admins or super admins
+        if (user.role === "admin" || user.role === "super_admin") {
+            return res.status(403).json({ message: "You cannot edit other admins or super admins" });
+        }
+
+        // Update allowed fields only
+        user.name = name || user.name;
+        user.contact = contact || user.contact;
+        user.email = email || user.email;
+        user.status = status || user.status;
+        if (isVerified !== undefined) user.isVerified = isVerified; // Verification control
+
+        await user.save();
+        res.status(200).json({ message: "User updated successfully", user });
+
+    } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+    }
+};
+
+//============= /get user by Admin ================
+exports.getUsersForAdmin = async (req, res) => {
+    try {
+        // Fetch only non-admin users
+        const users = await User.find({ role: { $nin: ["admin", "super_admin"] } });
+
+        res.status(200).json({ message: "Users fetched successfully", users });
+    } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+    }
+};
 
 
 
