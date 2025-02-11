@@ -4,7 +4,7 @@ const ActorCode = require("../model/ActorCode");
 const User = require("../model/User");
 
 exports.assignActorToUser = async (code) => {
-  console.log("entering assign code");
+  //console.log("entering assign code");
   try {
     const actor = await ActorCode.findOne({ code });
     console.log("Actor found:", actor);
@@ -17,13 +17,13 @@ exports.assignActorToUser = async (code) => {
     // Check if a user with this actor code already exists
     const existingUser = await User.findOne({ code });
     if (existingUser) {
-      console.log(`User with code '${code}' already exists.`);
+      //console.log(`User with code '${code}' already exists.`);
       return {
         success: false,
         message: "User already exists with this actor code.",
       };
     }
-    console.log("existing user is ", existingUser);
+    //console.log("existing user is ", existingUser);
     // Hash default password
     const hashedPassword = await bcrypt.hash("123456", 10);
     //create default email
@@ -38,14 +38,46 @@ exports.assignActorToUser = async (code) => {
       position: actor.position,
       role: actor.role,
       isVerified: true,
-      email: `default_${formattedName}_${formattedPosition}@example.com`,
+      email: `${formattedName}_${formattedPosition}@example.com`,
       actorCode: actor._id, 
     });
-    console.log("new user is", newUser);
-    console.log(`Successfully saved user: ${newUser.name}`);
+    //console.log("new user is", newUser);
+    //console.log(`Successfully saved user: ${newUser.name}`);
     return { success: true, message: "Successfully saved user." };
   } catch (error) {
     console.error("Error assigning actor code to users:", error);
     return { success: false, message: "Internal server error." };
   }
 };
+
+
+
+exports.unassignActorToUser = async (code) => {
+  //console.log("Entering unassignActorToUser...");
+
+  try {
+    // Check if the user exists
+    const existingUser = await User.findOne({ code });
+    if (!existingUser) {
+      //console.log(`❌ User with code '${code}' not found.`);
+      return { success: false, message: "User not found." };
+    }
+
+    //console.log("🔹 User found, deleting...");
+
+    // Delete the user
+    const deletedUser = await User.findOneAndDelete({ code });
+
+    if (!deletedUser) {
+      //console.error(`⚠️ Failed to delete user with code '${code}'.`);
+      return { success: false, message: "User deletion failed." };
+    }
+
+    //console.log("✅ User deleted:", deletedUser);
+    return { success: true, message: "User deleted successfully." };
+  } catch (error) {
+    // console.error("❌ Error in unassignActorToUser:", error);
+    return { success: false, message: "Internal server error." };
+  }
+};
+

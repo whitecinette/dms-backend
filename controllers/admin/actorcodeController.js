@@ -2,7 +2,7 @@ const fs = require("fs");
 const csvParser = require("csv-parser");
 const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
-const { assignActorToUser } = require("../../helpers/assignActorToUserHelper");
+const { assignActorToUser } = require("../../helpers/actorToUserHelper");
 
 ///upload aotor codes in bulks
 exports.uploadBulkActorCodes = async (req, res) => {
