@@ -1,19 +1,35 @@
 const express = require("express");
-const { registerSuperAdmin, loginSuperAdmin, registerAdmin, editAdminProfile, deleteUser, editProfileForUser } = require("../controllers/admin/userController");
-const { superAdminAuth, findUserWithToken } = require("../middlewares/authmiddlewares");
+const { registerSuperAdmin, loginSuperAdmin, editAdminProfile, editProfileForUser, deleteUserBySuperAdmin, deactivateUserBySuperAdmin, deleteUserByAdmin, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin } = require("../controllers/admin/userController");
+const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth } = require("../middlewares/authmiddlewares");
+const { loginUser } = require("../controllers/common/userController");
 const router = express.Router();
 
-
+// ============================ SUPER ADMIN ================================
 router.post("/register-super-admin", registerSuperAdmin);
-router.post("/login-super-admin", loginSuperAdmin);
-router.delete("/delete-User-by-super-admin/:id", deleteUser); // only by super admin
-
-router.post("/register-admin", superAdminAuth, registerAdmin);
-router.put("/edit-admin-profile/:id", editAdminProfile );
+// router.post("/login-super-admin", loginSuperAdmin);
+router.delete("/delete-User-by-super-admin/:id", superAdminAuth, deleteUserBySuperAdmin); // only by super admin
+router.patch("/deactivate-user-by-super-admin/:id", superAdminAuth, deactivateUserBySuperAdmin);
+router.post("/register-user-by-super-admin", superAdminAuth, registerUserBySuperAdmin);
+router.post("/register-admin-by-super-admin", superAdminAuth, registerAdminForSuperAdmin);
 router.put("/edit-admin-profile-by-super-admin/:id", superAdminAuth, editAdminProfile );
+// ============================ /SUPER ADMIN ================================
+
+
+// ============================ ADMIN ================================
+// router.post("/register-admin", superAdminAuth, registerAdmin);
+// router.post("/login-admin", loginAdmin);
+router.put("/edit-admin-profile/:id", editAdminProfile );
+router.post("/register-user-by-admin", adminAuth, registerUserByAdmin);
+router.patch("/deactivate-user-by-admin/:id", adminAuth, deactivateUserByAdmin);
+router.delete("/delete-User-by-admin/:id", adminAuth, deleteUserByAdmin);
+//  =========================== /ADMIN ================================
 
 //user
-router.put("/edit-profile",findUserWithToken,editProfileForUser);
+router.post("/login-admin-or-super-admin", loginAdminOrSuperAdmin)
+router.post("/login-user", loginUser);
+router.put("/edit-profile", findUserWithToken, editProfileForUser);
+// Private: Only Admin or Super Admin can activate and verify an employee
+router.patch("/activate-verify-user-by-admin-or-super-admin/:id", adminOrSuperAdminAuth, activateAndVerifyUser);
 
 
 module.exports = router;    

@@ -5,25 +5,32 @@ exports.superAdminAuth = async (req, res, next) => {
   try {
     const token = req.header("Authorization");
     if (!token) {
-      return res
-        .status(401)
-        .send({ message: "Access Denied. No token provided." });
+      return res.status(401).send({ message: "Access Denied. No token provided." });
     }
+    
+    // Log the token for debugging
+    console.log("Received Token:", token);
+
+    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log(decoded);
+    
+    // Log the decoded token for debugging
+    console.log("Decoded Token:", decoded);
+
     const user = await User.findOne({ _id: decoded.id, role: "super_admin" });
 
     if (!user) {
-      return res
-        .status(401)
-        .send({ message: "Access Denied. You are not a super Admin" });
+      return res.status(401).send({ message: "Access Denied. You are not a super Admin" });
     }
+
     req.user = user;
     next();
   } catch (err) {
-    console.log(err);
+    console.error("Error in superAdminAuth middleware:", err);
+    res.status(500).send({ message: "Internal Server Error", error: err });
   }
 };
+
 exports.adminAuth = async (req, res, next) => {
   try {
     const token = req.header("Authorization");
