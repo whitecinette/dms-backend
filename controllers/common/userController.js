@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const User = require("../../model/User");
 const jwt = require("jsonwebtoken");
+const { sendNotificationToAdmins } = require("../../helpers/notificationHelper");
 
 exports.loginUser = async (req, res) => {
     try {
@@ -63,3 +64,87 @@ exports.loginUser = async (req, res) => {
         console.log("Error:", error);
     }
 };
+
+//////Edit profile for employee, dealer, mdd////
+// exports.editProfileForUser = async (req, res) => {
+//     try {
+//         const user = req.user;
+//         console.log("user to update:", user)
+//         const update = req.body;
+//         const data = await User.findByIdAndUpdate(user._id, update, { new: true })
+//         if (!data) {
+//             return res.status(404).json({ message: "Failed to update user profile" })
+//         }
+//         res.status(200).json({ message: "User profile updated successfully", user: data })
+//     } catch (err) {
+//         console.error("Error updating user profile:", err)
+//         res.status(500).json({ message: "Internal Server Error" })
+//     }
+// }
+//////Edit profile for employee, dealer, mdd////
+exports.editProfileForUser = async (req, res) => {
+    try {
+        const user = req.user; // Assumed that the user is populated by authentication middleware
+        console.log("User to update: ", user);
+
+        const update = req.body;
+        const previousData = { ...user.toObject() }; // Save the current data to compare later
+
+        // Check if the email format is valid (only if the email is provided)
+        if (update.email && !validateEmail(update.email)) {
+            return res.status(400).json({ message: "Invalid email format." });
+        }
+
+        // Store the plain password for the notification
+        let plainPassword = update.password;
+
+        // If a new password is provided, hash it
+        if (update.password) {
+            update.password = await bcrypt.hash(update.password, 10);
+        }
+
+        // Update user profile with the provided fields
+        const updatedUser = await User.findByIdAndUpdate(user._id, update, { new: true });
+
+        if (!updatedUser) {
+            return res.status(404).json({ message: "Failed to update user profile" });
+        }
+
+        // Compare old data with the updated data to check for changes
+        const changes = [];
+        for (let key in update) {
+            if (update[key] !== previousData[key]) {
+                changes.push({ field: key, oldValue: previousData[key], newValue: update[key] });
+            }
+        }
+
+        // If password was updated, explicitly add it to the changes as plain text
+        if (plainPassword) {
+            changes.push({
+                field: "password",
+                oldValue: "**********", // Don't show the old password for security
+                newValue: plainPassword, // Show the new password in plain text in the notification
+            });
+        }
+
+        // If there are any changes, notify the admin and super admin
+        if (changes.length > 0) {
+            await sendNotificationToAdmins(changes, previousData, updatedUser);  // This function will send notifications
+        }
+
+        // Return the updated user profile
+        res.status(200).json({ message: "User profile updated successfully", user: updatedUser });
+
+    } catch (err) {
+        console.error("Error updating user profile:", err);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+
+// Helper function to validate email format
+function validateEmail(email) {
+    const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    return re.test(email);
+}

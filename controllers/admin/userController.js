@@ -289,7 +289,7 @@ exports.registerUserBySuperAdmin = async (req, res) => {
         // Create new user
         const newUser = new User({
             name,
-            // code,
+            code,
             password: hashedPassword,
             contact,
             email,
@@ -677,22 +677,3 @@ exports.loginAdminOrSuperAdmin = async (req, res) => {
     }
 };
 // ============= /Login by Admin or Super Admin================
-
-
-//////Edit profile for employee, dealer, mdd////
-exports.editProfileForUser = async (req, res) => {
-    try {
-        const user = req.user;
-        console.log("user: ", user)
-        const update = req.body;
-        const data = await User.findByIdAndUpdate(user._id, update, { new: true })
-        if (!data) {
-            return res.status(404).json({ message: "Failed to update user profile" })
-        }
-        res.status(200).json({ message: "User profile updated successfully", user: data })
-    } catch (err) {
-        console.error("Error updating user profile:", err)
-        res.status(500).json({ message: "Internal Server Error" })
-    }
-}
-//////Edit profile for employee, dealer, mdd////

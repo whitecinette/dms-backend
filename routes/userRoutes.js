@@ -1,7 +1,7 @@
 const express = require("express");
-const { registerSuperAdmin, loginSuperAdmin, editAdminProfile, editProfileForUser, deleteUserBySuperAdmin, deactivateUserBySuperAdmin, deleteUserByAdmin, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin } = require("../controllers/admin/userController");
+const { registerSuperAdmin, loginSuperAdmin, editAdminProfile, deleteUserBySuperAdmin, deactivateUserBySuperAdmin, deleteUserByAdmin, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin } = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth } = require("../middlewares/authmiddlewares");
-const { loginUser } = require("../controllers/common/userController");
+const { loginUser, editProfileForUser } = require("../controllers/common/userController");
 const router = express.Router();
 
 // ============================ SUPER ADMIN ================================
