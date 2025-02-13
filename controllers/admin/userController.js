@@ -100,16 +100,7 @@ exports.registerSuperAdmin = async (req, res) => {
 exports.deleteUserBySuperAdmin = async (req, res) => {
     try {
         const { id } = req.params; // User ID to delete
-        // const token = req.headers.authorization?.split(" ")[1]; // Extract JWT Token
-        const token = req.header("Authorization") || req.header("X-Auth-Token");
-
-        if (!token) {
-            return res.status(401).json({ message: "Unauthorized: No token provided" });
-        }
-
-        // Verify the token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const superAdmin = await User.findById(decoded.id);
+        const superAdmin = req.user;
 
         // Check if requester is a Super Admin
         if (!superAdmin || superAdmin.role !== "super_admin") {
@@ -186,24 +177,13 @@ exports.deactivateUserBySuperAdmin = async (req, res) => {
         console.log("Error:", error);
     }
 };
+
+// 📌 Register Admin for Super Admin
 exports.registerAdminForSuperAdmin = async (req, res) => {
     try {
-
         const { name, contact, email, password } = req.body;
+        const superAdmin = req.user;
 
-        // Get the token from the Authorization header
-        const token = req.header("Authorization") || req.header("X-Auth-Token");
-
-        // Ensure the token is provided
-        if (!token) {
-            return res.status(401).json({ message: "Unauthorized: No token provided" });
-        }
-
-        // Verify the token and decode it
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        // Find the super admin using the decoded token
-        const superAdmin = await User.findById(decoded.id);
         if (!superAdmin || superAdmin.role !== "super_admin") {
             return res.status(403).json({ message: "Forbidden: Only Super Admin can register admins" });
         }
@@ -244,25 +224,12 @@ exports.registerAdminForSuperAdmin = async (req, res) => {
     }
 };
 
-
 // 📌 Register User by Super Admin
 exports.registerUserBySuperAdmin = async (req, res) => {
     try {
-        const { name, contact, email, password, role } = req.body;
+        const { name, code, contact, email, password, role } = req.body;
+        const superAdmin = req.user; // Admin information from the authentication middleware
 
-        // Get the token from the Authorization header
-        const token = req.header("Authorization") || req.header("X-Auth-Token");
-
-        // Ensure the token is provided
-        if (!token) {
-            return res.status(401).json({ message: "Unauthorized: No token provided" });
-        }
-
-        // Verify the token and decode it
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        // Find the super admin using the decoded token
-        const superAdmin = await User.findById(decoded.id);
         if (!superAdmin || superAdmin.role !== "super_admin") {
             return res.status(403).json({ message: "Forbidden: Only Super Admin can register users" });
         }
@@ -312,8 +279,7 @@ exports.registerUserBySuperAdmin = async (req, res) => {
     }
 };
 
-//============= /edit user by Super Admin ================
-
+// 📌 Edit User by Super Admin
 exports.editUserBySuperAdmin = async (req, res) => {
     try {
         const { id } = req.params;
@@ -340,7 +306,7 @@ exports.editUserBySuperAdmin = async (req, res) => {
     }
 };
 
-//============= /get user by super Admin ================
+// 📌 Get User by Super Admin
 exports.getUsersForSuperAdmin = async (req, res) => {
     try {
         // Fetch all users
@@ -452,19 +418,7 @@ exports.editAdminProfile = async (req, res) => {
 exports.deleteUserByAdmin = async (req, res) => {
     try {
         const { id } = req.params; // User ID to delete
-        // const token = req.headers.authorization?.split(" ")[1]; // Extract JWT Token
-
-        // Extract the token from the Authorization header (without Bearer)
-        const token = req.header("Authorization") || req.header("X-Auth-Token");
-
-        if (!token) {
-            return res.status(401).json({ message: "Unauthorized: No token provided" });
-        }
-
-        // Verify the token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        const admin = await User.findById(decoded.id);
+        const admin = req.user;
 
         // Check if requester is an Admin
         if (!admin || admin.role !== "admin") {
@@ -497,18 +451,8 @@ exports.deleteUserByAdmin = async (req, res) => {
 exports.deactivateUserByAdmin = async (req, res) => {
     try {
         const { id } = req.params;  // User ID to deactivate
-        const token = req.header("Authorization") || req.header("X-Auth-Token");
-
-        // Ensure the token is provided
-        if (!token) {
-            return res.status(401).json({ message: "Unauthorized: No token provided" });
-        }
-
-        // Verify the token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        // Find the user by ID (it can be Employee, Dealer, MDD)
-        const user = await User.findById(decoded.id);
+       
+        const user = await User.findById(id);
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
@@ -544,21 +488,9 @@ exports.deactivateUserByAdmin = async (req, res) => {
 // 📌 Register User by Admin
 exports.registerUserByAdmin = async (req, res) => {
     try {
-        const { name, contact, email, password, role, address, bankAccountNumber, bankName } = req.body;
-
-        // Get the token from the Authorization header
-        const token = req.header("Authorization") || req.header("X-Auth-Token");
-
-        // Ensure the token is provided
-        if (!token) {
-            return res.status(401).json({ message: "Unauthorized: No token provided" });
-        }
-
-        // Verify the token and decode it
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        // Find the admin using the decoded token
-        const admin = await User.findById(decoded.id);
+        const { name,code, contact, email, password, role, address, bankAccountNumber, bankName } = req.body;
+        const admin = req.user;
+        
         if (!admin || admin.role !== "admin") {
             return res.status(403).json({ message: "Forbidden: Only Admin can register users" });
         }
@@ -581,7 +513,7 @@ exports.registerUserByAdmin = async (req, res) => {
         // Create new user
         const newUser = new User({
             name,
-            // code: await generateAdminCode(),  // Assuming generateAdminCode() is defined elsewhere
+            code,  // Assuming generateAdminCode() is defined elsewhere
             password: hashedPassword,
             contact,
             email,
@@ -605,7 +537,7 @@ exports.registerUserByAdmin = async (req, res) => {
     }
 };
 
-//============= /edit user by Admin ================
+// 📌 Edit User by Admin
 exports.editUserByAdmin = async (req, res) => {
     try {
         console.log(req.params)
@@ -636,7 +568,7 @@ exports.editUserByAdmin = async (req, res) => {
     }
 };
 
-//============= /get user by Admin ================
+// 📌 Get Users for Admin
 exports.getUsersForAdmin = async (req, res) => {
     try {
         // Fetch only non-admin users
@@ -648,8 +580,6 @@ exports.getUsersForAdmin = async (req, res) => {
     }
 };
 
-
-
 /////////////// ADMIN ///////////////////////////
 // ============= Permission by Admin or Super Admin================
 // 📌 Activate and Verify Employee (Only Admin/Super Admin)
@@ -658,9 +588,9 @@ exports.activateAndVerifyUser = async (req, res) => {
         const { id } = req.params;  // Employee ID to activate and verify
 
         // Find the employee by ID
-        const employee = await User.findById(id);
-        if (!employee) {
-            return res.status(404).json({ message: "Employee not found" });
+        const person = await User.findById(id);
+        if (!person) {
+            return res.status(404).json({ message: "person not found" });
         }
 
         // Get the super admin or admin performing the action
@@ -668,41 +598,42 @@ exports.activateAndVerifyUser = async (req, res) => {
 
         // Ensure super admin can verify any user (admin, employee, dealer, MDD)
         if (adminOrSuperAdmin.role === "super_admin") {
-            // No restrictions for super admin, proceed with activation
+        //     // No restrictions for super admin, proceed with activation
         }
-        // Ensure admin can only activate employee, dealer, or MDD, not themselves or other admins
-        else if (adminOrSuperAdmin.role === "admin") {
-            // Admin should not be able to activate or verify themselves or other admins
-            if (employee.role === "admin") {
-                return res.status(403).json({ message: "An admin cannot activate or verify another admin" });
+        // // Ensure admin can only activate employee, dealer, or MDD, not themselves or other admins
+        else
+            if (adminOrSuperAdmin.role === "admin") {
+                // Admin should not be able to activate or verify themselves or other admins
+                if (person.role === "admin") {
+                    return res.status(403).json({ message: "An admin cannot activate or verify another admin" });
+                }
+            } else {
+                return res.status(403).json({ message: "Only Admin or Super Admin can verify or activate users" });
             }
-        } else {
-            return res.status(403).json({ message: "Only Admin or Super Admin can verify or activate users" });
-        }
 
         // Ensure the user is not already active and verified
-        if (employee.status === "active" && employee.isVerified === true) {
-            return res.status(400).json({ message: "Employee is already active and verified" });
+        if (person.status === "active" && person.isVerified === true) {
+            return res.status(400).json({ message: "person is already active and verified" });
         }
 
         // Ensure an admin cannot verify or activate themselves
-        if (adminOrSuperAdmin.role === "admin" && adminOrSuperAdmin._id.toString() === employee._id.toString()) {
+        if (adminOrSuperAdmin.role === "admin" && adminOrSuperAdmin._id.toString() === person._id.toString()) {
             return res.status(403).json({ message: "An admin cannot verify or activate itself" });
         }
 
         // Log who verified (admin or super_admin)
-        employee.verifiedBy = {
+        person.verifiedBy = {
             userId: adminOrSuperAdmin._id,
             role: adminOrSuperAdmin.role,  // Store the role for clarity
             name: adminOrSuperAdmin.name   // Optional: You could also store the admin's name if needed
         };
 
         // Update status to active and mark as verified
-        employee.status = "active";
-        employee.isVerified = true;
-        await employee.save();
+        person.status = "active";
+        person.isVerified = true;
+        await person.save();
 
-        res.status(200).json({ message: "Employee activated and verified successfully", employee });
+        res.status(200).json({ message: "Employee activated and verified successfully", person });
     } catch (error) {
         res.status(500).json({ message: "Server Error", error });
         console.log("Error:", error);
@@ -711,6 +642,8 @@ exports.activateAndVerifyUser = async (req, res) => {
 
 // ============= /Permission by Admin or Super Admin================
 // ============= /Login by Admin or Super Admin================
+
+// 📌 Login by Admin or Super Admin
 exports.loginAdminOrSuperAdmin = async (req, res) => {
     try {
         const { email, password, role } = req.body;  // Login with email, password, and role

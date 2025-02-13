@@ -1,6 +1,8 @@
+// notificationHelper.js
 const User = require("../model/User");
+const { sendEmail } = require("./emailHelper");
 
-exports.sendNotificationToAdmins = async (changes, previousData, updatedUser) => {
+exports.sendNotificationToAdmins = async (changes, previousData, updatedUser, userMakingChangesEmail) => {
   try {
     // Find all admins and super admins
     const admins = await User.find({ role: { $in: ["admin", "super_admin"] } });
@@ -12,12 +14,11 @@ exports.sendNotificationToAdmins = async (changes, previousData, updatedUser) =>
 
     const message = generateNotificationMessage(changes, previousData, updatedUser);
 
-    // Send notifications (via email, in-app, etc.)
-    // For this example, we'll assume an email function is available
+    // Send notifications (via email)
     for (const admin of admins) {
       console.log(`Sending notification to ${admin.email}: ${message}`);
-      // Uncomment the line below when email sending is implemented
-      // sendEmail(admin.email, message); // Actual email sending logic goes here
+      console.log(`Sending from: ${userMakingChangesEmail}`);  // Log the sender's email for debugging
+      await sendEmail(admin.email, "User Profile Update Notification", message, userMakingChangesEmail);  // Send email dynamically to admin's email
     }
 
     return { success: true, message: "Notifications sent successfully." };
@@ -40,4 +41,4 @@ function generateNotificationMessage(changes, previousData, updatedUser) {
 
   return message;
 }
-
+// neerajsharmaskr26@gmail.com

@@ -82,6 +82,7 @@ exports.loginUser = async (req, res) => {
 //     }
 // }
 //////Edit profile for employee, dealer, mdd////
+// editProfileForUser controller
 exports.editProfileForUser = async (req, res) => {
     try {
         const user = req.user; // Assumed that the user is populated by authentication middleware
@@ -96,7 +97,7 @@ exports.editProfileForUser = async (req, res) => {
         }
 
         // Store the plain password for the notification
-        let plainPassword = update.password;
+        // let plainPassword = update.password;
 
         // If a new password is provided, hash it
         if (update.password) {
@@ -119,17 +120,21 @@ exports.editProfileForUser = async (req, res) => {
         }
 
         // If password was updated, explicitly add it to the changes as plain text
-        if (plainPassword) {
-            changes.push({
-                field: "password",
-                oldValue: "**********", // Don't show the old password for security
-                newValue: plainPassword, // Show the new password in plain text in the notification
-            });
-        }
+        // if (plainPassword) {
+        //     changes.push({
+        //         field: "password",
+        //         oldValue: "**********", // Don't show the old password for security
+        //         newValue: plainPassword, // Show the new password in plain text in the notification
+        //     });
+        // }
+
+        // If the email was updated, update the "fromEmail" for sending notification
+        const userMakingChangesEmail = update.email || user.email;
 
         // If there are any changes, notify the admin and super admin
         if (changes.length > 0) {
-            await sendNotificationToAdmins(changes, previousData, updatedUser);  // This function will send notifications
+            console.log(`Changes detected, notifying admins with sender email: ${userMakingChangesEmail}`);
+            await sendNotificationToAdmins(changes, previousData, updatedUser, userMakingChangesEmail);  // This function will send notifications
         }
 
         // Return the updated user profile
@@ -140,6 +145,7 @@ exports.editProfileForUser = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
 
 
 
