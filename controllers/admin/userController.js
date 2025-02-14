@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const User = require("../../model/User");
 const { generateAdminCode } = require("../../helpers/adminHelpers");
 const jwt = require("jsonwebtoken");
+const { inactiveActor, editActorCode } = require("../../helpers/actorToUserHelper");
 
 
 /////////////// SUPER ADMIN ///////////////////////////
@@ -100,9 +101,10 @@ exports.registerSuperAdmin = async (req, res) => {
 exports.deleteUserBySuperAdmin = async (req, res) => {
     try {
         const { id } = req.params; // User ID to delete
-        const superAdmin = req.user;
 
-        // Check if requester is a Super Admin
+        // const superAdmin = req.user;
+
+        // // Check if requester is a Super Admin
         // if (!superAdmin || superAdmin.role !== "super_admin") {
         //     return res.status(403).json({ message: "Forbidden: Only Super Admin can delete users" });
         // }
@@ -112,7 +114,8 @@ exports.deleteUserBySuperAdmin = async (req, res) => {
         if (!userToDelete) {
             return res.status(404).json({ message: "User not found" });
         }
-
+        //deactivate actor codes
+        await inactiveActor(userToDelete.code);
         // Delete the user (Only the user record, NOT related work)
         await User.findByIdAndDelete(id);
 
@@ -170,6 +173,7 @@ exports.deactivateUserBySuperAdmin = async (req, res) => {
         user.status = "inactive";  // Setting user status to inactive
         user.isVerified = false;   // Optionally, you can also mark the user as unverified
         await user.save();
+        await inactiveActor(user.code)
 
         res.status(200).json({ message: "User deactivated successfully", user });
     } catch (error) {
@@ -283,28 +287,26 @@ exports.registerUserBySuperAdmin = async (req, res) => {
 exports.editUserBySuperAdmin = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, contact, email, status, role, isVerified, password, code } = req.body;
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const user = await User.findById(id);
+        const { name, contact, email, status, role, position, isVerified } = req.body;
+
+        const user = await User.findByIdAndUpdate(
+            id,
+            { $set: { name, contact, email, status, role, position, isVerified } },
+            { new: true } // Returns the updated user & applies schema validation
+        );
+
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        // Allow super admin to update any field except 'code' and 'password'
-        user.name = name || user.name;
-        user.contact = contact || user.contact;
-        user.email = email || user.email;
-        user.password = user.password || hashedPassword;
-        user.code = user.code || code;
-        if (status) user.status = status; // Super admin can change user status
-        if (role) user.role = role; // Super admin can change roles
-        if (isVerified !== undefined) user.isVerified = isVerified; // Verification control
+        // Edit actor code
+        await editActorCode(user.code, user.name, user.status, user.role, user.position);
 
-        await user.save();
         res.status(200).json({ message: "User updated successfully", user });
 
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });
     }
 };
+
 
 // 📌 Get User by Super Admin
 exports.getUsersForSuperAdmin = async (req, res) => {
@@ -418,12 +420,12 @@ exports.editAdminProfile = async (req, res) => {
 exports.deleteUserByAdmin = async (req, res) => {
     try {
         const { id } = req.params; // User ID to delete
-        const admin = req.user;
+        // const admin = req.user;
 
-        // Check if requester is an Admin
-        if (!admin || admin.role !== "admin") {
-            return res.status(403).json({ message: "Forbidden: Only Admins can delete users" });
-        }
+        // // Check if requester is an Admin
+        // if (!admin || admin.role !== "admin") {
+        //     return res.status(403).json({ message: "Forbidden: Only Admins can delete users" });
+        // }
 
         // Check if the user exists
         const userToDelete = await User.findById(id);
@@ -435,7 +437,8 @@ exports.deleteUserByAdmin = async (req, res) => {
         if (userToDelete.role === "admin" || userToDelete.role === "super_admin") {
             return res.status(403).json({ message: "Admins cannot delete Super Admin or other Admins" });
         }
-
+        //deactivate actor code
+        await inactiveActor(userToDelete.code)
         // Delete the user (Only the user record, NOT related work)
         await User.findByIdAndDelete(id);
 
@@ -477,6 +480,8 @@ exports.deactivateUserByAdmin = async (req, res) => {
         user.status = "inactive";
         user.isVerified = false;  // Optionally, mark the user as unverified
         await user.save();
+        //deactivate actor code
+        await inactiveActor(user.code)
 
         res.status(200).json({ message: "User deactivated successfully", user });
     } catch (error) {
@@ -542,25 +547,18 @@ exports.editUserByAdmin = async (req, res) => {
     try {
         console.log(req.params)
         const { id } = req.params;
-        const { name, contact, email, isVerified, status } = req.body;
+        const { name, contact, email, isVerified, role, position, status } = req.body;
 
         const user = await User.findById(id);
         console.log(user)
         if (!user) return res.status(404).json({ message: "User not found" });
-
-        // Restrict normal admin from editing other admins or super admins
-        if (user.role === "admin" || user.role === "super_admin") {
-            return res.status(403).json({ message: "You cannot edit other admins or super admins" });
-        }
-
-        // Update allowed fields only
-        user.name = name || user.name;
-        user.contact = contact || user.contact;
-        user.email = email || user.email;
-        user.status = status || user.status;
-        if (isVerified !== undefined) user.isVerified = isVerified; // Verification control
-
-        await user.save();
+        const updatedUser = await User.findByIdAndUpdate(
+            id,
+            { $set: { name, contact, email, status, role, position, isVerified } },
+            { new: true, runValidators: true } // Returns the updated user & applies schema validation
+        );
+        //edit actor code
+        await editActorCode(updatedUser.code, updatedUser.name, updatedUser.status, updatedUser.role, updatedUser.position);
         res.status(200).json({ message: "User updated successfully", user });
 
     } catch (error) {

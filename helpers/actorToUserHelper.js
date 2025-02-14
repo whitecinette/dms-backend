@@ -1,5 +1,4 @@
 const bcrypt = require("bcryptjs");
-// const mongoose = require("mongoose");
 const ActorCode = require("../model/ActorCode");
 const User = require("../model/User");
 
@@ -52,7 +51,8 @@ exports.assignActorToUser = async (code) => {
   }
 };
 
-exports.unassignActorToUser = async (code) => {
+//delete user if actor codes get delete
+exports.deleteUser = async (code) => {
   console.log("Entering unassignActorToUser...");
 
   try {
@@ -77,6 +77,71 @@ exports.unassignActorToUser = async (code) => {
     return { success: true, message: "User deleted successfully." };
   } catch (error) {
     console.error("❌ Error in unassignActorToUser:", error);
+    return { success: false, message: "Internal server error." };
+  }
+};
+
+// inactive actor when delete from user model
+exports.inactiveActor = async (code) => {
+  try {
+    const existingActor = await ActorCode.findOne({code});
+
+    if(!existingActor){
+      return { success: false, message: "Actor code not found." };
+    }
+    existingActor.status ="inactive";
+    await existingActor.save();
+    return { success: true, message: "Actor code deactivated successfully." };
+
+  }catch(err){
+    console.error("Error in inactiveActor:", err);
+    return { success: false, message: "Internal server error." };
+  }
+  
+}
+
+//edit actor codes
+exports.editActorCode = async (code, name, status, role, position) => {
+  try{
+    const existingActor = await ActorCode.findOne({code});
+    if(!existingActor){
+      return { success: false, message: "Actor code not found." };
+    }
+    existingActor.name = name;
+    existingActor.status = status;
+    existingActor.role = role;
+    existingActor.position = position
+    await existingActor.save();
+    return { success: true, message: "Actor code updated successfully." };
+  }catch(err){
+    console.error("Error in editActorCode:", err);
+    return { success: false, message: "Internal server error." };
+  }
+}
+
+//edit user codes
+exports.editUser = async (oldCode, newCode, name, position, role, status) => {
+  try {
+    // Find the user associated with the old actor code
+    const user = await User.findOne({ code: oldCode });
+    
+    if (!user) {
+      console.log("User not found for actor code:", oldCode);
+      return { success: false, message: "User not found." };
+    }
+
+    // Update user details
+    user.code = newCode;
+    user.name = name;
+    user.position = position;
+    user.role = role;
+    user.status = status;
+    
+    await user.save();
+    console.log("User updated successfully.");
+    return { success: true, message: "User updated successfully." };
+  } catch (error) {
+    console.error("Error editing user:", error);
     return { success: false, message: "Internal server error." };
   }
 };

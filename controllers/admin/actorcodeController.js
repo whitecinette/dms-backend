@@ -2,7 +2,7 @@ const fs = require("fs");
 const csvParser = require("csv-parser");
 const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
-const { assignActorToUser, unassignActorToUser } = require("../../helpers/actorToUserHelper");
+const { assignActorToUser, deleteUser, editUser } = require("../../helpers/actorToUserHelper");
 
 ///upload aotor codes in bulks
 exports.uploadBulkActorCodes = async (req, res) => {
@@ -55,6 +55,9 @@ exports.uploadBulkActorCodes = async (req, res) => {
               existingActor.position = data.position;
               existingActor.role = data.role;
               existingActor.status = data.status;
+              if (existingActor.status === "active") {
+                await editUser(existingActor.code, existingActor.code, existingActor.name, existingActor.position, existingActor.role, existingActor.status);
+            }            
               await existingActor.save();
               updatedData.push(existingActor);
             } else {
@@ -76,7 +79,7 @@ exports.uploadBulkActorCodes = async (req, res) => {
             message: "CSV processed successfully",
             insertedCount: insertedData.length,
             updatedCount: updatedData.length,
-            errors,
+            data: errors,
           });
         } catch (err) {
           console.error("Error processing CSV:", err);
@@ -151,6 +154,10 @@ exports.editActorCode = async (req, res) => {
         .json({ message: "Actor code already exists with another record." });
     }
 
+    if(actor.status === "active"){
+      await editUser(actor.code, code, name, position, role, status);
+    }
+
     actor.code = code;
     actor.name = name;
     actor.position = position;
@@ -158,10 +165,10 @@ exports.editActorCode = async (req, res) => {
     actor.status = status;
 
     await actor.save();
-
     if (status === "active") {
       await assignActorToUser(code);
     }
+    
 
     return res
       .status(200)
@@ -196,7 +203,7 @@ exports.deleteActorCode = async (req, res) => {
           return res.status(404).json({ message: "Actor code not found." });
       }
       if(actor.status === "active"){
-        await unassignActorToUser(actor.code)
+        await deleteUser(actor.code)
       }
 
       // Delete the actor code
