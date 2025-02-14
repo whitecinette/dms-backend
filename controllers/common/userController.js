@@ -19,7 +19,7 @@ exports.loginUser = async (req, res) => {
         }
 
         // Check if the user exists based on code and role
-        const user = await User.findOne({ code, role });  // Searching for user by their generated code and role
+        const user = await User.findOne({ code, role });  // Searching for user by their code and role
 
         if (!user) {
             return res.status(400).json({ message: "Invalid code or unauthorized access" });
@@ -83,6 +83,7 @@ exports.loginUser = async (req, res) => {
 // }
 //////Edit profile for employee, dealer, mdd////
 // editProfileForUser controller
+
 exports.editProfileForUser = async (req, res) => {
     try {
         const user = req.user; // Assumed that the user is populated by authentication middleware
@@ -96,10 +97,7 @@ exports.editProfileForUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid email format." });
         }
 
-        // Store the plain password for the notification
-        // let plainPassword = update.password;
-
-        // If a new password is provided, hash it
+        // If a new password is provided, hash it (no need to store plain text password)
         if (update.password) {
             update.password = await bcrypt.hash(update.password, 10);
         }
@@ -115,18 +113,18 @@ exports.editProfileForUser = async (req, res) => {
         const changes = [];
         for (let key in update) {
             if (update[key] !== previousData[key]) {
-                changes.push({ field: key, oldValue: previousData[key], newValue: update[key] });
+                // If the password field is changed, just indicate it was updated
+                if (key === 'password') {
+                    changes.push({
+                        field: "password",
+                        oldValue: "**********", // Mask the old password
+                        newValue: "**********", // Show that the password was updated, but not the new value
+                    });
+                } else {
+                    changes.push({ field: key, oldValue: previousData[key], newValue: update[key] });
+                }
             }
         }
-
-        // If password was updated, explicitly add it to the changes as plain text
-        // if (plainPassword) {
-        //     changes.push({
-        //         field: "password",
-        //         oldValue: "**********", // Don't show the old password for security
-        //         newValue: plainPassword, // Show the new password in plain text in the notification
-        //     });
-        // }
 
         // If the email was updated, update the "fromEmail" for sending notification
         const userMakingChangesEmail = update.email || user.email;
@@ -145,6 +143,7 @@ exports.editProfileForUser = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
 
 
 

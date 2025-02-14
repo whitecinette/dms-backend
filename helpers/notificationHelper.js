@@ -41,4 +41,3 @@ function generateNotificationMessage(changes, previousData, updatedUser) {
 
   return message;
 }
-// neerajsharmaskr26@gmail.com

@@ -103,9 +103,9 @@ exports.deleteUserBySuperAdmin = async (req, res) => {
         const superAdmin = req.user;
 
         // Check if requester is a Super Admin
-        if (!superAdmin || superAdmin.role !== "super_admin") {
-            return res.status(403).json({ message: "Forbidden: Only Super Admin can delete users" });
-        }
+        // if (!superAdmin || superAdmin.role !== "super_admin") {
+        //     return res.status(403).json({ message: "Forbidden: Only Super Admin can delete users" });
+        // }
 
         // Check if the user exists
         const userToDelete = await User.findById(id);
