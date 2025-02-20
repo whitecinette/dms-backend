@@ -4,7 +4,7 @@ const User = require("../model/User");
 
 
 // generate unique code for dealer
-exports.generateDealerCode = async () => {
+exports.generateDealerCode = async () => { 
     // Find the most recent dealer
     const lastDealer = await User.findOne({ role: "dealer" }).sort({ createdAt: -1 });
 

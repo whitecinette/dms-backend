@@ -98,7 +98,7 @@ exports.registerSuperAdmin = async (req, res) => {
 
 // 📌 Delete a User (Only Super Admin)
 // User can be MDD, Dealer, Employee or Admin
-exports.deleteUserBySuperAdmin = async (req, res) => {
+exports.deleteUserByAdmins = async (req, res) => {
     try {
         const { id } = req.params; // User ID to delete
 
@@ -309,16 +309,77 @@ exports.editUserBySuperAdmin = async (req, res) => {
 
 
 // 📌 Get User by Super Admin
-exports.getUsersForSuperAdmin = async (req, res) => {
+exports.getUsersForAdmins = async (req, res) => {
+    let {
+        page = 1,
+        limit = 50,
+        sort = "createdAt",
+        order = "" ,
+        search = "",
+        role = ""
+    } = req.query;
+    // console.log(req.query)
     try {
-        // Fetch all users
-        const users = await User.find({ role: { $ne: "super_admin" } });
+        const user = req.user;
+        let totalUsers, employees, dealers, mdds, users;
+        const filters = {};
 
-        res.status(200).json({ message: "All users fetched successfully", users });
+        if (user.role === "super_admin") {
+            filters.role = { $ne: "super_admin" };
+            totalUsers = await User.countDocuments(filters);
+            employees = await User.countDocuments({ role: { $in: ["Employee", "admin"] } });
+        } else {
+            filters.role = { $nin: ["admin", "super_admin"] };
+            totalUsers = await User.countDocuments(filters);
+            employees = await User.countDocuments({ role: "Employee" });
+        }
+
+        // Ensure order is a number
+        const sortOrder = order === "-1" ? -1 : 1;
+
+        // Ensure role filter is correctly applied
+        if (role) {
+            filters.role = role;
+        }
+
+        // Search filter (case-insensitive)
+        if (search) {
+            filters.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { code: { $regex: search, $options: "i" } },
+                { contact: { $regex: search, $options: "i" } },
+                { role: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+            ];
+        }
+
+        // Fetch users with filters, sorting, and pagination
+        users = await User.find(filters)
+            .sort({ [sort]: sortOrder }) // Ensure sorting is correct
+            .limit(Number(limit)) // Ensure limit is a number
+            .skip((Number(page) - 1) * Number(limit));
+
+        // Count other user roles
+        dealers = await User.countDocuments({ role: "Dealer" });
+        mdds = await User.countDocuments({ role: "MDD" });
+
+        res.status(200).json({
+            message: "All users fetched successfully",
+            data: users,
+            currentPage: Number(page),
+            totalRecords: totalUsers,
+            employees,
+            dealers,
+            mdds,
+        });
+
     } catch (error) {
+        console.error("Error fetching users:", error); // Log error to debug
         res.status(500).json({ message: "Server error", error: error.message });
     }
 };
+
+
 
 /////////////// SUPER ADMIN ///////////////////////////
 
@@ -417,38 +478,38 @@ exports.editAdminProfile = async (req, res) => {
 //     }
 // };
 // 📌 Delete User (Employee, Dealer, or any role) for Admin
-exports.deleteUserByAdmin = async (req, res) => {
-    try {
-        const { id } = req.params; // User ID to delete
-        // const admin = req.user;
+// exports.deleteUserByAdmin = async (req, res) => {
+//     try {
+//         const { id } = req.params; // User ID to delete
+//         // const admin = req.user;
 
-        // // Check if requester is an Admin
-        // if (!admin || admin.role !== "admin") {
-        //     return res.status(403).json({ message: "Forbidden: Only Admins can delete users" });
-        // }
+//         // // Check if requester is an Admin
+//         // if (!admin || admin.role !== "admin") {
+//         //     return res.status(403).json({ message: "Forbidden: Only Admins can delete users" });
+//         // }
 
-        // Check if the user exists
-        const userToDelete = await User.findById(id);
-        if (!userToDelete) {
-            return res.status(404).json({ message: "User not found" });
-        }
+//         // Check if the user exists
+//         const userToDelete = await User.findById(id);
+//         if (!userToDelete) {
+//             return res.status(404).json({ message: "User not found" });
+//         }
 
-        // Check if Admin is trying to delete another Admin (this logic can be adjusted based on your needs)
-        if (userToDelete.role === "admin" || userToDelete.role === "super_admin") {
-            return res.status(403).json({ message: "Admins cannot delete Super Admin or other Admins" });
-        }
-        //deactivate actor code
-        await inactiveActor(userToDelete.code)
-        // Delete the user (Only the user record, NOT related work)
-        await User.findByIdAndDelete(id);
+//         // Check if Admin is trying to delete another Admin (this logic can be adjusted based on your needs)
+//         if (userToDelete.role === "admin" || userToDelete.role === "super_admin") {
+//             return res.status(403).json({ message: "Admins cannot delete Super Admin or other Admins" });
+//         }
+//         //deactivate actor code
+//         await inactiveActor(userToDelete.code)
+//         // Delete the user (Only the user record, NOT related work)
+//         await User.findByIdAndDelete(id);
 
-        res.status(200).json({ message: "User deleted successfully" });
+//         res.status(200).json({ message: "User deleted successfully" });
 
-    } catch (error) {
-        console.error("Delete User Error:", error);
-        res.status(500).json({ message: "Internal Server Error" });
-    }
-};
+//     } catch (error) {
+//         console.error("Delete User Error:", error);
+//         res.status(500).json({ message: "Internal Server Error" });
+//     }
+// };
 
 // 📌 inActive User (Employee, Dealer, or any role) for Admin
 exports.deactivateUserByAdmin = async (req, res) => {
@@ -542,29 +603,51 @@ exports.registerUserByAdmin = async (req, res) => {
     }
 };
 
-// 📌 Edit User by Admin
-exports.editUserByAdmin = async (req, res) => {
+// 📌 Edit User by Admins
+exports.editUserByAdmins = async (req, res) => {
     try {
-        console.log(req.params)
+        console.log(req.params);
         const { id } = req.params;
-        const { name, contact, email, isVerified, role, position, status } = req.body;
+        const { name, email, code, role, position, status } = req.body;
 
         const user = await User.findById(id);
-        console.log(user)
         if (!user) return res.status(404).json({ message: "User not found" });
+
+        // Only check if the code exists for other users (ignore the current user's code)
+        const existingUser = await User.findOne({ code, _id: { $ne: id } });
+        if (existingUser) return res.status(400).json({ message: "Code already in use" });
+
+        // Ensure the status is being updated
+        if (typeof status !== "string" || (status !== "active" && status !== "inactive")) {
+            return res.status(400).json({ message: "Invalid status value" });
+        }
+
+        // Update user
         const updatedUser = await User.findByIdAndUpdate(
             id,
-            { $set: { name, contact, email, status, role, position, isVerified } },
-            { new: true, runValidators: true } // Returns the updated user & applies schema validation
+            { $set: { name, code, email, status, role, position } },
+            { new: true, runValidators: true } // Ensures validation
         );
-        //edit actor code
-        await editActorCode(updatedUser.code, updatedUser.name, updatedUser.status, updatedUser.role, updatedUser.position);
-        res.status(200).json({ message: "User updated successfully", user });
+
+        // Ensure editActorCode only runs if the user was successfully updated
+        if (updatedUser) {
+            await editActorCode(
+                updatedUser.code,
+                updatedUser.name,
+                updatedUser.status,
+                updatedUser.role,
+                updatedUser.position
+            );
+        }
+
+        res.status(200).json({ message: "User updated successfully", user: updatedUser });
 
     } catch (error) {
+        console.error(error);
         res.status(500).json({ message: "Server error", error: error.message });
     }
 };
+
 
 // 📌 Get Users for Admin
 exports.getUsersForAdmin = async (req, res) => {
