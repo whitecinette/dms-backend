@@ -122,8 +122,9 @@ exports.getAttendance = async (req, res) => {
 
 exports.requestLeave = async (req, res) => {
   try {
-    const { employeeId, startDate, endDate, leaveType, leaveDescription } =
+    const { startDate, endDate, leaveType, leaveDescription } =
       req.body;
+    const { employeeId } = req.params;
 
     // Check if employee exists
     const employee = await ActorCode.findById(employeeId);
