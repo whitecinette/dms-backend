@@ -13,7 +13,7 @@ exports.loginUser = async (req, res) => {
         }
 
         // Check if the role is valid (employee, dealer, mdd)
-        const validRoles = ["employee", "dealer", "mdd"];
+        const validRoles = ["employee", "dealer", "mdd","human resource"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ message: "Invalid role" });
         }
