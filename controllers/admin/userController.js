@@ -284,33 +284,33 @@ exports.registerUserBySuperAdmin = async (req, res) => {
 };
 
 // 📌 Edit User by Super Admin
-exports.editUserBySuperAdmin = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { name, contact, email, status, role, position, isVerified } = req.body;
+// exports.editUserBySuperAdmin = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { name, contact, email, status, role, position, isVerified } = req.body;
 
-        const user = await User.findByIdAndUpdate(
-            id,
-            { $set: { name, contact, email, status, role, position, isVerified } },
-            { new: true } // Returns the updated user & applies schema validation
-        );
+//         const user = await User.findByIdAndUpdate(
+//             id,
+//             { $set: { name, contact, email, status, role, position, isVerified } },
+//             { new: true } // Returns the updated user & applies schema validation
+//         );
 
-        if (!user) return res.status(404).json({ message: "User not found" });
+//         if (!user) return res.status(404).json({ message: "User not found" });
 
-        // Edit actor code
-        await editActorCode(user.code, user.name, user.status, user.role, user.position);
+//         // Edit actor code
+//         await editActorCode(user.code, user.name, user.status, user.role, user.position);
 
-        res.status(200).json({ message: "User updated successfully", user });
+//         res.status(200).json({ message: "User updated successfully", user });
 
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
-    }
-};
+//     } catch (error) {
+//         res.status(500).json({ message: "Server error", error: error.message });
+//     }
+// };
 
 
 // 📌 Get User by Super Admin
 exports.getUsersForAdmins = async (req, res) => {
-    let {
+    const {
         page = 1,
         limit = 50,
         sort = "createdAt",
@@ -650,16 +650,16 @@ exports.editUserByAdmins = async (req, res) => {
 
 
 // 📌 Get Users for Admin
-exports.getUsersForAdmin = async (req, res) => {
-    try {
-        // Fetch only non-admin users
-        const users = await User.find({ role: { $nin: ["admin", "super_admin"] } });
+// exports.getUsersForAdmin = async (req, res) => {
+//     try {
+//         // Fetch only non-admin users
+//         const users = await User.find({ role: { $nin: ["admin", "super_admin"] } });
 
-        res.status(200).json({ message: "Users fetched successfully", users });
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
-    }
-};
+//         res.status(200).json({ message: "Users fetched successfully", users });
+//     } catch (error) {
+//         res.status(500).json({ message: "Server error", error: error.message });
+//     }
+// };
 
 /////////////// ADMIN ///////////////////////////
 // ============= Permission by Admin or Super Admin================
