@@ -1,14 +1,12 @@
 const mongoose = require('mongoose');
 
 const orderSchema = new mongoose.Schema({
-    DealerCode: { type: String, required: true }, // Dealer placing the order
     OrderNumber:{ type: String, required: true, unique: true },
-    UserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // Name of the dealer
+    UserId: { type: String, ref: 'User', required: true }, // Name of the dealer
     Products: [
         {
             ProductId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true }, // Reference to Product model
             Quantity: { type: Number, required: true }, // Quantity ordered
-            Price: { type: Number, required: true }, // Price at the time of order
         }
     ],
     TotalPrice: { type: Number, required: true }, // Calculated total price of the order

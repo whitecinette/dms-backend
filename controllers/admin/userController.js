@@ -327,11 +327,11 @@ exports.getUsersForAdmins = async (req, res) => {
         if (user.role === "super_admin") {
             filters.role = { $ne: "super_admin" };
             totalUsers = await User.countDocuments(filters);
-            employees = await User.countDocuments({ role: { $in: ["Employee", "admin"] } });
+            employees = await User.countDocuments({ role: { $in: ["employee", "admin"] } });
         } else {
             filters.role = { $nin: ["admin", "super_admin"] };
             totalUsers = await User.countDocuments(filters);
-            employees = await User.countDocuments({ role: "Employee" });
+            employees = await User.countDocuments({ role: "employee" });
         }
 
         // Ensure order is a number
@@ -360,8 +360,8 @@ exports.getUsersForAdmins = async (req, res) => {
             .skip((Number(page) - 1) * Number(limit));
 
         // Count other user roles
-        dealers = await User.countDocuments({ role: "Dealer" });
-        mdds = await User.countDocuments({ role: "MDD" });
+        dealers = await User.countDocuments({ role: "dealer" });
+        mdds = await User.countDocuments({ role: "mdd" });
 
         res.status(200).json({
             message: "All users fetched successfully",
