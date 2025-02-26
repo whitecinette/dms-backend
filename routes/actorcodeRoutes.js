@@ -6,7 +6,7 @@ const router = express.Router();
 
 //Actorcodes
 router.get("/get-actorcode", adminOrSuperAdminAuth, getActorCodeForAdminAndSuperAdmin)
-router.post("/upload-actorcode", upload.single("file"), uploadBulkActorCodes);
+router.post("/upload-actorcode-csv", upload.single("file"), uploadBulkActorCodes);
 router.post("/add-actorcode", addActorCode)
 router.put("/edit-actorcode/:id", editActorCode)
 router.delete("/delete/actorcode/:id", deleteActorCode)

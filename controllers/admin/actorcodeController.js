@@ -5,45 +5,60 @@ const User = require("../../model/User");
 const { assignActorToUser, deleteUser, editUser } = require("../../helpers/actorToUserHelper");
 
 ///upload aotor codes in bulks
+
 exports.uploadBulkActorCodes = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "CSV file is required." });
     }
 
-    // console.log("File received:", req.file); // Debug log
     const results = [];
     const errors = [];
     const filePath = req.file.path;
 
     fs.createReadStream(filePath)
       .pipe(
-        csvParser({ mapHeaders: ({ header }) => header.toLowerCase().trim() })
-      ) // Normalize headers
+        csvParser({
+          mapHeaders: ({ header }) =>
+            header.toLowerCase().trim().replace(/\s+/g, "_"), // Normalize headers
+        })
+      )
       .on("data", (row) => {
-        //console.log("Processing row:", row); // Debug log
+        // Normalize required fields
+        let cleanedRow = {};
 
-        if (
-          !row.code ||
-          !row.name ||
-          !row.position ||
-          !row.role ||
-          !row.status
-        ) {
+        Object.keys(row).forEach((key) => {
+          let cleanedKey = key.toLowerCase().trim().replace(/\s+/g, "_"); // Clean column names
+          // console.log("Cleaned key-", cleanedKey)
+          let cleanedValue = row[key]?.trim(); // Trim whitespace from values
+
+          // Apply transformation rules
+          if (cleanedKey === "code") {
+            cleanedValue = cleanedValue.toUpperCase(); // Ensure code is uppercase
+          }
+          if (cleanedKey === "name") {
+            cleanedValue = cleanedValue
+              .toLowerCase()
+              .split(" ")
+              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(" "); // Capitalize Name
+          }
+          if (cleanedKey === "status") {
+            cleanedValue = cleanedValue.toLowerCase(); // Normalize status
+          }
+
+          cleanedRow[cleanedKey] = cleanedValue;
+        });
+
+        // Check required fields
+        if (!cleanedRow.code || !cleanedRow.name || !cleanedRow.position || !cleanedRow.role ) {
           errors.push({ row, message: "Missing required fields" });
         } else {
-          results.push({
-            code: row.code.toUpperCase(),
-            name: row.name,
-            position: row.position,
-            role: row.role,
-            status: row.status.toLowerCase(), // Normalize status
-          });
+          results.push(cleanedRow);
         }
       })
       .on("end", async () => {
         try {
-          //console.log("CSV Processing Complete. Total Rows:", results.length);
           const insertedData = [];
           const updatedData = [];
 
@@ -51,13 +66,7 @@ exports.uploadBulkActorCodes = async (req, res) => {
             const existingActor = await ActorCode.findOne({ code: data.code });
 
             if (existingActor) {
-              existingActor.name = data.name;
-              existingActor.position = data.position;
-              existingActor.role = data.role;
-              existingActor.status = data.status;
-              if (existingActor.status === "active") {
-                await editUser(existingActor.code, existingActor.code, existingActor.name, existingActor.position, existingActor.role, existingActor.status);
-            }            
+              Object.assign(existingActor, data); // Update existing actor with new data
               await existingActor.save();
               updatedData.push(existingActor);
             } else {
@@ -72,8 +81,7 @@ exports.uploadBulkActorCodes = async (req, res) => {
             }
           }
 
-          fs.unlinkSync(filePath);
-          //console.log("File deleted:", filePath);
+          fs.unlinkSync(filePath); // Delete CSV file after processing
 
           res.status(200).json({
             message: "CSV processed successfully",
@@ -91,6 +99,93 @@ exports.uploadBulkActorCodes = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+// exports.uploadBulkActorCodes = async (req, res) => {
+//   try {
+//     if (!req.file) {
+//       return res.status(400).json({ message: "CSV file is required." });
+//     }
+
+//     // console.log("File received:", req.file); // Debug log
+//     const results = [];
+//     const errors = [];
+//     const filePath = req.file.path;
+
+//     fs.createReadStream(filePath)
+//       .pipe(
+//         csvParser({ mapHeaders: ({ header }) => header.toLowerCase().trim() })
+//       ) // Normalize headers
+//       .on("data", (row) => {
+//         //console.log("Processing row:", row); // Debug log
+
+//         if (
+//           !row.code ||
+//           !row.name ||
+//           !row.position ||
+//           !row.role ||
+//           !row.status
+//         ) {
+//           errors.push({ row, message: "Missing required fields" });
+//         } else {
+//           results.push({
+//             code: row.code.toUpperCase(),
+//             name: row.name,
+//             position: row.position,
+//             role: row.role,
+//             status: row.status.toLowerCase(), // Normalize status
+//           });
+//         }
+//       })
+//       .on("end", async () => {
+//         try {
+//           //console.log("CSV Processing Complete. Total Rows:", results.length);
+//           const insertedData = [];
+//           const updatedData = [];
+
+//           for (const data of results) {
+//             const existingActor = await ActorCode.findOne({ code: data.code });
+
+//             if (existingActor) {
+//               existingActor.name = data.name;
+//               existingActor.position = data.position;
+//               existingActor.role = data.role;
+//               existingActor.status = data.status;
+//               if (existingActor.status === "active") {
+//                 await editUser(existingActor.code, existingActor.code, existingActor.name, existingActor.position, existingActor.role, existingActor.status);
+//             }            
+//               await existingActor.save();
+//               updatedData.push(existingActor);
+//             } else {
+//               const newActor = new ActorCode(data);
+//               await newActor.save();
+//               insertedData.push(newActor);
+//             }
+
+//             // Assign actor to user if status is "active"
+//             if (data.status === "active") {
+//               await assignActorToUser(data.code);
+//             }
+//           }
+
+//           fs.unlinkSync(filePath);
+//           //console.log("File deleted:", filePath);
+
+//           res.status(200).json({
+//             message: "CSV processed successfully",
+//             insertedCount: insertedData.length,
+//             updatedCount: updatedData.length,
+//             data: errors,
+//           });
+//         } catch (err) {
+//           console.error("Error processing CSV:", err);
+//           res.status(500).json({ message: "Internal server error." });
+//         }
+//       });
+//   } catch (error) {
+//     console.error("Upload Error:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
 
 //add actor code
 exports.addActorCode = async (req, res) => {

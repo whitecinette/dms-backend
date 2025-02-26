@@ -1,0 +1,105 @@
+exports.getAdditionalFields = (role, data) => {
+    let additionalFields = {};
+    switch (role.toLowerCase()) {
+        case "admin":
+        case "super_admin":
+            additionalFields = {
+                phone: data.phone || "0000000000",
+                verified: data.verified || false,
+            };
+            break;
+        case "employee":
+        case "hr":
+            additionalFields = {
+                phone: data.phone || "0000000000",
+                verified: data.verified || false,
+                birth_date: data.birth_date || "01-01-2000",
+                address: data.address || "Not Provided",
+                family_info: {
+                    father_name: data.father_name || "Not Provided",
+                    father_bday: data.father_bday || "01-01-2000",
+                    mother_name: data.mother_name || "Not Provided",
+                    mother_bday: data.mother_bday || "01-01-2000",
+                    spouse_name: data.spouse_name || "Not Provided",
+                    spouse_bday: data.spouse_bday || "01-01-2000",
+                    wedding_anniversary: data.wedding_anniversary || "01-01-2000",
+                    children: Array.isArray(data.children) ? data.children.map(child => ({
+                        name: child.name || "Not Provided",
+                        birth_date: child.birth_date || "01-01-2000"
+                    })) : []
+                },
+                bank_details: {
+                    account_holder_name: data.account_holder_name || "Not Provided",
+                    account_number: data.account_number || "0000000000",
+                    ifsc: data.ifsc || "DEFAULTIFSC",
+                    bank_name: data.bank_name || "Not Provided",
+                    phone_number: data.bank_phone || "0000000000"
+                }
+            };
+            break;
+        case "mdd":
+            additionalFields = {
+                city: data.city || "Unknown",
+                address: data.address || "Not Provided",
+                distributor_type: data.distributor_type || "Not Specified",
+                owner_details: {
+                    name: data.owner_name || "Not Provided",
+                    phone: data.owner_phone || "0000000000",
+                    email: data.owner_email || "notprovided@example.com",
+                    birth_date: data.owner_birth_date || "01-01-2000",
+                    family_info: {
+                        father_name: data.father_name || "Not Provided",
+                        father_bday: data.father_bday || "01-01-2000",
+                        mother_name: data.mother_name || "Not Provided",
+                        mother_bday: data.mother_bday || "01-01-2000",
+                        spouse_name: data.spouse_name || "Not Provided",
+                        spouse_bday: data.spouse_bday || "01-01-2000",
+                        wedding_anniversary: data.wedding_anniversary || "01-01-2000",
+                        children: Array.isArray(data.children) ? data.children.map(child => ({
+                            name: child.name || "Not Provided",
+                            birth_date: child.birth_date || "01-01-2000"
+                        })) : []
+                    }
+                },
+                shop_anniversary: data.shop_anniversary || "01-01-2000",
+                credit_limit: data.credit_limit || 0,
+                geotag_picture: data.geotag_picture || "Not Available",
+                latitude: data.latitude || "0.0",
+                longitude: data.longitude || "0.0"
+            };
+            break;
+        case "dealer":
+            additionalFields = {
+                city: data.city || "Unknown",
+                cluster: data.cluster || "Not Provided",
+                address: data.address || "Not Provided",
+                category: data.category || "Not Specified",
+                owner_details: {
+                    name: data.owner_name || "Not Provided",
+                    phone: data.owner_phone || "0000000000",
+                    email: data.owner_email || "notprovided@example.com",
+                    birth_date: data.owner_birth_date || "01-01-2000",
+                    family_info: {
+                        father_name: data.father_name || "Not Provided",
+                        father_bday: data.father_bday || "01-01-2000",
+                        mother_name: data.mother_name || "Not Provided",
+                        mother_bday: data.mother_bday || "01-01-2000",
+                        spouse_name: data.spouse_name || "Not Provided",
+                        spouse_bday: data.spouse_bday || "01-01-2000",
+                        wedding_anniversary: data.wedding_anniversary || "01-01-2000",
+                        children: Array.isArray(data.children) ? data.children.map(child => ({
+                            name: child.name || "Not Provided",
+                            birth_date: child.birth_date || "01-01-2000"
+                        })) : []
+                    }
+                },
+                shop_anniversary: data.shop_anniversary || "01-01-2000",
+                credit_limit: data.credit_limit || 0,
+                geotag_picture: data.geotag_picture || "Not Available",
+                latitude: data.latitude || "0.0",
+                longitude: data.longitude || "0.0"
+            };
+            break;
+    }
+    return additionalFields;
+};

@@ -1,5 +1,5 @@
 const express = require("express");
-const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins } = require("../controllers/admin/userController");
+const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes } = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
@@ -37,6 +37,8 @@ router.get("/user/get-by-admins", adminOrSuperAdminAuth, getUsersForAdmins);
 // Private: Only Admin or Super Admin can activate and verify an employee
 router.patch("/activate-verify-user-by-admin-or-super-admin/:id", adminOrSuperAdminAuth, activateAndVerifyUser);
 
+router.put("/admin/register-update-from-actor-codes", registerOrUpdateUsersFromActorCodes);
+
 
 
 
@@ -45,6 +47,9 @@ router.patch("/activate-verify-user-by-admin-or-super-admin/:id", adminOrSuperAd
 // USER APIS 
 router.post("/app/user/login", loginUserForApp);
 router.post("/app/user/register", registerUserForApp);
+
+
+
 
 
 module.exports = router;    
