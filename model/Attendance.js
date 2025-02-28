@@ -21,6 +21,10 @@ const attendanceSchema = new mongoose.Schema(
       type: String,
       enum: ["Sick", "Casual", "Paid", "Unpaid"],
     },
+    punchInImage: { 
+      type: String, 
+      default : null
+     },
     hoursWorked: Number,
     leaveDescription: String,
     leaveDays: Number,
