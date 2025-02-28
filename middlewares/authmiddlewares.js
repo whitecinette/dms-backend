@@ -116,3 +116,26 @@ exports.findUserWithToken = async (req, res, next) => {
   }
 };
 
+exports.userAuth = async (req, res, next) => {
+  try {
+      const token = req.header("Authorization");
+
+      if (!token) {
+          return res.status(401).json({ message: "Access denied. No token provided." });
+      }
+
+      // Verify token
+      const decoded = jwt.verify(token.replace("Bearer ", ""), process.env.JWT_SECRET);
+      req.user = decoded; // Attach user info to the request object
+
+      // Fetch user details to ensure the user exists
+      const user = await User.findById(req.user.id);
+      if (!user) {
+          return res.status(404).json({ message: "User not found." });
+      }
+
+      next(); // Move to the next middleware or route handler
+  } catch (error) {
+      res.status(401).json({ message: "Invalid or expired token.", error: error.message });
+  }
+};

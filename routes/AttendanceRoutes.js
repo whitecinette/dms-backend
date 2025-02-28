@@ -1,9 +1,10 @@
 const express = require('express');
 const { punchIn, punchOut,  getAttendanceByEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getDealersByEmployeeCode } = require('../controllers/common/attendanceController');
+const { userAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
-router.post('/punch-in/:code', punchIn);
-router.post('/punch-out/:code',punchOut)
+router.post('/punch-in', userAuth, punchIn);
+router.post('/punch-out', userAuth, punchOut)
 
 router.get('/get-attandance/:employeeId', getAttendanceByEmployee);
 router.get('/get-all-attendance', getAttendance);

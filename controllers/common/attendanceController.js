@@ -8,210 +8,199 @@ const getDistance = require("../../helpers/attendanceHelper")
 
 // punch in
 exports.punchIn = async (req, res) => {
-    try {
-        let { code } = req.params; // Employee code from params
-        const { date, punchIn, latitude, longitude } = req.body;
+  try {
+      const { date, punchIn, latitude, longitude } = req.body;
+      const { code } = req.user; // Get code from JWT token
 
-        // Fetch user code if not provided
-        if (!code) {
-            const user = await User.findById(req.user.id);
-            if (!user) {
-                return res.status(404).json({ message: "User not found" });
-            }
-            code = user.code;
-        }
+      if (!code) {
+          return res.status(400).json({ message: "User code is missing in token." });
+      }
 
-        // Format date to ensure proper comparison
-        const formattedDate = moment(date, "YYYY-MM-DD").startOf("day").toDate();
+      // Format date
+      const formattedDate = moment(date, "YYYY-MM-DD").startOf("day").toDate();
 
-        // Check if the user has already punched in for the day
-        const existingAttendance = await Attendance.findOne({ code, date: formattedDate });
-        if (existingAttendance) {
-            return res.status(400).json({
-                message: "You have already punched in for today.",
-                attendance: existingAttendance
-            });
-        }
+      // Check if user has already punched in
+      const existingAttendance = await Attendance.findOne({ code, date: formattedDate });
+      if (existingAttendance) {
+          return res.status(400).json({
+              message: "You have already punched in for today.",
+              attendance: existingAttendance
+          });
+      }
 
-        // Fetch employee's assigned dealers
-        const hierarchyData = await HierarchyEntries.find({
-            $or: [{ tse: code }, { mdd: code }, { asm: code }, { szd: code }]
-        });
+      // Fetch user's assigned dealers
+      const hierarchyData = await HierarchyEntries.find({
+          $or: [{ tse: code }, { mdd: code }, { asm: code }, { szd: code }]
+      });
 
-        if (!hierarchyData || hierarchyData.length === 0) {
-            return res.status(404).json({ message: "No dealers found under this employee." });
-        }
+      if (!hierarchyData || hierarchyData.length === 0) {
+          return res.status(404).json({ message: "No dealers found under this employee." });
+      }
 
-        // Extract dealer codes
-        const dealerCodes = hierarchyData.map(entry => entry.dealer);
-        const dealers = await User.find(
-            { code: { $in: dealerCodes } },
-            { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
-        );
+      // Extract dealer codes
+      const dealerCodes = hierarchyData.map(entry => entry.dealer);
+      const dealers = await User.find(
+          { code: { $in: dealerCodes } },
+          { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
+      );
 
-        if (!dealers || dealers.length === 0) {
-            return res.status(404).json({ message: "No dealers with location data found." });
-        }
+      if (!dealers || dealers.length === 0) {
+          return res.status(404).json({ message: "No dealers with location data found." });
+      }
 
-        // Convert coordinates to floats
-        const userLat = parseFloat(latitude);
-        const userLon = parseFloat(longitude);
+      // Convert coordinates
+      const userLat = parseFloat(latitude);
+      const userLon = parseFloat(longitude);
 
-        // Find the nearest dealer
-        let nearestDealer = null;
-        let minDistance = Infinity;
+      // Find the nearest dealer
+      let nearestDealer = null;
+      let minDistance = Infinity;
 
-        dealers.forEach(dealer => {
-            if (dealer.latitude && dealer.longitude) {
-                const distance = getDistance(userLat, userLon, parseFloat(dealer.latitude), parseFloat(dealer.longitude));
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    nearestDealer = dealer;
-                }
-            }
-        });
+      dealers.forEach(dealer => {
+          if (dealer.latitude && dealer.longitude) {
+              const distance = getDistance(userLat, userLon, parseFloat(dealer.latitude), parseFloat(dealer.longitude));
+              if (distance < minDistance) {
+                  minDistance = distance;
+                  nearestDealer = dealer;
+              }
+          }
+      });
 
-        if (!nearestDealer) {
-            return res.status(404).json({ message: "No nearby dealer found." });
-        }
+      if (!nearestDealer) {
+          return res.status(404).json({ message: "No nearby dealer found." });
+      }
 
-        // Define max allowed distance for punch-in (100 meters)
-        const MAX_DISTANCE = 100;
-        if (minDistance > MAX_DISTANCE) {
-            return res.status(400).json({
-                message: "You are too far from the nearest dealer to punch in.",
-                nearestDealer,
-                distance: minDistance
-            });
-        }
+      // Define max allowed distance for punch-in (100 meters)
+      const MAX_DISTANCE = 100;
+      if (minDistance > MAX_DISTANCE) {
+          return res.status(400).json({
+              message: "You are too far from the nearest dealer to punch in.",
+              nearestDealer,
+              distance: minDistance
+          });
+      }
 
-        // Convert punch-in time
-        const punchInTime = moment(punchIn, "hh:mm A").toDate();
-        if (!punchInTime) {
-            return res.status(400).json({ message: "Invalid punch-in time" });
-        }
+      // Convert punch-in time
+      const punchInTime = moment(punchIn, "hh:mm A").toDate();
+      if (!punchInTime) {
+          return res.status(400).json({ message: "Invalid punch-in time" });
+      }
 
-        // Save punch-in record
-        const attendance = new Attendance({
-            code,
-            date: formattedDate,
-            punchIn: punchInTime,
-            status: "Pending",
-            latitude,
-            longitude,
-            dealerCode: nearestDealer.code
-        });
+      // Save punch-in record
+      const attendance = new Attendance({
+          code,
+          date: formattedDate,
+          punchIn: punchInTime,
+          status: "Pending",
+          latitude,
+          longitude,
+          dealerCode: nearestDealer.code
+      });
 
-        await attendance.save();
+      await attendance.save();
 
-        res.status(201).json({
-            message: "Punch-in recorded successfully",
-            attendance
-        });
-    } catch (error) {
-        res.status(500).json({ message: "Error recording punch-in", error: error.message });
-    }
+      res.status(201).json({
+          message: "Punch-in recorded successfully",
+          attendance
+      });
+  } catch (error) {
+      res.status(500).json({ message: "Error recording punch-in", error: error.message });
+  }
 };
 
 // punch out api
 exports.punchOut = async (req, res) => {
- try {
-     let { code } = req.params;
-     const { date, punchOut, latitude, longitude } = req.body;
+  try {
+      const { date, punchOut, latitude, longitude } = req.body;
+      const code = req.user.code;  // Extract code from authenticated user
 
-     if (!code) {
-         const user = await User.findById(req.user.id);
-         if (!user) return res.status(404).json({ message: "User not found" });
-         code = user.code;
-     }
+      // Format date to remove time
+      const formattedDate = moment(date, "YYYY-MM-DD").startOf("day").toDate();
 
-     // Format date to remove time
-     const formattedDate = moment(date, "YYYY-MM-DD").startOf("day").toDate();
+      // Find existing attendance record for the day
+      const attendance = await Attendance.findOne({ code, date: formattedDate });
+      if (!attendance) {
+          return res.status(400).json({ message: "You have not punched in yet for today." });
+      }
 
-     // Find existing attendance record for the day
-     const attendance = await Attendance.findOne({ code, date: formattedDate });
-     if (!attendance) {
-         return res.status(400).json({ message: "You have not punched in yet for today." });
-     }
+      if (attendance.punchOut) {
+          return res.status(400).json({ message: "You have already punched out today." });
+      }
 
-     if (attendance.punchOut) {
-         return res.status(400).json({ message: "You have already punched out today." });
-     }
+      // Fetch dealers assigned to this employee
+      const hierarchyData = await HierarchyEntries.find({
+          $or: [{ tse: code }, { mdd: code }, { asm: code }, { szd: code }]
+      });
 
-     // Fetch dealers assigned to this employee
-     const hierarchyData = await HierarchyEntries.find({
-         $or: [{ tse: code }, { mdd: code }, { asm: code }, { szd: code }]
-     });
+      if (!hierarchyData || hierarchyData.length === 0) {
+          return res.status(404).json({ message: "No dealers found under this employee." });
+      }
 
-     if (!hierarchyData || hierarchyData.length === 0) {
-         return res.status(404).json({ message: "No dealers found under this employee." });
-     }
+      // Extract dealer codes
+      const dealerCodes = hierarchyData.map(entry => entry.dealer);
+      const dealers = await User.find(
+          { code: { $in: dealerCodes } },
+          { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
+      );
 
-     // Extract dealer codes
-     const dealerCodes = hierarchyData.map(entry => entry.dealer);
-     const dealers = await User.find(
-         { code: { $in: dealerCodes } },
-         { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
-     );
+      if (!dealers || dealers.length === 0) {
+          return res.status(404).json({ message: "No dealers with location data found." });
+      }
 
-     if (!dealers || dealers.length === 0) {
-         return res.status(404).json({ message: "No dealers with location data found." });
-     }
+      // Convert latitude and longitude to numbers
+      const userLat = parseFloat(latitude);
+      const userLon = parseFloat(longitude);
 
-     // Convert latitude and longitude to numbers
-     const userLat = parseFloat(latitude);
-     const userLon = parseFloat(longitude);
+      // Find nearest dealer
+      let nearestDealer = null;
+      let minDistance = Infinity;
 
-     // Find nearest dealer
-     let nearestDealer = null;
-     let minDistance = Infinity;
+      dealers.forEach(dealer => {
+          if (dealer.latitude && dealer.longitude) {
+              const distance = getDistance(userLat, userLon, parseFloat(dealer.latitude), parseFloat(dealer.longitude));
+              if (distance < minDistance) {
+                  minDistance = distance;
+                  nearestDealer = dealer;
+              }
+          }
+      });
 
-     dealers.forEach(dealer => {
-         if (dealer.latitude && dealer.longitude) {
-             const distance = getDistance(userLat, userLon, parseFloat(dealer.latitude), parseFloat(dealer.longitude));
-             if (distance < minDistance) {
-                 minDistance = distance;
-                 nearestDealer = dealer;
-             }
-         }
-     });
+      if (!nearestDealer) {
+          return res.status(404).json({ message: "No nearby dealer found." });
+      }
 
-     if (!nearestDealer) {
-         return res.status(404).json({ message: "No nearby dealer found." });
-     }
+      // Define max distance allowed for punch-out (100 meters)
+      const MAX_DISTANCE = 100;
+      if (minDistance > MAX_DISTANCE) {
+          return res.status(400).json({
+              message: "You are too far from the nearest dealer to punch out.",
+              nearestDealer,
+              distance: minDistance
+          });
+      }
 
-     // Define max distance allowed for punch-out (100 meters)
-     const MAX_DISTANCE = 100;
-     if (minDistance > MAX_DISTANCE) {
-         return res.status(400).json({
-             message: "You are too far from the nearest dealer to punch out.",
-             nearestDealer,
-             distance: minDistance
-         });
-     }
+      // Convert punch-out time
+      const punchOutTime = moment(punchOut, "hh:mm A").toDate();
+      if (!punchOutTime) {
+          return res.status(400).json({ message: "Invalid punch-out time" });
+      }
 
-     // Convert punch-out time
-     const punchOutTime = moment(punchOut, "hh:mm A").toDate();
-     if (!punchOutTime) {
-         return res.status(400).json({ message: "Invalid punch-out time" });
-     }
+      // Update punch-out record
+      attendance.punchOut = punchOutTime;
+      attendance.status = "Present";
+      attendance.latitude = latitude;
+      attendance.longitude = longitude;
+      attendance.dealerCode = nearestDealer.code;
 
-     // Update punch-out record
-     attendance.punchOut = punchOutTime;
-     attendance.status = "Present";
-     attendance.latitude = latitude;
-     attendance.longitude = longitude;
-     attendance.dealerCode = nearestDealer.code;
+      await attendance.save();
 
-     await attendance.save();
-
-     res.status(200).json({
-         message: "Punch-out recorded successfully",
-         attendance
-     });
- } catch (error) {
-     res.status(500).json({ message: "Error recording punch-out", error: error.message });
- }
+      res.status(200).json({
+          message: "Punch-out recorded successfully",
+          attendance
+      });
+  } catch (error) {
+      res.status(500).json({ message: "Error recording punch-out", error: error.message });
+  }
 };
 
 exports.getAttendanceByEmployee = async (req, res) => {
