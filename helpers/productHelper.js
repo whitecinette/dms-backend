@@ -27,6 +27,7 @@ exports.determineSegment = (price) => {
     if (price < 30000) return "20-30";
     if (price < 40000) return "30-40";
     if (price < 70000) return "40-70";
+    if (price < 100000) return "70-100";
     return "100";
   };
 
