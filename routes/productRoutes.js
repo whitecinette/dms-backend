@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin, editProductForAdmin, deleteProductForAdmin, getAllProducts } = require("../controllers/admin/productController");
+const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin, editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV } = require("../controllers/admin/productController");
 const {adminOrSuperAdminAuth} = require("../middlewares/authmiddlewares");
-const upload = require("../helpers/multerHelper");
+const { upload } = require('../services/fileUpload');
+// const upload = require("../helpers/multerHelper");
 
 //admin and super_admin routes
 router.post("/product/add-product-by-admin", adminOrSuperAdminAuth, addProductForAdmin);
@@ -13,5 +14,9 @@ router.delete("/product/delete-product-by-admin/:id", adminOrSuperAdminAuth, del
 
 //get all products to edit order
 router.get("/product/get-all-products", getAllProducts);
+
+
+// Rakshita 
+router.post("/products/upload-csv", upload.single("file"), uploadProductsThroughCSV);
 
 module.exports = router;

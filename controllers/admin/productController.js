@@ -1,7 +1,8 @@
 const Product = require("../../model/Product");
 const fs = require("fs");
 const csvParser = require("csv-parser");
-const { generateProductCode } = require("../../helpers/productHelper");
+const { generateProductCode, cleanHeader, cleanCategory, determineSegment, generateIdentifier } = require("../../helpers/productHelper");
+const { Readable } = require("stream");
 
 // Add Product for Admin
 exports.addProductForAdmin = async (req, res) => {
@@ -256,3 +257,77 @@ exports.getAllProducts = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+
+
+// Rakshita 
+exports.uploadProductsThroughCSV = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    let results = [];
+    const stream = new Readable();
+    stream.push(req.file.buffer);
+    stream.push(null);
+
+    let isFirstRow = true;
+    let cleanedHeaders = [];
+
+    stream
+      .pipe(csvParser())
+      .on("data", (row) => {
+        if (isFirstRow) {
+          cleanedHeaders = Object.keys(row).map(cleanHeader);
+          isFirstRow = false;
+        }
+
+        let productEntry = {};
+        cleanedHeaders.forEach((header, index) => {
+          const originalKey = Object.keys(row)[index];
+          productEntry[header] = row[originalKey].trim();
+        });
+
+        // Format product_category
+        productEntry.product_category = cleanCategory(productEntry.product_category);
+
+        // Assign segment based on price
+        productEntry.segment = determineSegment(Number(productEntry.price));
+
+        // Generate model_code if missing
+        if (!productEntry.model_code) {
+          productEntry.model_code = generateIdentifier(productEntry.product_name);
+        }
+
+        // Generate product_code if missing
+        if (!productEntry.product_code) {
+          productEntry.product_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
+        }
+
+        // Set default status to active
+        productEntry.status = "active";
+
+        results.push(productEntry);
+      })
+      .on("end", async () => {
+        try {
+          if (results.length === 0) {
+            return res.status(400).json({ success: false, message: "No valid data found in CSV." });
+          }
+
+          // Insert all products without checking for existing ones
+          await Product.insertMany(results, { ordered: false });
+
+          return res.status(201).json({ success: true, message: "Products uploaded successfully", totalEntries: results.length });
+        } catch (error) {
+          console.error("Error processing product entries:", error);
+          res.status(500).json({ success: false, message: "Internal server error" });
+        }
+      });
+  } catch (error) {
+    console.error("Error in uploadProductsThroughCSV:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
