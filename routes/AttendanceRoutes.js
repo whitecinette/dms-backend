@@ -6,7 +6,8 @@ const upload_img = require('../middlewares/upload');
 const router = express.Router();
 
 router.post('/punch-in', upload_img.single('punchInImage'), userAuth, punchIn);
-router.post('/punch-out', userAuth, punchOut)
+router.post('/punch-out', upload_img.single('punchOutImage'), userAuth, punchOut);
+
 
 router.get('/get-attandance/:employeeId', getAttendanceByEmployee);
 router.get('/get-all-attendance', getAttendance);

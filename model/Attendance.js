@@ -25,6 +25,10 @@ const attendanceSchema = new mongoose.Schema(
       type: String, 
       default : null
      },
+     punchOutImage: { 
+      type: String, 
+      default : null
+     },
     hoursWorked: Number,
     leaveDescription: String,
     leaveDays: Number,

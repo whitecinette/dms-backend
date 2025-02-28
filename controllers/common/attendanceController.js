@@ -144,21 +144,7 @@ await attendance.save();
   }
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// punch out
 
 exports.punchOut = async (req, res) => {
     try {
@@ -170,6 +156,8 @@ exports.punchOut = async (req, res) => {
 
         // Get current time dynamically for punch-out
         const punchOutTime = moment().toDate();
+
+
 
         // Find existing attendance record for today
         const attendance = await Attendance.findOne({ code, date: formattedDate });
@@ -233,11 +221,34 @@ exports.punchOut = async (req, res) => {
             });
         }
 
+        // Ensure punch-out image is provided
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "Punch out image is required.",
+            });
+        }
+
+        // Upload punch-out image to Cloudinary
+        const result = await cloudinary.uploader.upload(req.file.path, {
+            folder: 'gpunchOutImage',
+            resource_type: 'image',
+        });
+
+        const punchOutImage = result.secure_url; // ✅ Get punch-out image URL
+
+        // Calculate hours worked
+        // const hoursWorked = moment(punchOutTime).diff(moment(attendance.punchIn), 'hours', true);
+        // const hoursWorked = moment(punchOutTime).diff(moment(attendance.punchIn, moment.ISO_8601), 'hours', true);
+
+
         // Update punch-out record
         attendance.punchOut = punchOutTime;
+        attendance.punchOutImage = punchOutImage; // ✅ Store punch-out image in DB
         attendance.status = "Present";
         attendance.latitude = latitude;
         attendance.longitude = longitude;
+        // attendance.hoursWorked = hoursWorked;
         attendance.dealerCode = nearestDealer.code;
 
         await attendance.save();
