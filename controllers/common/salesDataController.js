@@ -155,3 +155,107 @@ exports.getSalesReport = async (req, res) => {
   }
 };
 
+
+
+exports.getDashboardSalesMetrics = async (req, res) => {
+  try {
+    let { code, filter_type, start_date, end_date } = req.body;
+    filter_type = filter_type || "value"; // Default to 'value'
+
+    if (!code || !start_date || !end_date) {
+      return res.status(400).json({ success: false, message: "Code, start_date, and end_date are required." });
+    }
+
+    // Convert dates to IST
+    const convertToIST = (date) => {
+      let d = new Date(date);
+      return new Date(d.getTime() + (5.5 * 60 * 60 * 1000)); // Convert UTC to IST
+    };
+
+    const startDate = convertToIST(new Date(start_date));
+    const endDate = convertToIST(new Date(end_date));
+
+    // Fetch actor details using the code
+    const actor = await ActorCode.findOne({ code });
+    if (!actor) {
+      return res.status(404).json({ success: false, message: "Actor not found for the provided code." });
+    }
+
+    const { role, position } = actor;
+
+    // Determine dealer filtering based on role
+    let dealerCodes = [];
+    if (["admin", "super_admin"].includes(role)) {
+      dealerCodes = null; // Fetch all data
+    } else if (role === "employee" && position) {
+      // Fetch dealers assigned to this position
+      const hierarchyEntries = await HeirarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+        [position]: code,
+      });
+
+      dealerCodes = hierarchyEntries.map(entry => entry.dealer);
+    } else {
+      return res.status(403).json({ success: false, message: "Unauthorized role." });
+    }
+
+    // Get last month’s start & end date till today's date
+    let lmtdStartDate = new Date(startDate);
+    lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+
+    let lmtdEndDate = new Date(endDate);
+    lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+    let baseQuery = dealerCodes ? { buyer_code: { $in: dealerCodes } } : {};
+
+    // Fetch MTD Sell Out
+    let mtdSellOut = await SalesData.aggregate([
+      { $match: { ...baseQuery, sales_type: "Sell Out", date: { $gte: startDate, $lte: endDate } } },
+      { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } }
+    ]);
+
+    // Fetch LMTD Sell Out
+    let lmtdSellOut = await SalesData.aggregate([
+      { $match: { ...baseQuery, sales_type: "Sell Out", date: { $gte: lmtdStartDate, $lte: lmtdEndDate } } },
+      { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } }
+    ]);
+
+    // Fetch MTD Sell In
+    let mtdSellIn = await SalesData.aggregate([
+      { $match: { ...baseQuery, sales_type: { $in: ["Sell In", "Sell Thru2"] }, date: { $gte: startDate, $lte: endDate } } },
+      { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } }
+    ]);
+
+    // Fetch LMTD Sell In
+    let lmtdSellIn = await SalesData.aggregate([
+      { $match: { ...baseQuery, sales_type: { $in: ["Sell In", "Sell Thru2"] }, date: { $gte: lmtdStartDate, $lte: lmtdEndDate } } },
+      { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } }
+    ]);
+
+    // Calculate Growth %
+    const calculateGrowth = (current, last) => (last !== 0 ? ((current - last) / last) * 100 : 0);
+
+    let response = {
+      lmtd_sell_out: lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0,
+      mtd_sell_out: mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
+      lmtd_sell_in: lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0,
+      mtd_sell_in: mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
+      sell_out_growth: calculateGrowth(
+        mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
+        lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0
+      ).toFixed(2),
+      sell_in_growth: calculateGrowth(
+        mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
+        lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0
+      ).toFixed(2),
+    };
+
+    res.status(200).json({ success: true, data: response });
+
+  } catch (error) {
+    console.error("Error in getDashboardSalesMetrics:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
