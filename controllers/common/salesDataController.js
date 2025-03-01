@@ -157,7 +157,7 @@ exports.getSalesReportByCode = async (req, res) => {
 
 exports.getSalesReportForUser = async (req, res) => {
   try {
-    let {code} = req;
+    let {code} = req.user;
     let { start_date, end_date, filter_type, report_type } = req.body;
     filter_type = filter_type || "value"; // Default to 'value' if not provided
     report_type = report_type || "segment"; // Default to segment-wise report
@@ -411,7 +411,7 @@ exports.getDashboardSalesMetricsByCode = async (req, res) => {
 
 exports.getDashboardSalesMetricsForUser = async (req, res) => {
   try {
-    let {code} = req;
+    let {code} = req.user;
     let { filter_type, start_date, end_date } = req.body;
     filter_type = filter_type || "value"; // Default to 'value'
 

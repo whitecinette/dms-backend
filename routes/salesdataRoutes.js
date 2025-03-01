@@ -9,8 +9,8 @@ router.post("/sales-data/upload/csv", upload.single("file"), uploadSalesDataThro
 
 // common 
 router.post("/user/sales-data/report/by-code", getSalesReportByCode);
-router.post("/user/sales-data/report", userAuth, getSalesReportForUser);
+router.post("/user/sales-data/report/self", userAuth, getSalesReportForUser);
 router.post("/user/sales-data/dashboard/metrics/by-code", getDashboardSalesMetricsByCode);
-router.post("/user/sales-data/dashboard/metrics", userAuth, getDashboardSalesMetricsForUser);
+router.post("/user/sales-data/dashboard/metrics/self", userAuth, getDashboardSalesMetricsForUser);
 
 module.exports = router;
