@@ -1,11 +1,16 @@
 const express = require('express');
 const { upload } = require('../services/fileUpload');
 const { uploadSalesDataThroughCSV } = require('../controllers/admin/salesdataController');
-const { getSalesReport, getDashboardSalesMetrics } = require('../controllers/common/salesDataController');
+const { getSalesReportByCode, getDashboardSalesMetricsByCode, getSalesReportForUser, getDashboardSalesMetricsForUser } = require('../controllers/common/salesDataController');
+const { userAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
 router.post("/sales-data/upload/csv", upload.single("file"), uploadSalesDataThroughCSV);
-router.post("/sales-data/report", getSalesReport);
-router.post("/sales-data/dashboard/metrics", getDashboardSalesMetrics);
+
+// common 
+router.post("/user/sales-data/report/by-code", getSalesReportByCode);
+router.post("/user/sales-data/report", userAuth, getSalesReportForUser);
+router.post("/user/sales-data/dashboard/metrics/by-code", getDashboardSalesMetricsByCode);
+router.post("/user/sales-data/dashboard/metrics", userAuth, getDashboardSalesMetricsForUser);
 
 module.exports = router;
