@@ -1,11 +1,12 @@
-
+const path = require("path");  // ✅ Import path module
+const fs = require("fs");  // ✅ Import fs module
+const stream = require("stream");
+const csvParser = require("csv-parser");
 const bcrypt = require("bcryptjs");
 const User = require("../../model/User");
 const { generateAdminCode } = require("../../helpers/adminHelpers");
 const jwt = require("jsonwebtoken");
 const { inactiveActor, editActorCode } = require("../../helpers/actorToUserHelper");
-const ActorCode = require("../../model/ActorCode");
-const { getAdditionalFields } = require("../../helpers/userHelpers");
 
 
 /////////////// SUPER ADMIN ///////////////////////////
@@ -310,34 +311,32 @@ exports.registerUserBySuperAdmin = async (req, res) => {
 // };
 
 
-// 📌 Get User by Super Admin
+// 📌 Get Users for Admins
 exports.getUsersForAdmins = async (req, res) => {
     const {
         page = 1,
         limit = 50,
         sort = "createdAt",
-        order = "" ,
+        order = "",
         search = "",
         role = ""
     } = req.query;
-    // console.log(req.query)
+
     try {
         const user = req.user;
-        let totalUsers, employees, dealers, mdds, users;
+        let employees, dealers, mdds, users, totalUsers, filteredUsers;
         const filters = {};
 
+        // ✅ Count total users based on role
         if (user.role === "super_admin") {
-            filters.role = { $ne: "super_admin" };
-            totalUsers = await User.countDocuments(filters);
+            totalUsers = await User.countDocuments({ role: { $ne: "super_admin" } }); // All except super_admin
+            filters.role = { $ne: "super_admin" }; // Apply filter for super_admin
             employees = await User.countDocuments({ role: { $in: ["employee", "admin"] } });
         } else {
-            filters.role = { $nin: ["admin", "super_admin"] };
-            totalUsers = await User.countDocuments(filters);
+            totalUsers = await User.countDocuments({ role: { $nin: ["admin", "super_admin"] } }); // All except admin & super_admin
+            filters.role = { $nin: ["admin", "super_admin"] }; // Apply filter for admin
             employees = await User.countDocuments({ role: "employee" });
         }
-
-        // Ensure order is a number
-        const sortOrder = order === "-1" ? -1 : 1;
 
         // Ensure role filter is correctly applied
         if (role) {
@@ -355,10 +354,16 @@ exports.getUsersForAdmins = async (req, res) => {
             ];
         }
 
-        // Fetch users with filters, sorting, and pagination
+        // ✅ Count filtered users (after search & role filters)
+        filteredUsers = await User.countDocuments(filters);
+
+        // Ensure order is a number
+        const sortOrder = order === "-1" ? -1 : 1;
+
+        // Fetch filtered users with sorting & pagination
         users = await User.find(filters)
-            .sort({ [sort]: sortOrder }) // Ensure sorting is correct
-            .limit(Number(limit)) // Ensure limit is a number
+            .sort({ [sort]: sortOrder })
+            .limit(Number(limit))
             .skip((Number(page) - 1) * Number(limit));
 
         // Count other user roles
@@ -369,17 +374,19 @@ exports.getUsersForAdmins = async (req, res) => {
             message: "All users fetched successfully",
             data: users,
             currentPage: Number(page),
-            totalRecords: totalUsers,
+            totalRecords: filteredUsers, // ✅ Filtered user count
+            totalUsers, // ✅ Total users count (excluding super_admin or admin based on role)
             employees,
             dealers,
             mdds,
         });
 
     } catch (error) {
-        console.error("Error fetching users:", error); // Log error to debug
+        console.error("Error fetching users:", error);
         res.status(500).json({ message: "Server error", error: error.message });
     }
 };
+
 
 
 
@@ -608,47 +615,44 @@ exports.registerUserByAdmin = async (req, res) => {
 // 📌 Edit User by Admins
 exports.editUserByAdmins = async (req, res) => {
     try {
-        console.log(req.params);
-        const { id } = req.params;
-        const { name, email, code, role, position, status } = req.body;
+        const { id } = req.params; // Extract user ID from request parameters
+        const updateData = req.body; // Extract incoming update data
 
-        const user = await User.findById(id);
-        if (!user) return res.status(404).json({ message: "User not found" });
-
-        // Only check if the code exists for other users (ignore the current user's code)
-        const existingUser = await User.findOne({ code, _id: { $ne: id } });
-        if (existingUser) return res.status(400).json({ message: "Code already in use" });
-
-        // Ensure the status is being updated
-        if (typeof status !== "string" || (status !== "active" && status !== "inactive")) {
-            return res.status(400).json({ message: "Invalid status value" });
+        if (!id) {
+            return res.status(400).json({ message: "User ID is required" });
         }
 
-        // Update user
+        if (!updateData || Object.keys(updateData).length === 0) {
+            return res.status(400).json({ message: "No update data provided" });
+        }
+
+        // Construct the dynamic update object
+        let updateFields = {};
+
+        for (const key in updateData) {
+            if (updateData[key] !== undefined) {
+                updateFields[key] = updateData[key];
+            }
+        }
+
+        // Perform the update with $set
         const updatedUser = await User.findByIdAndUpdate(
             id,
-            { $set: { name, code, email, status, role, position } },
-            { new: true, runValidators: true } // Ensures validation
+            { $set: updateFields },
+            { new: true, runValidators: true }
         );
 
-        // Ensure editActorCode only runs if the user was successfully updated
-        if (updatedUser) {
-            await editActorCode(
-                updatedUser.code,
-                updatedUser.name,
-                updatedUser.status,
-                updatedUser.role,
-                updatedUser.position
-            );
+        if (!updatedUser) {
+            return res.status(404).json({ message: "User not found" });
         }
 
-        res.status(200).json({ message: "User updated successfully", user: updatedUser });
-
+        res.status(200).json(updatedUser);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Server error", error: error.message });
+        console.error("Error updating user:", error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
+
 
 
 // 📌 Get Users for Admin
@@ -777,45 +781,122 @@ exports.loginAdminOrSuperAdmin = async (req, res) => {
 };
 // ============= /Login by Admin or Super Admin================
 
+// ============= /Update dealer by Admin or Super Admin================
 
-
-// Rakshita
-// API to register or update users from ActorCodes
-exports.registerOrUpdateUsersFromActorCodes = async (req, res) => {
-    try {
-        const actorCodes = await ActorCode.find();
-        for (const actor of actorCodes) {
-            const existingUser = await User.findOne({ code: actor.code });
-            
-            if (existingUser) {
-                // Check if fields need updating
-                const updatedFields = {};
-                if (existingUser.name !== actor.name) updatedFields.name = actor.name;
-                if (existingUser.position !== actor.position) updatedFields.position = actor.position;
-                if (existingUser.role !== actor.role) updatedFields.role = actor.role;
-                if (existingUser.status !== actor.status) updatedFields.status = actor.status;
-                
-                if (Object.keys(updatedFields).length > 0) {
-                    await User.updateOne({ code: actor.code }, { $set: updatedFields });
-                }
-            } else {
-                // Create new user
-                const hashedPassword = await bcrypt.hash("123456", 10);
-                const newUser = new User({
-                    name: actor.name,
-                    code: actor.code,
-                    password: hashedPassword,
-                    role: actor.role,
-                    status: actor.status,
-                    email: actor.email || `${actor.code}@dummyemail.com`,
-                    ...getAdditionalFields(actor.role, actor)
-                });
-                await newUser.save();
-            }
-        }
-        res.status(200).json({ message: "Users registered/updated successfully" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Internal server error" });
+exports.updateBulkDealers = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV file is required." });
     }
+
+    const results = [];
+    const errors = [];
+    const filePath = req.file.path;
+
+    fs.createReadStream(filePath)
+      .pipe(
+        csvParser({
+          mapHeaders: ({ header }) =>
+            header.toLowerCase().trim().replace(/\s+/g, "_"), // Normalize headers
+        })
+      )
+      .on("data", (row) => {
+        let cleanedRow = {};
+
+        Object.keys(row).forEach((key) => {
+          let cleanedKey = key.toLowerCase().trim().replace(/\s+/g, "_");
+          let cleanedValue = row[key]?.trim();
+
+          // Convert known number fields to numbers
+          if (["latitude", "longitude", "credit_limit"].includes(cleanedKey)) {
+            cleanedValue = cleanedValue ? Number(cleanedValue) : 0;
+          }
+
+          cleanedRow[cleanedKey] = cleanedValue;
+        });
+
+        if (!cleanedRow.code) {
+          errors.push({ row, message: "Missing required 'code' field" });
+        } else {
+          results.push(cleanedRow);
+        }
+      })
+      .on("end", async () => {
+        try {
+          const updatedData = [];
+
+          await Promise.all(
+            results.map(async (data) => {
+            //   console.log("🔄 Processing Dealer Data:", data);
+              const { code } = data;
+
+              let existingDealer = await User.findOne({ code , role: "dealer"});
+
+              if (existingDealer) {
+                let isUpdated = false;
+
+                // ✅ Dynamically update all fields
+                Object.keys(data).forEach((key) => {
+                  if (data[key] !== undefined && data[key] !== "" && existingDealer[key] !== data[key]) {
+                    existingDealer.set(key, data[key]);
+                    isUpdated = true;
+                  }
+                });
+
+                // ✅ Handle nested `owner_details`
+                if (!existingDealer.owner_details) existingDealer.owner_details = {};
+                const ownerFields = ["owner_name", "owner_phone", "owner_email", "owner_birth_date"];
+                ownerFields.forEach((field) => {
+                  let dbField = field.replace("owner_", ""); // Convert "owner_name" → "name"
+                  if (data[field] && existingDealer.owner_details[dbField] !== data[field]) {
+                    existingDealer.set(`owner_details.${dbField}`, data[field]);
+                    isUpdated = true;
+                  }
+                });
+
+                // ✅ Handle nested `family_info`
+                if (!existingDealer.owner_details.family_info) existingDealer.owner_details.family_info = {};
+                const familyFields = ["father_name", "father_bday", "mother_name", "mother_bday", "spouse_name", "spouse_bday", "wedding_anniversary"];
+                familyFields.forEach((field) => {
+                  if (data[field] && existingDealer.owner_details.family_info[field] !== data[field]) {
+                    existingDealer.set(`owner_details.family_info.${field}`, data[field]);
+                    isUpdated = true;
+                  }
+                });
+
+                // ✅ Mark modified fields for Mongoose
+                if (isUpdated) {
+                  existingDealer.markModified("owner_details");
+                  existingDealer.markModified("owner_details.family_info");
+                  await existingDealer.save();
+                  console.log("✅ Updated Dealer:", existingDealer);
+                  updatedData.push(existingDealer);
+                } else {
+                  console.log("⚠️ No changes detected for:", data);
+                }
+              } else {
+                errors.push({ data, message: "Dealer code not found. Skipped update." });
+              }
+            })
+          );
+
+          fs.unlinkSync(filePath); // Delete CSV file after processing
+
+          res.status(200).json({
+            message: "CSV processed successfully",
+            updatedCount: updatedData.length,
+            errors,
+          });
+        } catch (err) {
+          console.error("❌ Error processing CSV:", err);
+          res.status(500).json({ message: "Internal server error." });
+        }
+      });
+  } catch (error) {
+    console.error("❌ Upload Error:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
 };
+
+
+// ============= /Update dealer by Admin or Super Admin================

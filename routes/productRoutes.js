@@ -13,7 +13,7 @@ router.put("/product/edit-product-by-admin/:id", adminOrSuperAdminAuth, editProd
 router.delete("/product/delete-product-by-admin/:id", adminOrSuperAdminAuth, deleteProductForAdmin);
 
 //get all products to edit order
-router.get("/product/get-all-products", getAllProducts);
+router.get("/product/get-all-products-for-admin", getAllProducts);
 
 
 // Rakshita 

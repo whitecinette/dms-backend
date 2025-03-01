@@ -1,45 +1,45 @@
 const Product = require("../../model/Product");
 const fs = require("fs");
 const csvParser = require("csv-parser");
-const { generateProductCode, cleanHeader, cleanCategory, determineSegment, generateIdentifier } = require("../../helpers/productHelper");
+const { generateProductCode, cleanHeader, cleanproduct_category, determinesegment, generateIdentifier } = require("../../helpers/productHelper");
 const { Readable } = require("stream");
+const stream = require("stream");
 
 // Add Product for Admin
 exports.addProductForAdmin = async (req, res) => {
   try {
-    const { Brand, Model, Price, Category, Status, Segment, Specs } = req.body;
+    const { brand, product_name, price, product_category, status, segment, } = req.body;
 
     // Check if all required fields are provided
-    if (!Brand || !Model || !Price || !Category || !Status) {
+    if (!brand || !product_name || !price || !product_category || !status) {
       return res
         .status(400)
         .json({ message: "All required fields must be provided." });
     }
 
-    // Check if a product with the same Brand & Model already exists
-    const existingProduct = await Product.findOne({ Brand, Model });
+    // Check if a product with the same brand & product_name already exists
+    const existingProduct = await Product.findOne({ brand, product_name });
 
     if (existingProduct) {
       return res
         .status(400)
         .json({
-          message: "A product with this Brand and Model already exists.",
+          message: "A product with this brand and product_name already exists.",
         });
     }
 
     // Generate a unique ProductCode
-    const productCode = await generateProductCode(Model);
-    const categoryLowerCase = Category.toLowerCase();
+    const productCode = await generateProductCode(product_name);
+    const product_categoryLowerCase = product_category.toLowerCase();
     // Create the new product
     const product = await Product.create({
-      Brand,
-      Model,
-      Price,
-      Category: categoryLowerCase,
-      Status,
-      Segment,
-      Specs,
-      ProductCode: productCode,
+      brand,
+      product_name,
+      price,
+      product_category: product_categoryLowerCase,
+      status,
+      segment,
+      model_code: productCode,
     });
 
     return res.status(200).json({
@@ -57,78 +57,94 @@ exports.addProductForAdmin = async (req, res) => {
 // Upload CSV for Admin
 exports.uploadBulkProducts = async (req, res) => {
   try {
+    console.log("File Received:", req.file);
+
     if (!req.file) {
       return res.status(400).json({ message: "CSV file is required." });
     }
 
     const results = [];
     const errors = [];
-    const filePath = req.file.path;
+    const requiredFields = ["brand", "product_name", "price", "product_category", "status"];
 
-    fs.createReadStream(filePath)
-      .pipe(
-        csvParser({ mapHeaders: ({ header }) => header.toLowerCase().trim() })
-      ) // Normalize headers
-      .on("data", async (row) => {
-        if (
-          !row.brand ||
-          !row.model ||
-          !row.price ||
-          !row.category ||
-          !row.status
-        ) {
-          errors.push({ row, message: "Missing required fields" });
-        } else {
-          const productCode = await generateProductCode(row.model);
-          results.push({
-            Brand: row.brand,
-            Model: row.model,
-            ProductCode: productCode,
-            Price: parseFloat(row.price),
-            Segment: row.segment || null,
-            Category: row.category.toLowerCase(),
-            Status: row.status.toLowerCase(),
-            Specs: row.specs || null,
-          });
+    const processRow = async (row) => {
+      try {
+        // Validate required fields
+        const missingFields = requiredFields.filter((field) => !row[field]);
+        if (missingFields.length > 0) {
+          errors.push({ row, message: `Missing required fields: ${missingFields.join(", ")}` });
+          return;
         }
-      })
+
+        // Normalize values
+        row.price = parseFloat(row.price);
+        row.status = row.status.toLowerCase();
+        row.product_category = row.product_category.toLowerCase();
+
+        // Validate status field
+        if (!["active", "inactive"].includes(row.status)) {
+          errors.push({ row, message: "Invalid status value. Allowed: active, inactive." });
+          return;
+        }
+
+        // Generate model_code only if it's missing
+        if (!row.model_code || row.model_code.trim() === "") {
+          row.model_code = await generateProductCode(row.product_name);
+        }
+
+        results.push(row);
+      } catch (error) {
+        console.error("Error processing row:", row, error);
+      }
+    };
+
+    // Convert buffer to a readable stream
+    const bufferStream = new stream.PassThrough();
+    bufferStream.end(req.file.buffer);
+
+    bufferStream
+      .pipe(csvParser({ mapHeaders: ({ header }) => header.toLowerCase().trim() }))
+      .on("data", async (row) => await processRow(row))
       .on("end", async () => {
         try {
           const insertedData = [];
           const updatedData = [];
 
           for (const data of results) {
-            existingProduct = await Product.findOne({
-              Brand: data.Brand,
-              Model: data.Model,
+            console.log("Processing Data:", data);
+            const { brand, product_name } = data;
+
+            let existingProduct = await Product.findOne({
+              brand: new RegExp(`^${brand}$`, "i"),
+              product_name: new RegExp(`^${product_name}$`, "i"),
             });
 
             if (existingProduct) {
-              existingProduct.Price = data.Price;
-              existingProduct.Segment = data.Segment;
-              existingProduct.Category = data.Category;
-              existingProduct.Status = data.Status;
-              existingProduct.Specs = data.Specs;
+              Object.assign(existingProduct, data);
 
-              await existingProduct.save();
-              updatedData.push(existingProduct);
+              if (existingProduct.isModified()) {
+                await existingProduct.save();
+                console.log("Updated Product:", existingProduct);
+                updatedData.push(existingProduct);
+              } else {
+                console.log("No changes detected for:", data);
+              }
             } else {
               const newProduct = new Product(data);
               await newProduct.save();
+              console.log("Inserted Product:", newProduct);
               insertedData.push(newProduct);
             }
           }
-
-          fs.unlinkSync(filePath);
 
           res.status(200).json({
             message: "CSV processed successfully",
             insertedCount: insertedData.length,
             updatedCount: updatedData.length,
-            errors: errors,
+            errors,
           });
         } catch (err) {
-          console.error("Error processing CSV:", err);
+          console.error("Error saving data:", err);
           res.status(500).json({ message: "Internal server error." });
         }
       });
@@ -146,7 +162,7 @@ exports.getAllProductsForAdmin = async (req, res) => {
     sort = "createdAt",
     order = "",
     search = "",
-    category = "",
+    product_category = "",
   } = req.query;
   try {
     const filters = {};
@@ -156,20 +172,19 @@ exports.getAllProductsForAdmin = async (req, res) => {
     if (search) {
       const searchRegex = new RegExp(search, "i"); // Create regex once
       filters.$or = [
-        { Brand: searchRegex },
-        { Model: searchRegex },
-        { Category: searchRegex },
-        { Status: searchRegex },
-        { Specs: searchRegex },
+        { brand: searchRegex },
+        { product_name: searchRegex },
+        { product_category: searchRegex },
+        { status: searchRegex },
       ];
 
       // If the search term is a number, add it to the price filter
       if (!isNaN(search)) {
-        filters.$or.push({ Price: Number(search) });
+        filters.$or.push({ price: Number(search) });
       }
     }
-    if (category) {
-      filters.Category = category;
+    if (product_category) {
+      filters.product_category = product_category;
     }
     const product = await Product.find(filters)
       .sort({ [sort]: sortOrder })
@@ -289,15 +304,15 @@ exports.uploadProductsThroughCSV = async (req, res) => {
           productEntry[header] = row[originalKey].trim();
         });
 
-        // Format product_category
-        productEntry.product_category = cleanCategory(productEntry.product_category);
+        // Format product_product_category
+        productEntry.product_product_category = cleanproduct_category(productEntry.product_product_category);
 
         // Assign segment based on price
-        productEntry.segment = determineSegment(Number(productEntry.price));
+        productEntry.segment = determinesegment(Number(productEntry.price));
 
-        // Generate model_code if missing
-        if (!productEntry.model_code) {
-          productEntry.model_code = generateIdentifier(productEntry.product_name);
+        // Generate product_name_code if missing
+        if (!productEntry.product_name_code) {
+          productEntry.product_name_code = generateIdentifier(productEntry.product_name);
         }
 
         // Generate product_code if missing
