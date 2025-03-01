@@ -900,3 +900,38 @@ exports.updateBulkDealers = async (req, res) => {
 
 
 // ============= /Update dealer by Admin or Super Admin================
+
+
+
+
+// Verify and Activate users in all cases
+
+exports.activateAllUsersInAllCases = async (req, res) => {
+  try {
+    // Update all users to set isVerified, status, and verify field if present
+    const updateQuery = {
+      isVerified: true,
+      status: "active",
+    };
+
+    // Check if the `verify` field exists in any document
+    const hasVerifyField = await User.findOne({ verify: { $exists: true } });
+
+    if (hasVerifyField) {
+      updateQuery.verify = true;
+    }
+
+    // Update all users
+    const result = await User.updateMany({}, { $set: updateQuery });
+
+    res.status(200).json({
+      success: true,
+      message: "All users activated successfully.",
+      modifiedCount: result.modifiedCount,
+    });
+
+  } catch (error) {
+    console.error("Error in activateAllUsersInAllCases:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
