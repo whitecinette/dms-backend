@@ -9,7 +9,7 @@ router.post('/punch-in', upload_img.single('punchInImage'), userAuth, punchIn);
 router.post('/punch-out', upload_img.single('punchOutImage'), userAuth, punchOut);
 
 
-router.get('/get-attandance/:employeeId', getAttendanceByEmployee);
+router.get('/get-attandance', userAuth, getAttendanceByEmployee);
 router.get('/get-all-attendance', getAttendance);
 
 // leave
