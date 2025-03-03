@@ -41,9 +41,6 @@ exports.addBeatMapping = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error", error: error.message });
     }
 };
-
-
-
 exports.getBeatMapping = async (req, res) =>{
     try {
         // Fetch all beat mapping data from MongoDB

@@ -3,18 +3,29 @@ const ActorCode = require("../../model/ActorCode");
 const moment = require("moment");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
-const getDistance = require("../../helpers/attendanceHelper")
+const getDistance = require("../../helpers/attendanceHelper");
 
-const cloudinary =require("../../config/cloudinary")
+const cloudinary = require("../../config/cloudinary");
 // punch in
 
 exports.punchIn = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
-    const { code } = req.user; // Get user code from JWT token
+    const { code } = req.user; // Extract user code from token
 
     if (!code) {
-      return res.status(400).json({ message: "User code is missing in token." });
+      return res
+        .status(400)
+        .json({ message: "User code is missing in token." });
+    }
+
+ 
+
+    // Validate lat-long
+    if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid latitude or longitude." });
     }
 
     // Get current date for attendance tracking
@@ -22,43 +33,71 @@ exports.punchIn = async (req, res) => {
     const punchInTime = moment().toDate();
 
     // Check if user already punched in today
-    const existingAttendance = await Attendance.findOne({ code, date: formattedDate });
-    if (existingAttendance) {
-      return res.status(400).json({ message: "You have already punched in for today.", attendance: existingAttendance });
-    }
-
-    // Fetch hierarchy entry for the user
-    const userHierarchy = await HierarchyEntries.findOne({
-      $or: [{ tse: code },  { asm: code }], // Include all possible positions
+    const existingAttendance = await Attendance.findOne({
+      code,
+      date: formattedDate,
     });
-console.log("user heirarchy punch in :", userHierarchy)
-    if (!userHierarchy) {
-      return res.status(404).json({ message: "No hierarchy data found for this user." });
+    if (existingAttendance) {
+      return res.status(400).json({
+        message: "You have already punched in for today.",
+        attendance: existingAttendance,
+      });
     }
-    // console.log(`User ${code} belongs to hierarchy:`, userHierarchy);
 
+    // Fetch hierarchy entries for the user
+    const userHierarchies = await HierarchyEntries.find({
+      $or: [{ tse: code }, { asm: code }, { dealers: code }],
+    });
 
-    // Extract all hierarchy levels dynamically
-    const hierarchyKeys = Object.keys(userHierarchy.toObject()).filter(
-      (key) => !["hierarchy_name"].includes(key)
-    );
-
-    const allCodes = hierarchyKeys.map((key) => userHierarchy[key]).flat(); // Get all related employee codes
-
-    if (!allCodes.length) {
-      return res.status(404).json({ message: "No related employees found in the hierarchy." });
+    if (!userHierarchies || userHierarchies.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No hierarchy data found for this user." });
     }
-    // console.log(`Related employee codes for user ${code}:`, allCodes);
+
+    console.log("User Hierarchies:", userHierarchies);
+
+    // Extract all related employee codes from hierarchy
+    let allCodes = [];
+
+    userHierarchies.forEach((hierarchy) => {
+  
+
+      // Extract values from hierarchy
+      const fields = ["smd", "asm", "mdd", "tse", "dealer"]; // Ensure all roles are considered
+
+      fields.forEach((key) => {
+        if (hierarchy[key]) {
+          // Ensure the field exists
+          allCodes.push(hierarchy[key]); // Push value (string) directly
+        }
+      });
+    });
+
+    // Remove duplicates
+    allCodes = [...new Set(allCodes)];
+
+
+
+    if (allCodes.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No related employees found in the hierarchy." });
+    }
 
     // Find all users related to extracted codes
     const relatedUsers = await User.find(
       { code: { $in: allCodes } },
       { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
     );
+
     if (!relatedUsers.length) {
-      console.log("related user: " , relatedUsers);
-      return res.status(404).json({ message: "No related users with location data found." });
+      return res
+        .status(404)
+        .json({ message: "No related users with location data found." });
     }
+
+
 
     // Convert user coordinates
     const userLat = parseFloat(latitude);
@@ -71,7 +110,8 @@ console.log("user heirarchy punch in :", userHierarchy)
       const relLat = parseFloat(relUser.latitude);
       const relLon = parseFloat(relUser.longitude);
 
-      if (isNaN(relLat) || isNaN(relLon) || (relLat === 0 && relLon === 0)) return;
+      if (isNaN(relLat) || isNaN(relLon) || (relLat === 0 && relLon === 0))
+        return;
 
       const distance = getDistance(userLat, userLon, relLat, relLon);
       if (distance < minDistance) {
@@ -80,23 +120,31 @@ console.log("user heirarchy punch in :", userHierarchy)
       }
     });
 
+    console.log("Nearest User:", nearestUser, "Distance:", minDistance);
+
     if (!nearestUser || minDistance > 100) {
       return res.status(400).json({
-        message: "You are too far from the nearest hierarchy member to punch in.",
+        message:
+          "You are too far from the nearest hierarchy location to punch in.",
         nearestUser,
         distance: minDistance,
       });
     }
 
-     // Upload image to Cloudinary if provided
-if (!req.file) {
-  return res.status(400).json({
-    success: false,
-    message: "Punch in image is required.",
-  });
-}
+    // Validate image for Cloudinary upload
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Punch in image is required.",
+      });
+    }
 
-    const result = await cloudinary.uploader.upload(req.file.path, { folder: 'gpunchInImage', resource_type: 'image' });
+    // Upload image to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "gpunchInImage",
+      resource_type: "image",
+    });
+
     const punchInImage = result.secure_url;
 
     // Save punch-in record
@@ -113,135 +161,171 @@ if (!req.file) {
 
     await attendance.save();
 
-    res.status(201).json({ message: "Punch-in recorded successfully", attendance });
+    res
+      .status(201)
+      .json({ message: "Punch-in recorded successfully", attendance });
   } catch (error) {
-    res.status(500).json({ message: "Error recording punch-in", error: error.message });
+    console.error("Error in punch-in:", error);
+    res
+      .status(500)
+      .json({ message: "Error recording punch-in", error: error.message });
   }
 };
 // punch out
 exports.punchOut = async (req, res) => {
   try {
-      const { latitude, longitude } = req.body;
-      const { code } = req.user;  // Extract user code from token
+    const { latitude, longitude } = req.body;
+    const { code } = req.user; // Extract user code from token
 
-      // Get current date dynamically
-      const formattedDate = moment().startOf("day").toDate();
-      const punchOutTime = moment().toDate();
+    if (!code) {
+      return res
+        .status(400)
+        .json({ message: "User code is missing in token." });
+    }
 
-      // Find existing attendance record for today
-      const attendance = await Attendance.findOne({ code, date: formattedDate });
-      if (!attendance) {
-          return res.status(400).json({ message: "You have not punched in yet for today." });
-      }
+    console.log("User Punch-Out Lat:", latitude, "Long:", longitude);
 
-      if (attendance.punchOut) {
-          return res.status(400).json({ message: "You have already punched out today." });
-      }
+    // Validate lat-long
+    if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid latitude or longitude." });
+    }
 
-      // Fetch hierarchy entry for the user
-      const userHierarchy = await HierarchyEntries.findOne({
-          $or: [{ tse: code }, { asm: code }], // Include all hierarchy levels
+    // Get current date for attendance tracking
+    const formattedDate = moment().startOf("day").toDate();
+    const punchOutTime = moment().toDate();
+
+    // Check if user has already punched in today
+    const attendance = await Attendance.findOne({ code, date: formattedDate });
+    if (!attendance) {
+      return res.status(400).json({
+        message: "You have not punched in today.",
       });
-console.log("user heirarchy:", userHierarchy)
-      if (!userHierarchy) {
-          return res.status(404).json({ message: "No hierarchy data found for this user." });
-      }
+    }
 
-      // Extract all hierarchy levels dynamically
-      const hierarchyKeys = Object.keys(userHierarchy.toObject()).filter(
-          (key) => !["hierarchy_name"].includes(key)
-      );
-
-      const allCodes = hierarchyKeys.map((key) => userHierarchy[key]).flat();
-
-      if (!allCodes.length) {
-          return res.status(404).json({ message: "No related employees found in the hierarchy." });
-      }
-
-      // Find all users related to extracted codes
-      const relatedUsers = await User.find(
-          { code: { $in: allCodes } },
-          { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
-      );
-console.log("all related user of the heirarchy :", relatedUsers)
-      if (!relatedUsers.length) {
-          return res.status(404).json({ message: "No related users with location data found." });
-      }
-
-      // Convert user coordinates
-      const userLat = parseFloat(latitude);
-      const userLon = parseFloat(longitude);
-
-      let nearestUser = null;
-      let minDistance = Infinity;
-
-      relatedUsers.forEach((relUser) => {
-          const relLat = parseFloat(relUser.latitude);
-          const relLon = parseFloat(relUser.longitude);
-
-          if (isNaN(relLat) || isNaN(relLon) || (relLat === 0 && relLon === 0)) return;
-
-          const distance = getDistance(userLat, userLon, relLat, relLon);
-          if (distance < minDistance) {
-              minDistance = distance;
-              nearestUser = relUser;
-          }
+    // Check if user already punched out
+    if (attendance.punchOut) {
+      return res.status(400).json({
+        message: "You have already punched out for today.",
+        attendance,
       });
+    }
 
-      if (!nearestUser || minDistance > 100) {
-          return res.status(400).json({
-              message: "You are too far from the nearest hierarchy member to punch out.",
-              nearestUser,
-              distance: minDistance,
-          });
-      }
+    // Fetch hierarchy entries for the user
+    const userHierarchies = await HierarchyEntries.find({
+      $or: [{ tse: code }, { asm: code }, { dealers: code }],
+    });
 
-      // Ensure punch-out image is provided
-      if (!req.file) {
-          return res.status(400).json({
-              success: false,
-              message: "Punch out image is required.",
-          });
-      }
+    if (!userHierarchies || userHierarchies.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No hierarchy data found for this user." });
+    }
 
-      // Upload punch-out image to Cloudinary
-      const result = await cloudinary.uploader.upload(req.file.path, {
-          folder: 'gpunchOutImage',
-          resource_type: 'image',
+    console.log("User Hierarchies:", userHierarchies);
+
+    // Extract all related employee codes from hierarchy
+    let allCodes = [];
+
+    userHierarchies.forEach((hierarchy) => {
+      const fields = ["smd", "asm", "mdd", "tse", "dealer"];
+      fields.forEach((key) => {
+        if (hierarchy[key]) {
+          allCodes.push(hierarchy[key]);
+        }
       });
+    });
 
-      const punchOutImage = result.secure_url; // ✅ Get punch-out image URL
+    // Remove duplicates
+    allCodes = [...new Set(allCodes)];
 
-      // Calculate hours worked
-      const hoursWorked = moment(punchOutTime).diff(moment(attendance.punchIn), 'hours', true);
+    if (allCodes.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No related employees found in the hierarchy." });
+    }
 
-      // Update punch-out record
-      attendance.punchOut = punchOutTime;
-      attendance.punchOutImage = punchOutImage; 
-      attendance.status = "Present";
-      attendance.latitude = latitude;
-      attendance.longitude = longitude;
-      attendance.hoursWorked = hoursWorked;
-      // attendance.nearestHierarchyCode = nearestUser.code;
+    // Find all users related to extracted codes
+    const relatedUsers = await User.find(
+      { code: { $in: allCodes } },
+      { code: 1, name: 1, longitude: 1, latitude: 1, _id: 0 }
+    );
 
-      await attendance.save();
+    if (!relatedUsers.length) {
+      return res
+        .status(404)
+        .json({ message: "No related users with location data found." });
+    }
 
-      res.status(200).json({
-          message: "Punch-out recorded successfully",
-          attendance
+    // Convert user coordinates
+    const userLat = parseFloat(latitude);
+    const userLon = parseFloat(longitude);
+
+    let nearestUser = null;
+    let minDistance = Infinity;
+
+    relatedUsers.forEach((relUser) => {
+      const relLat = parseFloat(relUser.latitude);
+      const relLon = parseFloat(relUser.longitude);
+
+      if (isNaN(relLat) || isNaN(relLon) || (relLat === 0 && relLon === 0))
+        return;
+
+      const distance = getDistance(userLat, userLon, relLat, relLon);
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestUser = relUser;
+      }
+    });
+
+    if (!nearestUser || minDistance > 100) {
+      return res.status(400).json({
+        message:
+          "You are too far from the nearest hierarchy location to punch out.",
+        nearestUser,
+        distance: minDistance,
       });
+    }
+
+    // Validate image for Cloudinary upload
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Punch out image is required.",
+      });
+    }
+
+    // Upload image to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "gpunchOutImage",
+      resource_type: "image",
+    });
+
+    const punchOutImage = result.secure_url;
+
+    // Update punch-out record
+    attendance.punchOut = punchOutTime;
+    attendance.punchOutImage = punchOutImage;
+    attendance.status = "Present";
+    await attendance.save();
+
+    res
+      .status(201)
+      .json({ message: "Punch-out recorded successfully", attendance });
   } catch (error) {
-      res.status(500).json({ message: "Error recording punch-out", error: error.message });
-      console.log("Error:", error);
+    console.error("Error in punch-out:", error);
+    res
+      .status(500)
+      .json({ message: "Error recording punch-out", error: error.message });
   }
 };
-
 
 exports.getAttendance = async (req, res) => {
   try {
     // Fetch all attendance records for the user
     const attendanceRecords = await Attendance.find();
-    
+
     if (!attendanceRecords.length) {
       return res.status(404).json({ message: "No attendance records found." });
     }
@@ -251,22 +335,25 @@ exports.getAttendance = async (req, res) => {
       attendance: attendanceRecords,
     });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching attendance", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching attendance", error: error.message });
   }
 };
-
 
 exports.getAttendanceByEmployee = async (req, res) => {
   try {
     const { code } = req.user; // Extract user code from JWT token
-    
+
     if (!code) {
-      return res.status(400).json({ message: "User code is missing in token." });
+      return res
+        .status(400)
+        .json({ message: "User code is missing in token." });
     }
 
     // Fetch all attendance records for the user
     const attendanceRecords = await Attendance.find({ code });
-    
+
     if (!attendanceRecords.length) {
       return res.status(404).json({ message: "No attendance records found." });
     }
@@ -276,7 +363,9 @@ exports.getAttendanceByEmployee = async (req, res) => {
       attendance: attendanceRecords,
     });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching attendance", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching attendance", error: error.message });
   }
 };
 
@@ -446,7 +535,6 @@ exports.getAllEmpLeaves = async (req, res) => {
     });
   }
 };
-
 
 // exports.getDealersByEmployeeCode = async (req, res) => {
 //     try {
