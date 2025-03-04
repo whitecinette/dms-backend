@@ -3,8 +3,8 @@ const mongoose = require('mongoose');
 const DealerScheduleSchema = new mongoose.Schema({
     code: { type: String, required: true },
     name: { type: String, required: true },
-    lat: { type: mongoose.Schema.Types.Decimal128, required: true },
-    long: { type: mongoose.Schema.Types.Decimal128, required: true },
+    latitude: { type: mongoose.Schema.Types.Decimal128, required: true },
+    longitude: { type: mongoose.Schema.Types.Decimal128, required: true },
     status: { type: String, enum: ['done', 'pending'], required: true },
     distance: { type: String, default: null }  // ✅ NEW FIELD to store distance from employee
 });
