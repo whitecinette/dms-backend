@@ -162,6 +162,8 @@ exports.getSalesReportForUser = async (req, res) => {
     filter_type = filter_type || "value"; // Default to 'value' if not provided
     report_type = report_type || "segment"; // Default to segment-wise report
 
+    console.log("Filters: ", start_date, end_date, filter_type, report_type);
+
     if (!start_date || !end_date || !code) {
       return res.status(400).json({ success: false, message: "Start date, end date, and code are required." });
     }
@@ -413,6 +415,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
   try {
     let {code} = req.user;
     let { filter_type, start_date, end_date } = req.body;
+    console.log("Filetrs: ", filter_type, start_date, end_date);
     filter_type = filter_type || "value"; // Default to 'value'
 
     if (!code || !start_date || !end_date) {
