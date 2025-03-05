@@ -180,8 +180,6 @@ exports.editUsers = async (req, res) => {
                 for (const subKey in allowedUpdates[key]) {
                     console.log("subkey: ", subKey)
                     flattenedUpdates[`${key}.${subKey}`] = allowedUpdates[key][subKey];
-                    console.log("Flat", flattenedUpdates)
-                    console.log("Some", allowedUpdates[key][subKey])
                 }
             } else {
                 flattenedUpdates[key] = allowedUpdates[key];
@@ -203,3 +201,21 @@ exports.editUsers = async (req, res) => {
     }
 };
 
+exports.getUsersDetails = async (req, res) => {
+    try {
+        const { code } = req.user; // Extract code from token
+
+        // Find user by code
+        const user = await User.findOne({ code }).select('-password'); // Exclude password for security
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.status(200).json({ message: 'User details fetched successfully', user });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
