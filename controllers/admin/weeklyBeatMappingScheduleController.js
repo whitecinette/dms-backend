@@ -1,5 +1,10 @@
     const getDistance = require("../../helpers/attendanceHelper");
+    const csvParser = require("csv-parser");
+const { Readable } = require("stream");
+const { getCurrentWeekDates } = require('../../helpers/dateHelpers');
     const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule");
+const User = require("../../model/User");
+const HierarchyEntries = require("../../model/HierarchyEntries");
 
 // add weekly beat mapping
     exports.addWeeklyBeatMappingSchedule = async (req, res) => {
@@ -237,3 +242,91 @@
     };
 
 // Add beat mapping using csv
+
+exports.addWeeklyBeatMappingUsingCSV = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: "No file uploaded" });
+        }
+
+        let results = [];
+        const stream = new Readable();
+        stream.push(req.file.buffer);
+        stream.push(null);
+
+        stream.pipe(csvParser())
+            .on("data", (data) => {
+                results.push(data);
+            })
+            .on("end", async () => {
+                try {
+                    let schedules = [];
+
+                    for (let row of results) {
+                        const asmCode = row["code"];
+                        console.log("asmCode:", asmCode);
+                        const dealerCodes = row["Dealer Codes(All)"] ? row["Dealer Codes(All)"].split(" ") : [];
+
+                        if (!asmCode) continue;
+
+                        // Fetch dealer details from User collection
+                        const dealerRecords = await User.find({ code: { $in: dealerCodes }, role: "dealer" });
+                        let schedule = {
+                            Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: []
+                        };
+
+                        for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]) {
+                            if (row[day]) {
+                                const dayDealerCodes = row[day].split(" ").filter(code => code);
+                                for (const dealerCode of dayDealerCodes) {
+                                    const dealer = dealerRecords.find(d => d.code === dealerCode);
+                                    if (dealer) {
+                                        schedule[day.substring(0, 3)].push({
+                                            code: dealerCode,
+                                            name: dealer.name,
+                                            latitude: dealer.latitude || 0.0,
+                                            longitude: dealer.longitude || 0.0,
+                                            status: "pending",
+                                            distance: null
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        let { startDate, endDate } = req.body;
+                        if (!startDate || !endDate) {
+                            ({ startDate, endDate } = getCurrentWeekDates());
+                        }
+
+                        let total = Object.values(schedule).reduce((sum, dealers) => sum + dealers.length, 0);
+
+                        schedules.push({
+                            startDate: new Date(startDate),
+                            endDate: new Date(endDate),
+                            code: asmCode,
+                            schedule,
+                            total,
+                            done: 0,
+                            pending: total
+                        });
+                    }
+
+                    await WeeklyBeatMappingSchedule.insertMany(schedules);
+
+                    return res.status(201).json({
+                        message: "Weekly Beat Mapping Schedules added successfully.",
+                        totalSchedules: schedules.length
+                    });
+
+                } catch (error) {
+                    console.error("Error processing CSV:", error);
+                    return res.status(500).json({ error: "Internal server error while processing CSV" });
+                }
+            });
+
+    } catch (error) {
+        console.error("Error handling CSV upload:", error);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};

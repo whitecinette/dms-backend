@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const User = require("../../model/User");
 const jwt = require("jsonwebtoken");
 const { sendNotificationToAdmins } = require("../../helpers/notificationHelper");
+const { getAdditionalFields } = require("../../helpers/userHelpers");
 
 exports.loginUser = async (req, res) => {
     try {
@@ -143,13 +144,62 @@ exports.editProfileForUser = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
-
-
-
-
-
 // Helper function to validate email format
 function validateEmail(email) {
     const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     return re.test(email);
 }
+
+
+// edit all user according to thier role
+exports.editUsers = async (req, res) => {
+    try {
+        const { updateData } = req.body;
+        const { code } = req.user; // Extracted from token
+
+        // Find user by code to get their role
+        let user = await User.findOne({ code });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const { role } = user; // Fetch the user's role from the database
+
+        // Get allowed fields dynamically based on role
+        const allowedUpdates = getAdditionalFields(role, updateData);
+
+        if (Object.keys(allowedUpdates).length === 0) {
+            return res.status(400).json({ message: 'No valid fields to update' });
+        }
+
+        // Convert nested objects to dot notation
+        const flattenedUpdates = {};
+        for (const key in allowedUpdates) {
+            console.log("Key: ", key)
+            if (typeof allowedUpdates[key] === "object" && allowedUpdates[key] !== null) {
+                for (const subKey in allowedUpdates[key]) {
+                    console.log("subkey: ", subKey)
+                    flattenedUpdates[`${key}.${subKey}`] = allowedUpdates[key][subKey];
+                    console.log("Flat", flattenedUpdates)
+                    console.log("Some", allowedUpdates[key][subKey])
+                }
+            } else {
+                flattenedUpdates[key] = allowedUpdates[key];
+            }
+        }
+
+        // Update user in DB
+        user = await User.findOneAndUpdate(
+            { code },
+            { $set: flattenedUpdates },
+            { new: true }
+        );
+
+        res.status(200).json({ message: 'Profile updated successfully', user });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
