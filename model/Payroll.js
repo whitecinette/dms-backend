@@ -18,7 +18,8 @@ const payrollSchema = new mongoose.Schema(
     netSalary: { type: Number },
     paymentDate: { type: Date, default: Date.now },
   },
-  { timestamps: true }
+  { strict: false, timestamps: true }
 );
 
 module.exports = mongoose.model("Payroll", payrollSchema);
+ 
