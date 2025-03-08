@@ -79,15 +79,12 @@ exports.calculateSalary = async (req, res) => {
       });
 
       const daysInMonth = new Date(year, month, 0).getDate(); // Total days in the month
-      const totalDays = attendanceRecords.filter(record => record.status !== 'Pending').length || daysInMonth;
+      const absentDays = attendanceRecords.filter(record => record.status === 'Absent').length;
+      const halfDays = attendanceRecords.filter(record => record.status === 'Half Day').length;
 
-      const absentDays = attendanceRecords.filter((record) => record.status === 'Absent').length;
-      const halfDays = attendanceRecords.filter((record) => record.status === 'Half Day').length;
-console.log("absent:", absentDays);
-console.log("halfDays:",halfDays)
-      // Calculate salary per day based on total month days
+      // Calculate salary per day
       const baseSalary = payroll.salaryDetails.baseSalary;
-      const salaryPerDay = baseSalary / daysInMonth; 
+      const salaryPerDay = baseSalary / daysInMonth;
 
       // Calculate deductions
       let totalDeductions = 0;
@@ -110,21 +107,24 @@ console.log("halfDays:",halfDays)
       // Final salary calculation
       const netSalary = Math.round(baseSalary + totalAdditions - totalDeductions - attendanceDeductions);
 
+      // Update Payroll model with calculated salary
+      payroll.totalSalary = netSalary;
+      await payroll.save();
+
       res.status(200).json({
-          message: 'Salary calculated successfully',
-          data: {
-              baseSalary,
-              totalAdditions,
-              totalDeductions,
-              attendanceDeductions,
-              netSalary
+          message: 'Salary calculated and saved successfully',
+          data:{
+            attendanceDeductions,
+            payroll
           }
       });
+
   } catch (error) {
-      console.error('Error calculating salary:', error);
+      console.error('Error calculating and saving salary:', error);
       res.status(500).json({ message: 'Internal server error' });
   }
 };
+
 
 
 

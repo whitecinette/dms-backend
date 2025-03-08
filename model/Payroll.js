@@ -28,14 +28,14 @@ const PayrollSchema = new mongoose.Schema(
           {
             name: { type: String, required: true },
             type: { type: String, enum: ["addition", "deduction"], required: true },
-            value: { type: Number, required: false },
+            amount: { type: Number, required: true },
           },
         ],
         default: [],  
       }
       
     },
-    calculatedSalary: { type: Number },
+    totalSalary: { type: Number },
     payrollDate: { type: Date, default: Date.now },
   },
   { timestamps: true }
