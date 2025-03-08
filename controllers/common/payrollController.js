@@ -3,55 +3,133 @@ const Payroll = require("../../model/Payroll");
 const Attendance = require("../../model/Attendance")
 
 
+// Controller to Add Salary
 exports.addSalary = async (req, res) => {
+  const { code, salaryDetails, deductionPreferences } = req.body;
+
+  // Validation
+  if (!code || !salaryDetails || !salaryDetails.baseSalary) {
+      return res.status(400).json({ message: 'Employee code and base salary are required.' });
+  }
+
   try {
-    const { actorCode, basicSalary, bonuses = 0, deductions = 0 } = req.body;
+      // Check if payroll entry already exists for this employee
+      const existingPayroll = await Payroll.findOne({ code });
+      if (existingPayroll) {
+          return res.status(400).json({ message: 'Payroll entry already exists for this employee.' });
+      }
 
-    // Validate inputs
-    if (!actorCode || !basicSalary) {
-      return res.status(400).json({ message: "Actor code and basic salary are required" });
-    }
+      // Handle Deduction Preferences from HR
+      const defaultDeductions = [
+          { 
+              name: 'PF', 
+              type: 'percentage', 
+              value: deductionPreferences?.pfPercentage || 12, // PF dynamic percentage
+              isActive: deductionPreferences?.pfDeduct || false 
+          },
+          { name: 'ESI', type: 'percentage', value: 1.75, isActive: deductionPreferences?.esiDeduct || false },
+          { name: 'Professional Tax', type: 'fixed', value: 200, isActive: deductionPreferences?.ptDeduct || false }
+      ];
 
-    // Find actor by code
-    const actor = await ActorCode.findOne({ code: actorCode });
-    if (!actor) {
-      return res.status(404).json({ message: "Actor not found" });
-    }
+      // Combine provided deductions with defaults
+      salaryDetails.deductions = salaryDetails.deductions || [];
+      salaryDetails.deductions = [...salaryDetails.deductions, ...defaultDeductions];
 
-    // Calculate Tax (Example: 10% of Basic Salary)
-    const taxAmount = basicSalary * 0.1;
-    const netSalary = basicSalary + bonuses - deductions - taxAmount;
+      // Remove overtime details since it's not required here
+      delete salaryDetails.overtimeHours;
+      delete salaryDetails.overtimeRate;
 
-    // Create Payroll Record
-    const payroll = new Payroll({
-      actorId: actor._id,
-      actorCode: actor.code,
-      actorName: actor.name,
-      position: actor.position,
-      role: actor.role,
-      basicSalary,
-      bonuses,
-      deductions,
-      taxAmount,
-      netSalary,
-      paymentDate: new Date(),
-    });
+      // Create new Payroll entry
+      const newPayroll = new Payroll({
+          code,
+          salaryDetails,
+      });
 
-    await payroll.save();
-
-    res.status(201).json({
-      message: "Salary processed and saved successfully",
-      data: payroll,
-    });
+      await newPayroll.save();
+      res.status(201).json({ message: 'Salary added successfully', data: newPayroll });
 
   } catch (error) {
-    console.error("Salary Processing Error:", error);
-    res.status(500).json({
-      message: "Error processing salary",
-      error: error.message || error.toString(),
-    });
+      console.error('Error adding salary:', error);
+      res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.calculateSalary = async (req, res) => {
+  const { code, month, year } = req.body;
+
+  // Validation
+  if (!code || !month || !year) {
+      return res.status(400).json({ message: 'Employee code, month, and year are required.' });
+  }
+
+  try {
+      // Fetch payroll details
+      const payroll = await Payroll.findOne({ code });
+      if (!payroll) {
+          return res.status(404).json({ message: 'Payroll entry not found for this employee.' });
+      }
+
+      // Fetch attendance data for the specified month and year
+      const attendanceRecords = await Attendance.find({
+          code,
+          date: {
+              $gte: new Date(`${year}-${month}-01`),
+              $lt: new Date(`${year}-${month}-31`)
+          }
+      });
+
+      const daysInMonth = new Date(year, month, 0).getDate(); // Total days in the month
+      const totalDays = attendanceRecords.filter(record => record.status !== 'Pending').length || daysInMonth;
+
+      const absentDays = attendanceRecords.filter((record) => record.status === 'Absent').length;
+      const halfDays = attendanceRecords.filter((record) => record.status === 'Half Day').length;
+console.log("absent:", absentDays);
+console.log("halfDays:",halfDays)
+      // Calculate salary per day based on total month days
+      const baseSalary = payroll.salaryDetails.baseSalary;
+      const salaryPerDay = baseSalary / daysInMonth; 
+
+      // Calculate deductions
+      let totalDeductions = 0;
+      payroll.salaryDetails.deductions.forEach(deduction => {
+          if (deduction.isActive) {
+              totalDeductions += deduction.type === 'percentage'
+                  ? (baseSalary * deduction.value) / 100
+                  : deduction.value;
+          }
+      });
+
+      // Calculate attendance-based salary deductions
+      const attendanceDeductions = (absentDays * salaryPerDay) + (halfDays * salaryPerDay * 0.5);
+
+      // Calculate additions (e.g., incentives)
+      const totalAdditions = payroll.salaryDetails.bonuses
+          ? payroll.salaryDetails.bonuses.reduce((sum, bonus) => sum + bonus.amount, 0)
+          : 0;
+
+      // Final salary calculation
+      const netSalary = Math.round(baseSalary + totalAdditions - totalDeductions - attendanceDeductions);
+
+      res.status(200).json({
+          message: 'Salary calculated successfully',
+          data: {
+              baseSalary,
+              totalAdditions,
+              totalDeductions,
+              attendanceDeductions,
+              netSalary
+          }
+      });
+  } catch (error) {
+      console.error('Error calculating salary:', error);
+      res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+
+
+
 
 
 exports.getAllSalaries = async (req, res) => {

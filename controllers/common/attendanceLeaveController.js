@@ -252,12 +252,12 @@ exports.getAttendance = async (req, res) => {
   try {
     let { startDate, endDate, page, limit } = req.query;
 
-    // Set default values for pagination
+    // Pagination defaults
     page = parseInt(page) || 1;
     limit = parseInt(limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Construct the query
+    // Construct query
     let query = {};
 
     if (startDate || endDate) {
@@ -266,17 +266,27 @@ exports.getAttendance = async (req, res) => {
       if (endDate) query.date.$lte = moment(endDate).endOf("day").toDate();
     }
 
-    // Fetch all attendance records with pagination
+    // Fetch attendance records and include the user's name
     const attendanceRecords = await Attendance.find(query)
-      .sort({ date: -1 }) // Sort by latest attendance first
+      .sort({ date: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean(); // .lean() improves performance when no mongoose methods are needed
 
-    if (!attendanceRecords.length) {
-      return res.status(404).json({ message: "No attendance records found." });
-    }
+    // Extract user names based on `code`
+    const codes = attendanceRecords.map(record => record.code);
+    const actorDetails = await ActorCode.find({ code: { $in: codes } }).lean();
 
-    // Get total records for pagination
+    // Map names to attendance records
+    const attendanceWithNames = attendanceRecords.map(record => {
+      const actor = actorDetails.find(actor => actor.code === record.code);
+      return {
+        ...record,
+        name: actor ? actor.name : "Unknown",
+      };
+    });
+
+    // Total records for pagination
     const totalRecords = await Attendance.countDocuments(query);
     const totalPages = Math.ceil(totalRecords / limit);
 
@@ -285,7 +295,7 @@ exports.getAttendance = async (req, res) => {
       totalRecords,
       totalPages,
       currentPage: page,
-      attendance: attendanceRecords,
+      attendance: attendanceWithNames,
     });
   } catch (error) {
     console.error("Error fetching attendance:", error);
