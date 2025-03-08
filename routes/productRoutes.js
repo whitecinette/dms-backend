@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin, editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV } = require("../controllers/admin/productController");
+const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin, editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById } = require("../controllers/admin/productController");
 const {adminOrSuperAdminAuth} = require("../middlewares/authmiddlewares");
 const { upload } = require('../services/fileUpload');
 // const upload = require("../helpers/multerHelper");
@@ -18,5 +18,9 @@ router.get("/product/get-all-products-for-admin", getAllProducts);
 
 // Rakshita 
 router.post("/products/upload-csv", upload.single("file"), uploadProductsThroughCSV);
+
+// h.D.s
+router.get("/product/by-id/:productId", getProductById);
+
 
 module.exports = router;
