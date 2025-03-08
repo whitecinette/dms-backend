@@ -935,3 +935,25 @@ exports.activateAllUsersInAllCases = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+///get all the dealer for admin
+exports.getAllDealerForAdmin = async (req, res) => {
+    try {
+      const dealers = await User.find({ role: "dealer" }); // Fetch all dealers
+  
+      if (!dealers || dealers.length === 0) {
+        return res.status(400).json({ message: "No dealers found" });
+      }
+  
+      // Map to extract only the name and code of each dealer
+      const dealerList = dealers.map((dealer) => ({
+        dealer_name: dealer.name,
+        dealer_code: dealer.code,
+      }));
+  
+      return res.status(200).json(dealerList); // Return the list of dealers
+    } catch (error) {
+      console.log(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  };

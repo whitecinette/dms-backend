@@ -1,14 +1,18 @@
 const express = require('express');
 const multer = require('multer');
 const router = express.Router();
-const { uploadHierarchyEntries } = require('../controllers/admin/hierarchyEntriesController');
+const { uploadHierarchyEntries, getHierarchEntriesForAdmin, editHierarchEntriesByAdmin, deleteHierarchEntriesByAdmin, addHierarchEntriesByAdmin} = require('../controllers/admin/hierarchyEntriesController');
 const { upload } = require('../services/fileUpload');
 const { getSubordinatesByCode, getSubordinatesForUser } = require('../controllers/common/hierarchyEntriesController');
-const { userAuth } = require('../middlewares/authmiddlewares');
+const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 
 // admin 
 // API Route for CSV Upload
 router.post('/hierarchy-entries/upload', upload.single('file'), uploadHierarchyEntries);
+router.get("/hierarchy-entries/get-hierarchy-entries-for-admin", getHierarchEntriesForAdmin)
+router.put("/hierarchy-entries/edit-hierarchy-entries-by-admin/:id", adminOrSuperAdminAuth, editHierarchEntriesByAdmin)
+router.delete("/hierarchy-entries/delete-hierarchy-entries-by-admin/:id", adminOrSuperAdminAuth, deleteHierarchEntriesByAdmin)
+router.post("/hierarchy-entries/add-hierarchy-entries-by-admin", adminOrSuperAdminAuth, addHierarchEntriesByAdmin)
 
 // common 
 router.get('/user/get-subordinates-by-code', getSubordinatesByCode);

@@ -13,11 +13,9 @@ exports.addWeeklyBeatMappingSchedule = async (req, res) => {
 
     // Validate input fields
     if (!code || !startDate || !endDate || !schedule) {
-      return res
-        .status(400)
-        .json({
-          error: "code, startDate, endDate, and schedule are required fields.",
-        });
+      return res.status(400).json({
+        error: "code, startDate, endDate, and schedule are required fields.",
+      });
     }
 
     // Count total dealers in the schedule
@@ -101,12 +99,9 @@ exports.getWeeklyBeatMappingSchedule = async (req, res) => {
     });
     // console.log("schedule dealer:" ,schedules)
     if (!schedules || schedules.length === 0) {
-      return res
-        .status(404)
-        .json({
-          error:
-            "No schedules found for this user within the given date range.",
-        });
+      return res.status(404).json({
+        error: "No schedules found for this user within the given date range.",
+      });
     }
 
     return res.status(200).json({
@@ -190,12 +185,10 @@ exports.updateWeeklyBeatMappingStatusWithProximity = async (req, res) => {
     const allowedRadius = 100; // Allowed proximity range in meters
 
     if (!status || !employeeLat || !employeeLong) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "status, employeeLat, and employeeLong are required in the request body.",
-        });
+      return res.status(400).json({
+        error:
+          "status, employeeLat, and employeeLong are required in the request body.",
+      });
     }
 
     // Find the schedule entry
@@ -382,5 +375,220 @@ exports.addWeeklyBeatMappingUsingCSV = async (req, res) => {
   } catch (error) {
     console.error("Error handling CSV upload:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+//get weekly beat mapping for admin
+exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
+  try {
+    let { code, startDate, endDate, status, day } = req.query;
+
+    // 🔹 Default to current week's Monday to Sunday if dates are not provided
+    if (!startDate || !endDate) {
+      const today = new Date();
+      const dayOfWeek = today.getDay(); // 0 (Sunday) - 6 (Saturday)
+
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      monday.setUTCHours(0, 0, 0, 0);
+
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setUTCHours(23, 59, 59, 999);
+
+      startDate = monday.toISOString().split("T")[0];
+      endDate = sunday.toISOString().split("T")[0];
+    }
+
+    // Convert to Date objects
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setUTCHours(23, 59, 59, 999);
+
+    // 🔹 Query conditions
+    let query = {
+      startDate: { $lte: end },
+      endDate: { $gte: start },
+    };
+
+    if (code) query.code = { $regex: code, $options: "i" };
+
+    // 🔹 Fetch only required fields for performance optimization
+    let schedules = await WeeklyBeatMappingSchedule.find(query)
+      .select("_id code schedule total done pending")
+      .lean();
+
+    if (!schedules.length) {
+      return res
+        .status(404)
+        .json({ error: "No schedules found for the given filters." });
+    }
+
+    let result;
+
+    if (day) {
+      // 🔹 If `day` is provided, filter schedule for that day
+      result = schedules.map((schedule) => {
+        let dealers = schedule.schedule?.[day] || [];
+
+        let totalDealers = dealers.length; // Total dealers for the day
+        let doneDealers = dealers.filter(
+          (dealer) => dealer.status === "done"
+        ).length; // Done dealers count
+
+        if (status) {
+          dealers = dealers.filter((dealer) => dealer.status === status); // Apply status filter
+        }
+
+        return {
+          _id: schedule._id,
+          code: schedule.code,
+          total: totalDealers, // Show correct total count
+          done: doneDealers, // Show correct done count
+          pending: totalDealers - doneDealers, // Calculate pending correctly
+          schedule: { [day]: dealers }, // Filtered schedule
+        };
+      });
+    } else {
+      // 🔹 If `day` is NOT provided, apply the status filter across all days
+      result = schedules.map(
+        ({ _id, code, schedule, total, done, pending }) => {
+          let filteredSchedule = {};
+
+          // Apply status filter across all days if provided
+          Object.keys(schedule || {}).forEach((dayKey) => {
+            let dealers = schedule[dayKey] || [];
+            let filteredDealers = status
+              ? dealers.filter((dealer) => dealer.status === status)
+              : dealers;
+
+            if (filteredDealers.length > 0) {
+              filteredSchedule[dayKey] = filteredDealers;
+            }
+          });
+
+          return {
+            _id,
+            code,
+            total, // Already stored in DB
+            done, // Already stored in DB
+            pending, // Already stored in DB
+            schedule: filteredSchedule, // Return filtered schedule
+          };
+        }
+      );
+    }
+
+    return res.status(200).json({
+      message: "Weekly Beat Mapping Schedules retrieved successfully!",
+      data: result,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching Weekly Beat Mapping Schedule:", error);
+    return res.status(500).json({ error: "Internal server error!" });
+  }
+};
+
+// Edit beat mapping for admin
+exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { day } = req.query;
+    const { schedule: updateData, code, name } = req.body;
+
+    const schedule = await WeeklyBeatMappingSchedule.findById(id);
+    if (!schedule) {
+      return res.status(404).json({ message: "Schedule not found" });
+    }
+
+    schedule.name = name;
+    schedule.code = code;
+    
+
+    const calculateStats = (schedule) => {
+      let total = 0,
+        done = 0;
+
+      Object.keys(schedule).forEach((dayKey) => {
+        if (Array.isArray(schedule[dayKey])) {
+          total += schedule[dayKey].length;
+          done += schedule[dayKey].filter(
+            (dealer) => dealer.status === "done"
+          ).length;
+        }
+      });
+
+      return { total, done, pending: total - done };
+    };
+
+    // Add default values for latitude and longitude
+    const addDefaultValues = (dealer) => ({
+      ...dealer,
+      latitude: dealer.latitude || "0.0",
+      longitude: dealer.longitude || "0.0",
+    });
+
+    // If a specific day is provided, update that day's schedule
+    if (
+      day &&
+      ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].includes(day)
+    ) {
+      const existingDealersMap = new Map(
+        schedule.schedule[day].map((dealer) => [dealer._id.toString(), dealer])
+      );
+
+      const updatedSchedule = Array.isArray(updateData[day])
+        ? updateData[day].map((dealer) =>
+            existingDealersMap.has(dealer._id)
+              ? addDefaultValues({
+                  ...existingDealersMap.get(dealer._id),
+                  ...dealer,
+                })
+              : addDefaultValues(dealer)
+          )
+        : [];
+
+      schedule.schedule[day] = updatedSchedule;
+    } else {
+      // If no specific day is provided, update the entire schedule
+      Object.keys(updateData).forEach((dayKey) => {
+        if (schedule.schedule[dayKey]) {
+          const existingDealersMap = new Map(
+            schedule.schedule[dayKey].map((dealer) => [
+              dealer._id.toString(),
+              dealer,
+            ])
+          );
+
+          const updatedSchedule = Array.isArray(updateData[dayKey])
+            ? updateData[dayKey].map((dealer) =>
+                existingDealersMap.has(dealer._id)
+                  ? addDefaultValues({
+                      ...existingDealersMap.get(dealer._id),
+                      ...dealer,
+                    })
+                  : addDefaultValues(dealer)
+              )
+            : [];
+
+          schedule.schedule[dayKey] = updatedSchedule;
+        }
+      });
+    }
+
+    // ✅ Automatically update total, pending, and done
+    const { total, done, pending } = calculateStats(schedule.schedule);
+    schedule.total = total;
+    schedule.done = done;
+    schedule.pending = pending;
+
+    await schedule.save();
+
+    res
+      .status(200)
+      .json({ message: "Schedule updated successfully", schedule });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 };

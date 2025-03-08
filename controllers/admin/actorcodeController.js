@@ -311,3 +311,22 @@ exports.deleteActorCode = async (req, res) => {
   }
 };
 
+exports.getEmployeeCodeAndName = async(req, res) =>{
+  try{
+     const employees = await ActorCode.find({role: "employee", status: "active"})
+
+     if(!employees){
+      return res.status(400).json({message:"Employee not found"})
+      }
+
+      const employeeList = employees.map((employee) => ({
+        employee_code: employee.code,
+        employee_name: employee.name
+      }));
+
+      return res.status(200).json({employeeList})
+  }catch(error){
+    console.log(error)
+    return res.status(500).json({message:"Internal Server Error"})
+  }
+}

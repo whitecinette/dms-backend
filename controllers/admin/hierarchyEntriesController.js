@@ -115,4 +115,107 @@ exports.uploadHierarchyEntries = async (req, res) => {
   }
 };
 
-  
+//get hierarch Entries for admin
+exports.getHierarchEntriesForAdmin = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 50,
+      sort = "createdAt",
+      order = "",
+      search = "",
+    } = req.query;
+    const filters = {};
+    if (search) {
+      filters.$or = [{ hierarchy_name: { $regex: search, $options: "i" } }];
+    }
+    const sortOrder = order === "-1" ? -1 : 1;
+    const actorTypesHierarchy = await HierarchyEntries.find(filters)
+      .sort({ [sort]: sortOrder })
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit));
+
+    const totalRecords = await HierarchyEntries.countDocuments(filters);
+    res.status(200).json({
+      message: "All users fetched successfully",
+      data: actorTypesHierarchy,
+      currentPage: page,
+      totalRecords,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Edit Hierarchy Entries by Admin
+exports.editHierarchEntriesByAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const update = req.body;
+
+    if (!id) {
+      return res.status(400).json({ message: "Id is required" });
+    }
+
+    const updatedData = await HierarchyEntries.findByIdAndUpdate(id, update, { new: true });
+
+    if (!updatedData) {
+      return res.status(404).json({ message: "Data not found" });
+    }
+
+    return res.status(200).json({
+      message: "Successfully Updated Data",
+      data: updatedData
+    });
+
+  } catch (error) {
+    console.error("Error updating Hierarchy Entries:", error);
+    return res.status(500).json({ message: "Internal server Error" });
+  }
+};
+
+// Delete Hierarchy Entries by Admin
+exports.deleteHierarchEntriesByAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ message: "Id is required" });
+    }
+
+    const deletedData = await HierarchyEntries.findByIdAndDelete(id);
+
+    if (!deletedData) {
+      return res.status(404).json({ message: "Data not found" });
+    } 
+
+    return res.status(200).json({ 
+      message: "Successfully Deleted Data",
+      data: deletedData
+    });
+  } catch (error) {
+    console.error("Error deleting Hierarchy Entries:", error);
+    return res.status(500).json({ message: "Internal server Error" });
+  }
+};
+
+// add hierarchy entries by admin
+exports.addHierarchEntriesByAdmin = async (req, res) => {
+  try {
+    const { hierarchy_name } = req.body;
+    if (!hierarchy_name) {
+      return res.status(400).json({ message: "Hierarchy name is required" });
+    }
+
+    const newHierarchyEntry = new HierarchyEntries(req.body);
+    await newHierarchyEntry.save();
+
+    return res.status(201).json({
+      message: "Successfully Added Hierarchy Entries",
+      data: newHierarchyEntry
+    });
+  } catch (error) {
+    console.error("Error adding Hierarchy Entries:", error);
+    return res.status(500).json({ message: "Internal server Error" });
+  }
+};  
