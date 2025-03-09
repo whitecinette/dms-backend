@@ -2,8 +2,8 @@ const ActorCode = require("../../model/ActorCode");
 
 exports.getEmpForHr = async (req, res) => {
   try {
-    const employees = await ActorCode.find({});
-    const totalEmployees = await ActorCode.countDocuments({});
+    const employees = await ActorCode.find({ role: 'employee' });
+    const totalEmployees = await ActorCode.countDocuments({ role: 'employee' });
 
     res.status(200).json({
       success: true,

@@ -8,7 +8,8 @@ const PayrollSchema = new mongoose.Schema(
       required: true,
     },
     salaryDetails: {
-      baseSalary: { type: Number, required: true },
+      CTC: { type: Number, required: true }, // New CTC field
+      baseSalary: { type: Number },          // Auto-calculated field
       deductions: [
         {
           name: { type: String, required: true },
@@ -33,7 +34,6 @@ const PayrollSchema = new mongoose.Schema(
         ],
         default: [],  
       }
-      
     },
     totalSalary: { type: Number },
     payrollDate: { type: Date, default: Date.now },
@@ -43,7 +43,13 @@ const PayrollSchema = new mongoose.Schema(
 
 // Salary Calculation Logic (Pre-save Hook)
 PayrollSchema.pre("save", function (next) {
-  let totalSalary = this.salaryDetails.baseSalary;
+  const { CTC, other } = this.salaryDetails;
+
+  // Auto-calculate baseSalary from CTC
+  const baseSalary = Math.round(CTC / 12); 
+  this.salaryDetails.baseSalary = baseSalary;
+
+  let totalSalary = baseSalary;
 
   // Add Bonuses
   if (this.salaryDetails.bonuses) {
@@ -64,17 +70,13 @@ PayrollSchema.pre("save", function (next) {
     });
   }
 
-  // Add Overtime Pay
-  totalSalary +=
-    this.salaryDetails.overtimeHours * this.salaryDetails.overtimeRate;
-
-  // Handle 'Other' Dynamic Fields
-  if (this.salaryDetails.other) {
-    this.salaryDetails.other.forEach((entry) => {
+  // Handle 'Other' Dynamic Fields (e.g., House Allowance)
+  if (other) {
+    other.forEach((entry) => {
       if (entry.type === "addition") {
-        totalSalary += entry.value;
+        totalSalary += entry.amount; 
       } else if (entry.type === "deduction") {
-        totalSalary -= entry.value;
+        totalSalary -= entry.amount; 
       }
     });
   }
