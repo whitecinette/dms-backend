@@ -1,6 +1,7 @@
 const axios = require('axios');
 const ExtractionRecord = require('../../model/ExtractionRecord');
 const Product = require('../../model/Product'); // Adjust path as needed
+const User = require('../../model/User');
 
 const { BACKEND_URL } = process.env;
 exports.addExtractionRecord = async (req, res) => {
@@ -79,5 +80,22 @@ exports.addExtractionRecord = async (req, res) => {
     } catch (error) {
         console.error(error);
         return res.status(500).json({ error: 'Internal Server Error!' });
+    }
+};
+
+exports.getDealerDropdownForExtraction = async (req, res) => {
+    try {
+        // Fetch users where role is "dealer" and only select the "name" field
+        // const dealers = await User.find({ role: "dealer" }).select("name");
+        const dealers = await User.find({ role: "dealer" }).select("name -_id");
+
+        if (!dealers.length) {
+            return res.status(404).json({ message: "No dealers found." });
+        }
+
+        return res.status(200).json(dealers);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ error: "Internal Server Error" });
     }
 };
