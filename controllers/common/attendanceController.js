@@ -59,7 +59,7 @@ console.log("user heirarchy punch in :", userHierarchy)
       console.log("related user: " , relatedUsers);
       return res.status(404).json({ message: "No related users with location data found." });
     }
-
+console.log("realted user", relatedUsers)
     // Convert user coordinates
     const userLat = parseFloat(latitude);
     const userLon = parseFloat(longitude);
