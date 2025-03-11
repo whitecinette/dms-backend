@@ -120,6 +120,7 @@ exports.userAuth = async (req, res, next) => {
   try {
     console.log("User auth reaching!!")
       const token = req.header("Authorization");
+      console.log("Token: ", token);
 
       if (!token) {
           return res.status(401).json({ message: "Access denied. No token provided." });
