@@ -42,10 +42,17 @@ jobs:
             pm2 restart dms-backend || pm2 start index.js --name dms-backend
             pm2 save
 
-            # Restart Nginx (if using it)
-            echo "🔄 Restarting Nginx..."
-            sudo systemctl restart nginx || echo "⚠️ Nginx restart failed, check logs."
-
             echo "✅ Deployment successful!!!"
             exit 0
+            
+      - name: Restart Nginx only if needed
+        run: |
+          if sudo nginx -t; then
+            echo "✅ Nginx config is valid. Restarting..."
+            sudo systemctl restart nginx
+          else
+            echo "⚠️ Nginx config error! Check logs."
+            exit 1
+          fi
+
           EOF
