@@ -23,7 +23,7 @@ jobs:
       # Step 3: Connect to EC2 instance and deploy
       - name: Deploy to EC2
         run: |
-          ssh -tt -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@43.204.111.96 << 'EOF'
+          ssh -tt -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@13.127.215.10 << 'EOF'
             set -e  # Exit on any error
 
             echo "🚀 Connecting to EC2..."
