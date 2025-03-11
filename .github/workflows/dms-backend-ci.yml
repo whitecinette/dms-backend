@@ -44,15 +44,5 @@ jobs:
 
             echo "✅ Deployment successful!!!"
             exit 0
-            
-      - name: Restart Nginx only if needed
-        run: |
-          if sudo nginx -t; then
-            echo "✅ Nginx config is valid. Restarting..."
-            sudo systemctl restart nginx
-          else
-            echo "⚠️ Nginx config error! Check logs."
-            exit 1
-          fi
 
           EOF

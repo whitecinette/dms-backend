@@ -43,7 +43,7 @@ mongoose.connection.on("error", (err) => {
 
 // Default route
 app.get("/", (req, res) => {
-  res.send("Welcome to the new server!!! :D :D :D :p");
+  res.send("Welcome to the new server!!! :D :D :D :p :p");
 });
 // Routes
 readdirSync("./routes").map((r) => app.use("/", require("./routes/" + r)));
