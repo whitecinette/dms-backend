@@ -98,6 +98,7 @@ exports.punchIn = async (req, res) => {
     res.status(201).json({ message: "Punch-in recorded successfully", attendance });
   } catch (error) {
     res.status(500).json({ message: "Error recording punch-in", error: error.message });
+    console.log("errorrr:", error)
   }
 };
 
