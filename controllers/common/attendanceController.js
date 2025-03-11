@@ -190,7 +190,7 @@ console.log("realted user", relatedUsers)
               distance: minDistance,
           });
       }
-      console.log("nearest user:", nearestUser )
+      console.log("nearest userrrrrrr:", nearestUser )
 
       if (!req.file) {
           return res.status(400).json({
