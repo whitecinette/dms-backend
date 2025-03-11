@@ -22,11 +22,8 @@ jobs:
 
       # Step 3: Connect to EC2 instance and deploy
       - name: Deploy to EC2
-              - name: Deploy to EC2
         run: |
-          echo "${{ secrets.EC2_PEM_KEY }}" > ec2-key.pem
-          chmod 600 ec2-key.pem
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@43.204.111.96 <<EOF
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@<43.204.111.96> << 'EOF'
             set -e  # Exit on any error
 
             echo "🚀 Connecting to EC2..."
@@ -35,7 +32,7 @@ jobs:
             echo "🔄 Pulling latest changes..."
             git pull origin main
 
-            echo "📦 Installing dependencies...."
+            echo "📦 Installing dependencies..."
             npm install --production
 
             echo "🌎 Setting environment variables..."
