@@ -1,0 +1,51 @@
+name: DMS Backend CI/CD
+
+on:
+  push:
+    branches:
+      - main  # Trigger on pushes to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the code from the repository
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # Step 2: Add the PEM key as an SSH key
+      - name: Add SSH Key
+        run: |
+          echo "${{ secrets.EC2_PEM_KEY }}" > ec2-key.pem
+          chmod 600 ec2-key.pem
+
+      # Step 3: Connect to EC2 instance and deploy
+      - name: Deploy to EC2
+        run: |
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@<43.204.111.96> << 'EOF'
+            set -e  # Exit on any error
+
+            echo "🚀 Connecting to EC2..."
+            cd /home/ec2-user/dms-backend
+
+            echo "🔄 Pulling latest changes..."
+            git pull origin main
+
+            echo "📦 Installing dependencies..."
+            npm install --production
+
+            echo "🌎 Setting environment variables..."
+            export NODE_ENV=production
+
+            echo "🚀 Restarting PM2 process..."
+            pm2 restart dms-backend || pm2 start index.js --name dms-backend
+            pm2 save
+
+            # Restart Nginx (if using it)
+            echo "🔄 Restarting Nginx..."
+            sudo systemctl restart nginx || echo "⚠️ Nginx restart failed, check logs."
+
+            echo "✅ Deployment successful!"
+            exit 0
+          EOF
