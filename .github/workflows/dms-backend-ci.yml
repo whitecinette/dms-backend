@@ -35,7 +35,7 @@ jobs:
             echo "🔄 Pulling latest changes..."
             git pull origin main
 
-            echo "📦 Installing dependencies..."
+            echo "📦 Installing dependencies...."
             npm install --production
 
             echo "🌎 Setting environment variables..."
