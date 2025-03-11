@@ -46,6 +46,6 @@ jobs:
             echo "🔄 Restarting Nginx..."
             sudo systemctl restart nginx || echo "⚠️ Nginx restart failed, check logs."
 
-            echo "✅ Deployment successful!"
+            echo "✅ Deployment successful!!"
             exit 0
           EOF
