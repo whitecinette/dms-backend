@@ -15,7 +15,7 @@ router.delete("/hierarchy-entries/delete-hierarchy-entries-by-admin/:id", adminO
 router.post("/hierarchy-entries/add-hierarchy-entries-by-admin", adminOrSuperAdminAuth, addHierarchEntriesByAdmin)
 
 // common 
-router.get('/user/get-subordinates-by-code', getSubordinatesByCode);
-router.get("/user/get-subordinates", userAuth, getSubordinatesForUser);
+router.post('/user/get-subordinates-by-code', getSubordinatesByCode);
+router.post("/user/get-subordinates", userAuth, getSubordinatesForUser);
 
 module.exports = router;

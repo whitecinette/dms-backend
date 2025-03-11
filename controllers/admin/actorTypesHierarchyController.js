@@ -32,6 +32,26 @@ exports.addHierarchy = async (req, res) => {
   }
 };
 
+exports.getActorTypesHierarchyByName = async (req, res) => {
+  try {
+      const { name } = req.params;
+      if (!name) {
+          return res.status(400).json({ success: false, message: 'Name parameter is required' });
+      }
+
+      const actorHierarchy = await ActorTypesHierarchy.findOne({ name });
+      
+      if (!actorHierarchy) {
+          return res.status(404).json({ success: false, message: 'Actor hierarchy not found' });
+      }
+
+      return res.status(200).json({ success: true, data: actorHierarchy.hierarchy });
+  } catch (error) {
+      console.error('Error fetching actor hierarchy:', error);
+      return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 //get ActorTypesHierarchy by admin
 exports.getActorTypesHierarchyByAdmin = async(req, res) => {
   try {

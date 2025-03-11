@@ -1,10 +1,11 @@
 const express = require('express');
-const { addHierarchy, getActorTypesHierarchyByAdmin, editActorTypesHierarchyByAdmin, deleteActorTypesHierarchyByAdmin, addActorTypesHierarchyByAdmin } = require('../controllers/admin/actorTypesHierarchyController');
+const { addHierarchy, getActorTypesHierarchyByName, getActorTypesHierarchyByAdmin, editActorTypesHierarchyByAdmin, deleteActorTypesHierarchyByAdmin, addActorTypesHierarchyByAdmin } = require('../controllers/admin/actorTypesHierarchyController');
 const { adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
 // API to add/update hierarchy
 router.post('/actortypeshierarchy/add', addHierarchy);
+router.get('/user/get/actor-types-hierarchy/:name', getActorTypesHierarchyByName);
 
 //API for admin
 router.get("/actorTypesHierarchy/get-by-admin",  getActorTypesHierarchyByAdmin)
