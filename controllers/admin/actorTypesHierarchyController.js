@@ -119,8 +119,8 @@ exports.addActorTypesHierarchyByAdmin = async(req, res) => {
     const { name, hierarchy } = req.body;
     const data = req.body
 
-    if(!name || !hierarchy){
-      return res.status(400).json({ message: "Name and Hierarchy both  fields are required" })
+    if(!name){
+      return res.status(400).json({ message: "Name fields is require" })
     }
 
     const existing = await ActorTypesHierarchy.findOne({name})

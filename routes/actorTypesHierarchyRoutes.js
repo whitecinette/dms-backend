@@ -7,9 +7,9 @@ const router = express.Router();
 router.post('/actortypeshierarchy/add', addHierarchy);
 
 //API for admin
-router.get("/actorTypesHierarchyController/get-by-admin",  getActorTypesHierarchyByAdmin)
-router.put("/actorTypesHierarchyController/edit-by-admin/:id", adminOrSuperAdminAuth, editActorTypesHierarchyByAdmin)
-router.delete("/actorTypesHierarchyController/delete-by-admin/:id", adminOrSuperAdminAuth, deleteActorTypesHierarchyByAdmin)
-router.post("/actorTypesHierarchyController/add-by-admin", adminOrSuperAdminAuth, addActorTypesHierarchyByAdmin)
+router.get("/actorTypesHierarchy/get-by-admin",  getActorTypesHierarchyByAdmin)
+router.put("/actorTypesHierarchy/edit-by-admin/:id", adminOrSuperAdminAuth, editActorTypesHierarchyByAdmin)
+router.delete("/actorTypesHierarchy/delete-by-admin/:id", adminOrSuperAdminAuth, deleteActorTypesHierarchyByAdmin)
+router.post("/actorTypesHierarchy/add-by-admin", adminOrSuperAdminAuth, addActorTypesHierarchyByAdmin)
 
 module.exports = router;

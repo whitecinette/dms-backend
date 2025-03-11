@@ -6,10 +6,10 @@ const router = express.Router();
 
 //Actorcodes
 router.get("/get-actorcode", adminOrSuperAdminAuth, getActorCodeForAdminAndSuperAdmin)
-router.post("/upload-actorcode-csv", upload.single("file"), uploadBulkActorCodes);
-router.post("/add-actorcode", addActorCode)
-router.put("/edit-actorcode/:id", editActorCode)
-router.delete("/delete/actorcode/:id", deleteActorCode)
+router.post("/upload-actorcode-csv", upload.single("file"), adminOrSuperAdminAuth, uploadBulkActorCodes);
+router.post("/add-actorcode", adminOrSuperAdminAuth, addActorCode)
+router.put("/edit-actorcode/:id", adminOrSuperAdminAuth, editActorCode)
+router.delete("/delete/actorcode/:id", adminOrSuperAdminAuth, deleteActorCode)
 
 //admin
 router.get("/actorCode/get-actorCode-for-admin", getEmployeeCodeAndName)

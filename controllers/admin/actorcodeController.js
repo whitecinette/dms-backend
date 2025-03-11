@@ -2,7 +2,11 @@ const fs = require("fs");
 const csvParser = require("csv-parser");
 const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
-const { assignActorToUser, deleteUser, editUser } = require("../../helpers/actorToUserHelper");
+const {
+  assignActorToUser,
+  deleteUser,
+  editUser,
+} = require("../../helpers/actorToUserHelper");
 
 ///upload aotor codes in bulks
 
@@ -51,7 +55,13 @@ exports.uploadBulkActorCodes = async (req, res) => {
         });
 
         // Check required fields
-        if (!cleanedRow.code || !cleanedRow.name || !cleanedRow.position || !cleanedRow.role ) {
+        if (
+          !cleanedRow.code ||
+          !cleanedRow.name ||
+          !cleanedRow.position ||
+          !cleanedRow.role ||
+          !cleanedRow.parent_code
+        ) {
           errors.push({ row, message: "Missing required fields" });
         } else {
           results.push(cleanedRow);
@@ -152,7 +162,7 @@ exports.uploadBulkActorCodes = async (req, res) => {
 //               existingActor.status = data.status;
 //               if (existingActor.status === "active") {
 //                 await editUser(existingActor.code, existingActor.code, existingActor.name, existingActor.position, existingActor.role, existingActor.status);
-//             }            
+//             }
 //               await existingActor.save();
 //               updatedData.push(existingActor);
 //             } else {
@@ -190,22 +200,24 @@ exports.uploadBulkActorCodes = async (req, res) => {
 //add actor code
 exports.addActorCode = async (req, res) => {
   try {
-    let { code, name, position, role, status } = req.body;
-    code = code.toUpperCase();
+    let { code, name, status, ...update } = req.body; // Destructure required fields and gather extra fields
+    code = code.toUpperCase(); // Ensure the code is stored in uppercase
 
+    // Check if the actor code already exists
     const existingActor = await ActorCode.findOne({ code });
     if (existingActor) {
       return res.status(400).json({ message: "Actor code already exists." });
     }
 
+    // Create a new actor code entry with required fields and any extra fields
     const actor = await ActorCode.create({
       code,
       name,
-      position,
-      role,
-      status,
+      status: status || "active", // Default to "active" if not provided
+      ...update, // Spread the extra fields into the actor object
     });
 
+    // If the status is "active", call the function to assign the actor to a user
     if (status === "active") {
       console.log("Calling assignActorToUser with code:", code);
       await assignActorToUser(code);
@@ -249,7 +261,7 @@ exports.editActorCode = async (req, res) => {
         .json({ message: "Actor code already exists with another record." });
     }
 
-    if(actor.status === "active"){
+    if (actor.status === "active") {
       await editUser(actor.code, code, name, position, role, status);
     }
 
@@ -263,7 +275,6 @@ exports.editActorCode = async (req, res) => {
     if (status === "active") {
       await assignActorToUser(code);
     }
-    
 
     return res
       .status(200)
@@ -276,12 +287,49 @@ exports.editActorCode = async (req, res) => {
 
 /////Actor Code for Admin and Super Admin/////
 exports.getActorCodeForAdminAndSuperAdmin = async (req, res) => {
+  const {
+    page = 1,
+    limit = 50,
+    sort = "createdAt",
+    order = "",
+    search = "",
+    status = "",
+  } = req.query;
+
   try {
-    const actorCode = await ActorCode.find();
-    if (!actorCode) {
-      return res.status(404).json({ message: "No actor code found." });
+    const user = req.user;
+    const filters = {};
+    // Ensure order is a number
+    const sortOrder = order === "-1" ? -1 : 1;
+
+    // Search filter (case-insensitive)
+    if (search) {
+      const searchRegex = new RegExp(search, "i"); // Create regex once
+      filters.$or = [{ code: searchRegex }, { name: searchRegex }];
     }
-    return res.status(200).json({ actorCode });
+    if (status) {
+      filters.status = status;
+    }
+    if (user.role === "admin") {
+      filters.role = { $nin: ["admin", "super_admin"] };
+    }
+    const actorCodes = await ActorCode.find(filters)
+      .sort({ [sort]: sortOrder })
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit));
+
+    const totalRecords = await ActorCode.countDocuments(filters);
+
+    if (!actorCodes || actorCodes.length === 0) {
+      return res.status(404).json({ message: "No actor codes found." });
+    }
+
+    return res.status(200).json({
+      message: "Actor codes fetched successfully",
+      currentPage: Number(page),
+      totalRecords,
+      data: actorCodes,
+    });
   } catch (error) {
     console.error("Error getting actor code for admin and super admin:", error);
     return res.status(500).json({ message: "Internal server error." });
@@ -290,43 +338,48 @@ exports.getActorCodeForAdminAndSuperAdmin = async (req, res) => {
 
 exports.deleteActorCode = async (req, res) => {
   try {
-      const actorId = req.params.id;
+    const actorId = req.params.id;
 
-      // Find the actor code
-      const actor = await ActorCode.findById(actorId);
-      if (!actor) {
-          return res.status(404).json({ message: "Actor code not found." });
-      }
-      if(actor.status === "active"){
-        await deleteUser(actor.code)
-      }
+    // Find the actor code
+    const actor = await ActorCode.findById(actorId);
+    if (!actor) {
+      return res.status(404).json({ message: "Actor code not found." });
+    }
+    if (actor.status === "active") {
+      await deleteUser(actor.code);
+    }
 
-      // Delete the actor code
-      await ActorCode.findByIdAndDelete(actorId);
+    // Delete the actor code
+    await ActorCode.findByIdAndDelete(actorId);
 
-      return res.status(200).json({ message: "Actor code deleted successfully." });
+    return res
+      .status(200)
+      .json({ message: "Actor code deleted successfully." });
   } catch (error) {
-      console.error("Error deleting actor code:", error);
-      return res.status(500).json({ message: "Internal server error." });
+    console.error("Error deleting actor code:", error);
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
 
-exports.getEmployeeCodeAndName = async(req, res) =>{
-  try{
-     const employees = await ActorCode.find({role: "employee", status: "active"})
+exports.getEmployeeCodeAndName = async (req, res) => {
+  try {
+    const employees = await ActorCode.find({
+      role: "employee",
+      status: "active",
+    });
 
-     if(!employees){
-      return res.status(400).json({message:"Employee not found"})
-      }
+    if (!employees) {
+      return res.status(400).json({ message: "Employee not found" });
+    }
 
-      const employeeList = employees.map((employee) => ({
-        employee_code: employee.code,
-        employee_name: employee.name
-      }));
+    const employeeList = employees.map((employee) => ({
+      employee_code: employee.code,
+      employee_name: employee.name,
+    }));
 
-      return res.status(200).json({employeeList})
-  }catch(error){
-    console.log(error)
-    return res.status(500).json({message:"Internal Server Error"})
+    return res.status(200).json({ employeeList });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ message: "Internal Server Error" });
   }
-}
+};
