@@ -7,6 +7,8 @@ const User = require("../../model/User");
 const { generateAdminCode } = require("../../helpers/adminHelpers");
 const jwt = require("jsonwebtoken");
 const { inactiveActor, editActorCode } = require("../../helpers/actorToUserHelper");
+const mongoose = require('mongoose');
+const Decimal128 = mongoose.Types.Decimal128;
 
 
 /////////////// SUPER ADMIN ///////////////////////////
@@ -899,6 +901,7 @@ exports.updateBulkDealers = async (req, res) => {
 };
 
 
+
 // ============= /Update dealer by Admin or Super Admin================
 
 
@@ -957,3 +960,90 @@ exports.getAllDealerForAdmin = async (req, res) => {
       return res.status(500).json({ message: "Internal server error" });
     }
   };
+
+
+  exports.updateBulkLatLongForAdmin = async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "CSV file is required." });
+      }
+  
+      const results = [];
+      const errors = [];
+      const filePath = req.file.path;
+  
+      fs.createReadStream(filePath)
+        .pipe(
+          csvParser({
+            mapHeaders: ({ header }) =>
+              header.toLowerCase().trim().replace(/\s+/g, "_")
+          })
+        )
+        .on("data", (row) => {
+          let cleanedRow = {};
+          Object.keys(row).forEach((key) => {
+            let cleanedKey = key.toLowerCase().trim().replace(/\s+/g, "_");
+            let cleanedValue = row[key]?.trim();
+  
+            // Convert lat/long to Decimal128
+            if (["latitude", "longitude"].includes(cleanedKey)) {
+              cleanedValue = cleanedValue ? new Decimal128(cleanedValue) : null;
+            }
+  
+            cleanedRow[cleanedKey] = cleanedValue;
+          });
+  
+          if (!cleanedRow.code || !cleanedRow.latitude || !cleanedRow.longitude) {
+            errors.push({ row, message: "Missing required 'code', 'latitude', or 'longitude' field." });
+          } else {
+            results.push(cleanedRow);
+          }
+        })
+        .on("end", async () => {
+          try {
+            const updatedData = [];
+  
+            await Promise.all(
+              results.map(async (data, index) => {
+                console.log(`🔄 Processing User ${index + 1} of ${results.length}: ${data.code}`);
+                const { code, latitude, longitude } = data;
+  
+                let existingUser = await User.findOne({ code });
+  
+                if (existingUser) {
+                  // Update if lat/long are different
+                  if (String(existingUser.latitude) !== String(latitude) || 
+                      String(existingUser.longitude) !== String(longitude)) {
+                    existingUser.latitude = latitude;
+                    existingUser.longitude = longitude;
+  
+                    await existingUser.save();
+                    updatedData.push(existingUser);
+                  } else {
+                    console.log("⚠️ No changes detected for:", code);
+                  }
+                } else {
+                  // Log an error if no matching user is found
+                  errors.push({ row: data, message: `No user found with code: ${code}. Skipping entry.` });
+                }
+              })
+            );
+  
+            fs.unlinkSync(filePath); // Delete CSV file after processing
+  
+            res.status(200).json({
+              message: "CSV processed successfully",
+              updatedCount: updatedData.length,
+              errors,
+            });
+          } catch (err) {
+            console.error("❌ Error processing CSV:", err);
+            res.status(500).json({ message: "Internal server error." });
+          }
+        });
+    } catch (error) {
+      console.error("❌ Upload Error:", error);
+      res.status(500).json({ message: "Internal server error." });
+    }
+  };
+  

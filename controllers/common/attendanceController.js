@@ -227,7 +227,7 @@ console.log("realted user", relatedUsers)
 
       await attendance.save();
 
-      res.status(200).json({
+      res.status(201).json({
           message: "Punch-out recorded successfully",
           attendance
       });

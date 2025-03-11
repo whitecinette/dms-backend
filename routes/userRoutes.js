@@ -1,5 +1,5 @@
 const express = require("express");
-const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerForAdmin } = require("../controllers/admin/userController");
+const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerForAdmin, updateBulkLatLongForAdmin } = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
@@ -23,6 +23,8 @@ router.put("/edit-admin-profile-by-super-admin/:id", superAdminAuth, editAdminPr
 router.put("/edit-admin-profile/:id", editAdminProfile );
 router.post("/register-user-by-admin", adminAuth, registerUserByAdmin);
 router.patch("/deactivate-user-by-admin/:id", adminAuth, deactivateUserByAdmin);
+
+router.put("/bulk-lats-longs-upload", upload.single("file"), updateBulkLatLongForAdmin);
 
 //  =========================== /ADMIN ================================
 
