@@ -118,6 +118,7 @@ exports.findUserWithToken = async (req, res, next) => {
 
 exports.userAuth = async (req, res, next) => {
   try {
+    console.log("User auth reaching!!")
       const token = req.header("Authorization");
 
       if (!token) {
