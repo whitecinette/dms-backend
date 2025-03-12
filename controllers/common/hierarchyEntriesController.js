@@ -4,132 +4,6 @@ const HierarchyEntries = require("../../model/HierarchyEntries");
 const SalesData = require("../../model/SalesData");
 
 
-// exports.getSubordinatesByCode = async (req, res) => {
-//   try {
-//     const { code } = req.query;
-//     if (!code) {
-//       return res.status(400).json({ success: false, message: "Code is required." });
-//     }
-
-//     // Fetch actor details (position)
-//     const actor = await ActorCode.findOne({ code });
-//     if (!actor) {
-//       return res.status(404).json({ success: false, message: "Actor not found." });
-//     }
-
-//     const { position } = actor;
-//     if (!position) {
-//       return res.status(400).json({ success: false, message: "Position not found for this user." });
-//     }
-
-//     // Fetch all hierarchy entries where this user appears in their position
-//     const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
-
-//     if (!hierarchyEntries.length) {
-//       return res.status(200).json({ success: true, positions: [], subordinates: {} });
-//     }
-
-//     // Identify subordinate positions dynamically (positions below the current position)
-//     const allPositions = ["smd", "asm", "mdd" ,"ase", "rso", "tse", "dealer"];
-//     const userPositionIndex = allPositions.indexOf(position);
-//     const subordinatePositions = allPositions.slice(userPositionIndex + 1);
-
-//     // Collect subordinate codes
-//     let subordinateData = {};
-//     for (let subPosition of subordinatePositions) {
-//       let subCodes = hierarchyEntries.map(entry => entry[subPosition]).filter(Boolean);
-//       if (subCodes.length > 0) {
-//         subordinateData[subPosition] = subCodes;
-//       }
-//     }
-
-//     // Fetch names for subordinate codes
-//     let subordinatesGrouped = {};
-//     for (let [subPosition, codes] of Object.entries(subordinateData)) {
-//       let users = await ActorCode.find({ code: { $in: codes } }, { code: 1, name: 1, position: 1, _id: 0 });
-
-//       subordinatesGrouped[subPosition] = users.map(user => ({
-//         code: user.code,
-//         name: user.name,
-//       }));
-//     }
-
-//     // Return response with positions and grouped subordinates
-//     res.status(200).json({
-//       success: true,
-//       positions: Object.keys(subordinateData),
-//       subordinates: subordinatesGrouped
-//     });
-
-//   } catch (error) {
-//     console.error("Error in getSubordinates:", error);
-//     res.status(500).json({ success: false, message: "Internal server error" });
-//   }
-// };
-
-// exports.getSubordinatesForUser = async (req, res) => {
-//     try {
-//       const { code } = req;
-//       if (!code) {
-//         return res.status(400).json({ success: false, message: "Code is required." });
-//       }
-  
-//       // Fetch actor details (position)
-//       const actor = await ActorCode.findOne({ code });
-//       if (!actor) {
-//         return res.status(404).json({ success: false, message: "Actor not found." });
-//       }
-  
-//       const { position } = actor;
-//       if (!position) {
-//         return res.status(400).json({ success: false, message: "Position not found for this user." });
-//       }
-  
-//       // Fetch all hierarchy entries where this user appears in their position
-//       const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
-  
-//       if (!hierarchyEntries.length) {
-//         return res.status(200).json({ success: true, positions: [], subordinates: {} });
-//       }
-  
-//       // Identify subordinate positions dynamically (positions below the current position)
-//       const allPositions = ["smd", "asm", "mdd", "ase", "rso", "tse", "dealer"];
-//       const userPositionIndex = allPositions.indexOf(position);
-//       const subordinatePositions = allPositions.slice(userPositionIndex + 1);
-  
-//       // Collect subordinate codes
-//       let subordinateData = {};
-//       for (let subPosition of subordinatePositions) {
-//         let subCodes = hierarchyEntries.map(entry => entry[subPosition]).filter(Boolean);
-//         if (subCodes.length > 0) {
-//           subordinateData[subPosition] = subCodes;
-//         }
-//       }
-  
-//       // Fetch names for subordinate codes
-//       let subordinatesGrouped = {};
-//       for (let [subPosition, codes] of Object.entries(subordinateData)) {
-//         let users = await ActorCode.find({ code: { $in: codes } }, { code: 1, name: 1, position: 1, _id: 0 });
-  
-//         subordinatesGrouped[subPosition] = users.map(user => ({
-//           code: user.code,
-//           name: user.name,
-//         }));
-//       }
-  
-//       // Return response with positions and grouped subordinates
-//       res.status(200).json({
-//         success: true,
-//         positions: Object.keys(subordinateData),
-//         subordinates: subordinatesGrouped
-//       });
-  
-//     } catch (error) {
-//       console.error("Error in getSubordinates:", error);
-//       res.status(500).json({ success: false, message: "Internal server error" });
-//     }
-//   };
-
 exports.getSubordinatesByCode = async (req, res) => {
   try {
     console.log("Reaacchhhh");
@@ -246,8 +120,8 @@ exports.getSubordinatesByCode = async (req, res) => {
 
 // exports.getSubordinatesForUser = async (req, res) => {
 //   try {
-//     const { code } = req;
-//     const { filter_type = "value", start_date, end_date } = req.body; // Use req.body
+//     const {code} = req.user;
+//     const { filter_type = "value", start_date, end_date } = req.body;
 
 //     if (!code || !start_date || !end_date) {
 //       return res.status(400).json({ success: false, message: "Code, start_date, and end_date are required." });
@@ -264,17 +138,17 @@ exports.getSubordinatesByCode = async (req, res) => {
 //       return res.status(400).json({ success: false, message: "Position not found for this user." });
 //     }
 
-//     // Fetch hierarchy entries
-//     const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
-
-//     if (!hierarchyEntries.length) {
-//       return res.status(200).json({ success: true, position: null, subordinates: {} });
+//     // Fetch hierarchy from actorTypesHierarchy
+//     const actorHierarchy = await ActorTypesHierarchy.findOne({name: "default_sales_flow"});
+//     if (!actorHierarchy) {
+//       return res.status(500).json({ success: false, message: "Hierarchy data not found." });
 //     }
 
-//     // Define position hierarchy
-//     const allPositions = ["smd", "asm", "mdd", "ase", "rso", "tse", "dealer"];
-//     const userPositionIndex = allPositions.indexOf(position);
+//     // Extract allPositions dynamically
+//     const allPositions = actorHierarchy.hierarchy || [];
+//     const default_sales_flow = actorHierarchy.default_sales_flow;
 
+//     const userPositionIndex = allPositions.indexOf(position);
 //     if (userPositionIndex === -1 || userPositionIndex === allPositions.length - 1) {
 //       return res.status(200).json({ success: true, position: null, subordinates: {} });
 //     }
@@ -282,9 +156,14 @@ exports.getSubordinatesByCode = async (req, res) => {
 //     // Get the immediate next subordinate position
 //     const nextSubordinatePosition = allPositions[userPositionIndex + 1];
 
+//     // Fetch hierarchy entries
+//     const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
+//     if (!hierarchyEntries.length) {
+//       return res.status(200).json({ success: true, position: null, subordinates: {} });
+//     }
+
 //     // Collect subordinate codes
 //     let subordinateCodes = hierarchyEntries.map(entry => entry[nextSubordinatePosition]).filter(Boolean);
-
 //     if (!subordinateCodes.length) {
 //       return res.status(200).json({ success: true, position: nextSubordinatePosition, subordinates: {} });
 //     }
@@ -344,7 +223,7 @@ exports.getSubordinatesByCode = async (req, res) => {
 //       })
 //     );
 
-//     res.status(200).json({ success: true, position: nextSubordinatePosition, subordinates: salesData });
+//     res.status(200).json({ success: true, position: nextSubordinatePosition, subordinates: salesData, default_sales_flow });
 
 //   } catch (error) {
 //     console.error("Error in getSubordinatesByCode:", error);
@@ -352,9 +231,11 @@ exports.getSubordinatesByCode = async (req, res) => {
 //   }
 // };
 
+
 exports.getSubordinatesForUser = async (req, res) => {
   try {
-    const {code} = req.user;
+    console.log("Subods reaching");
+    const { code } = req.user;
     const { filter_type = "value", start_date, end_date } = req.body;
 
     if (!code || !start_date || !end_date) {
@@ -372,41 +253,59 @@ exports.getSubordinatesForUser = async (req, res) => {
       return res.status(400).json({ success: false, message: "Position not found for this user." });
     }
 
-    // Fetch hierarchy from actorTypesHierarchy
-    const actorHierarchy = await ActorTypesHierarchy.findOne({name: "default_sales_flow"});
-    if (!actorHierarchy) {
+    // Fetch hierarchy from ActorTypesHierarchy
+    const actorHierarchy = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+    if (!actorHierarchy || !actorHierarchy.hierarchy) {
       return res.status(500).json({ success: false, message: "Hierarchy data not found." });
     }
 
-    // Extract allPositions dynamically
-    const allPositions = actorHierarchy.hierarchy || [];
-    const default_sales_flow = actorHierarchy.default_sales_flow;
+    const allPositions = actorHierarchy.hierarchy; // Full hierarchy array
 
+    // Get user position index
     const userPositionIndex = allPositions.indexOf(position);
-    if (userPositionIndex === -1 || userPositionIndex === allPositions.length - 1) {
-      return res.status(200).json({ success: true, position: null, subordinates: {} });
+    if (userPositionIndex === -1 || userPositionIndex >= allPositions.length - 1) {
+      return res.status(200).json({ success: true, positions: [], subordinates: [] });
     }
 
-    // Get the immediate next subordinate position
-    const nextSubordinatePosition = allPositions[userPositionIndex + 1];
+    // Extract only subordinate positions
+    const subordinatePositions = allPositions.slice(userPositionIndex + 1);
 
-    // Fetch hierarchy entries
+    // Fetch hierarchy entries to get subordinates
     const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
     if (!hierarchyEntries.length) {
-      return res.status(200).json({ success: true, position: null, subordinates: {} });
+      return res.status(200).json({ success: true, positions: subordinatePositions, subordinates: [] });
     }
 
-    // Collect subordinate codes
-    let subordinateCodes = hierarchyEntries.map(entry => entry[nextSubordinatePosition]).filter(Boolean);
-    if (!subordinateCodes.length) {
-      return res.status(200).json({ success: true, position: nextSubordinatePosition, subordinates: {} });
-    }
+    let subordinates = [];
 
-    // Fetch names for subordinate codes
-    let subordinates = await ActorCode.find(
-      { code: { $in: subordinateCodes } },
-      { code: 1, name: 1, _id: 0 }
-    );
+    // Process each subordinate position
+    for (const subPosition of subordinatePositions) {
+      let subCodes = hierarchyEntries.map(entry => entry[subPosition]).filter(Boolean);
+      if (!subCodes.length) continue;
+
+      let subs = await ActorCode.find({ code: { $in: subCodes } }, { code: 1, name: 1, _id: 0 });
+
+      for (let sub of subs) {
+        let hierarchyMap = {};
+        let subIndex = allPositions.indexOf(subPosition);
+
+        // Attach all higher hierarchy positions between user and subordinate
+        for (let i = userPositionIndex + 1; i < subIndex; i++) {
+          let higherPosition = allPositions[i];
+          let higherEntry = hierarchyEntries.find(entry => entry[subPosition] === sub.code);
+          if (higherEntry) {
+            hierarchyMap[higherPosition] = higherEntry[higherPosition] || null;
+          }
+        }
+
+        subordinates.push({
+          code: sub.code,
+          name: sub.name,
+          position: subPosition,
+          ...hierarchyMap
+        });
+      }
+    }
 
     // Convert dates to IST
     const convertToIST = (date) => {
@@ -424,8 +323,7 @@ exports.getSubordinatesForUser = async (req, res) => {
     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
 
     // Fetch sales data for each subordinate
-    let salesData = {};
-    salesData[nextSubordinatePosition] = await Promise.all(
+    await Promise.all(
       subordinates.map(async (sub) => {
         let baseQuery = { buyer_code: sub.code };
 
@@ -444,23 +342,17 @@ exports.getSubordinatesForUser = async (req, res) => {
         // Calculate Growth %
         const calculateGrowth = (current, last) => (last !== 0 ? ((current - last) / last) * 100 : 0);
 
-        return {
-          code: sub.code,
-          name: sub.name,
-          mtd_sell_out: mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
-          lmtd_sell_out: lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0,
-          sell_out_growth: calculateGrowth(
-            mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
-            lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0
-          ).toFixed(2),
-        };
+        sub.mtd_sell_out = mtdSellOut.length > 0 ? mtdSellOut[0].total : 0;
+        sub.lmtd_sell_out = lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0;
+        sub.sell_out_growth = calculateGrowth(sub.mtd_sell_out, sub.lmtd_sell_out).toFixed(2);
       })
     );
 
-    res.status(200).json({ success: true, position: nextSubordinatePosition, subordinates: salesData, default_sales_flow });
+    res.status(200).json({ success: true, positions: subordinatePositions, subordinates });
 
   } catch (error) {
-    console.error("Error in getSubordinatesByCode:", error);
+    console.error("Error in getSubordinatesForUser:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
