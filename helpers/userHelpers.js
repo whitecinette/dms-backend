@@ -35,6 +35,9 @@ exports.getAdditionalFields = (role, data) => {
                     bank_name: data.bank_details?.bank_name || "Not Provided",
                     phone_number: data.bank_details?.bank_phone || "0000000000"
                 }
+                //  latitude: data.latitude || "0.0",
+                // longitude: data.longitude || "0.0"
+               
             };
             break;
         case "mdd":

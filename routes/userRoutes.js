@@ -43,7 +43,7 @@ router.patch("/activate-verify-user-by-admin-or-super-admin/:id", adminOrSuperAd
 
 router.put("/activate-all-users-in-all-cases", activateAllUsersInAllCases);
 
-// router.put("/admin/register-update-from-actor-codes", registerOrUpdateUsersFromActorCodes);
+router.put("/admin/register-update-from-actor-codes", registerOrUpdateUsersFromActorCodes);
 
 //get dealer
 router.get("/user/get-dealer-for-admin", adminOrSuperAdminAuth, getAllDealerForAdmin)

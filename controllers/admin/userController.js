@@ -8,6 +8,8 @@ const { generateAdminCode } = require("../../helpers/adminHelpers");
 const jwt = require("jsonwebtoken");
 const { inactiveActor, editActorCode } = require("../../helpers/actorToUserHelper");
 const mongoose = require('mongoose');
+const ActorCode = require("../../model/ActorCode");
+const { getAdditionalFields } = require("../../helpers/userHelpers");
 const Decimal128 = mongoose.Types.Decimal128;
 
 
@@ -1047,3 +1049,49 @@ exports.getAllDealerForAdmin = async (req, res) => {
     }
   };
   
+
+
+  // Rakshita implemented by Nameera
+// API to register or update users from ActorCodes
+exports.registerOrUpdateUsersFromActorCodes = async (req, res) => {
+ try {
+     const actorCodes = await ActorCode.find();
+     
+     for (const actor of actorCodes) {
+         const existingUser = await User.findOne({ code: actor.code });
+
+         if (existingUser) {
+             // Check if fields need updating
+             const updatedFields = {};
+             if (existingUser.name !== actor.name) updatedFields.name = actor.name;
+             if (existingUser.position !== actor.position) updatedFields.position = actor.position;
+             if (existingUser.role !== actor.role) updatedFields.role = actor.role;
+             if (existingUser.status !== actor.status) updatedFields.status = actor.status;
+
+             if (Object.keys(updatedFields).length > 0) {
+                 await User.updateOne({ code: actor.code }, { $set: updatedFields });
+             }
+         } else {
+             // Create new user
+             const hashedPassword = await bcrypt.hash("123456", 10);
+             const newUser = new User({
+                 name: actor.name,
+                 code: actor.code,
+                 password: hashedPassword,
+                 role: actor.role,
+                 status: actor.status,
+                 email: actor.email || `${actor.code}@dummyemail.com`,
+                 ...getAdditionalFields(actor.role, actor)
+             });
+             await newUser.save();
+         }
+     }
+
+     // ✅ Response should be sent **after** the loop
+     res.status(200).json({ message: "Users registered/updated successfully" });
+
+ } catch (error) {
+     console.error(error);
+     res.status(500).json({ message: "Internal server error" });
+ }
+};

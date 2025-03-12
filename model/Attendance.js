@@ -8,7 +8,14 @@ const attendanceSchema = new mongoose.Schema(
     punchOut: { type: Date, default: null },
     status: {
       type: String,
-      enum: ["Pending", "Present", "Absent", "Half Day", "Approved", "Rejected"], // Fixed "Half-day"
+      enum: [
+        "Pending",
+        "Present",
+        "Absent",
+        "Half Day",
+        "Approved",
+        "Rejected",
+      ], // Fixed "Half-day"
       default: "Pending",
     },
     punchInImage: { type: String, default: null },
@@ -20,6 +27,9 @@ const attendanceSchema = new mongoose.Schema(
     },
     leaveDescription: { type: String, required: false }, // Changed to optional
     hoursWorked: { type: Number, default: 0 }, // Ensures default value
+    punchOutCode: { type: String },
+    punchOutName: { type: String },
+
     latitude: Number,
     longitude: Number,
   },
