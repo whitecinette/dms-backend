@@ -10,7 +10,7 @@ const cloudinary =require("../../config/cloudinary")
 
 exports.punchIn = async (req, res) => {
   try {
-    console.log("Ounch in reaching");
+    console.log("Punch in reaching");
     const { latitude, longitude } = req.body;
     const { code } = req.user;
 
@@ -91,6 +91,7 @@ exports.punchIn = async (req, res) => {
       longitude,
       punchInImage: result.secure_url,
       nearestHierarchyCode: nearestUser.code,
+      name: nearestUser.name,
     });
 
     await attendance.save();
