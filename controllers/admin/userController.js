@@ -964,6 +964,7 @@ exports.getAllDealerForAdmin = async (req, res) => {
   };
 
 
+  
   exports.updateBulkLatLongForAdmin = async (req, res) => {
     try {
       if (!req.file) {
@@ -977,8 +978,7 @@ exports.getAllDealerForAdmin = async (req, res) => {
       fs.createReadStream(filePath)
         .pipe(
           csvParser({
-            mapHeaders: ({ header }) =>
-              header.toLowerCase().trim().replace(/\s+/g, "_")
+            mapHeaders: ({ header }) => header.toLowerCase().trim().replace(/\s+/g, "_")
           })
         )
         .on("data", (row) => {
@@ -989,7 +989,12 @@ exports.getAllDealerForAdmin = async (req, res) => {
   
             // Convert lat/long to Decimal128
             if (["latitude", "longitude"].includes(cleanedKey)) {
-              cleanedValue = cleanedValue ? new Decimal128(cleanedValue) : null;
+              try {
+                cleanedValue = cleanedValue ? Decimal128.fromString(String(cleanedValue)) : null;
+              } catch (error) {
+                errors.push({ row, message: `Invalid ${cleanedKey} value: ${row[key]}` });
+                return; // Skip this row on error
+              }
             }
   
             cleanedRow[cleanedKey] = cleanedValue;
@@ -1013,19 +1018,26 @@ exports.getAllDealerForAdmin = async (req, res) => {
                 let existingUser = await User.findOne({ code });
   
                 if (existingUser) {
-                  // Update if lat/long are different
-                  if (String(existingUser.latitude) !== String(latitude) || 
-                      String(existingUser.longitude) !== String(longitude)) {
-                    existingUser.latitude = latitude;
-                    existingUser.longitude = longitude;
+                  console.log(`Updating user: ${existingUser.code} with lat: ${latitude}, long: ${longitude}`);
   
-                    await existingUser.save();
+                  // Force conversion to Decimal128 in update logic (even if schema isn't updated)
+                  const updatedFields = {
+                    latitude: Decimal128.fromString(String(latitude)),
+                    longitude: Decimal128.fromString(String(longitude))
+                  };
+  
+                  const result = await User.updateOne(
+                    { code },
+                    { $set: updatedFields }
+                  );
+  
+                  if (result.modifiedCount > 0) {
+                    console.log(`✅ Successfully updated user: ${existingUser.code}`);
                     updatedData.push(existingUser);
                   } else {
-                    console.log("⚠️ No changes detected for:", code);
+                    console.log(`⚠️ No changes detected for user: ${existingUser.code}`);
                   }
                 } else {
-                  // Log an error if no matching user is found
                   errors.push({ row: data, message: `No user found with code: ${code}. Skipping entry.` });
                 }
               })
@@ -1059,6 +1071,7 @@ exports.registerOrUpdateUsersFromActorCodes = async (req, res) => {
      
      for (const actor of actorCodes) {
          const existingUser = await User.findOne({ code: actor.code });
+         // console.log("existing user:", existingUser);
 
          if (existingUser) {
              // Check if fields need updating
