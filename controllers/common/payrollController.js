@@ -1,136 +1,118 @@
 const ActorCode = require("../../model/ActorCode");
 const Payroll = require("../../model/Payroll");
-const Attendance = require("../../model/Attendance")
+const Attendance = require("../../model/Attendance");
+const User = require("../../model/User");
+const moment = require("moment");
 
-
-// Controller to Add Salary
-exports.addSalary = async (req, res) => {
-  const { code, salaryDetails, deductionPreferences } = req.body;
-
-  // Validation
-  if (!code || !salaryDetails || !salaryDetails.CTC) {
-      return res.status(400).json({ message: 'Employee code and CTC are required.' });
-  }
-
-  try {
-      // Check if payroll entry already exists for this employee
-      const existingPayroll = await Payroll.findOne({ code });
-      if (existingPayroll) {
-          return res.status(400).json({ message: 'Payroll entry already exists for this employee.' });
-      }
-
-      // Auto-calculate baseSalary (CTC / 12)
-      const calculatedBaseSalary = Math.round(salaryDetails.CTC / 12);
-
-      // Handle Deduction Preferences from HR
-      const defaultDeductions = [
-          { 
-              name: 'PF', 
-              type: 'percentage', 
-              value: deductionPreferences?.pfPercentage || 12, 
-              isActive: deductionPreferences?.pfDeduct || false 
-          },
-          { name: 'ESI', type: 'percentage', value: 1.75, isActive: deductionPreferences?.esiDeduct || false },
-          { name: 'Professional Tax', type: 'fixed', value: 200, isActive: deductionPreferences?.ptDeduct || false }
-      ];
-
-      // Combine provided deductions with defaults
-      salaryDetails.deductions = salaryDetails.deductions || [];
-      salaryDetails.deductions = [...salaryDetails.deductions, ...defaultDeductions];
-
-      // // Remove overtime details since it's not required here
-      // delete salaryDetails.overtimeHours;
-      // delete salaryDetails.overtimeRate;
-
-      // Create new Payroll entry
-      const newPayroll = new Payroll({
-          code,
-          salaryDetails: {
-              ...salaryDetails,
-              baseSalary: calculatedBaseSalary,  // Auto-set Base Salary
-          }
-      });
-
-      await newPayroll.save();
-      res.status(201).json({ message: 'Salary added successfully', data: newPayroll });
-
-  } catch (error) {
-      console.error('Error adding salary:', error);
-      res.status(500).json({ message: 'Internal server error' });
-  }
-};
 
 // calculate salary for employee
 exports.calculateSalary = async (req, res) => {
-  const { code, month, year } = req.body;
+ const { code, salaryMonth, salaryDetails, deductionPreferences } = req.body;
 
-  // Validation
-  if (!code || !month || !year) {
-      return res.status(400).json({ message: 'Employee code, month, and year are required.' });
-  }
+ // Validation
+ if (!code || !salaryMonth) {
+     return res.status(400).json({ message: 'Employee code and salary month are required.' });
+ }
 
-  try {
-      // Fetch payroll details
-      const payroll = await Payroll.findOne({ code });
-      if (!payroll) {
-          return res.status(404).json({ message: 'Payroll entry not found for this employee.' });
-      }
+ if (!moment(salaryMonth, 'MM/YYYY', true).isValid()) {
+     return res.status(400).json({ message: 'Invalid salary month format. Use MM/YYYY.' });
+ }
 
-      // Fetch attendance data for the specified month and year
-      const attendanceRecords = await Attendance.find({
-          code,
-          date: {
-              $gte: new Date(`${year}-${month}-01`),
-              $lt: new Date(`${year}-${month}-31`)
-          }
-      });
+ try {
+     // Check for existing payroll entry
+     const existingPayroll = await Payroll.findOne({ code, salaryMonth });
+     if (existingPayroll) {
+         return res.status(400).json({ message: 'Salary already calculated for this month.' });
+     }
 
-      const daysInMonth = new Date(year, month, 0).getDate(); // Total days in the month
-      const absentDays = attendanceRecords.filter(record => record.status === 'Absent').length;
-      const halfDays = attendanceRecords.filter(record => record.status === 'Half Day').length;
+     // Fetch employee CTC
+     const user = await User.findOne({ code });
+     if (!user || !user.CTC) {
+         return res.status(404).json({ message: 'Employee or CTC not found.' });
+     }
 
-      // Calculate salary per day
-      const baseSalary = payroll.salaryDetails.baseSalary;
-      const salaryPerDay = baseSalary / daysInMonth;
+     // Base salary calculation
+     const calculatedBaseSalary = Math.round(user.CTC / 12);
+     const daysInMonth = moment(salaryMonth, 'MM/YYYY').daysInMonth();
+     const perDaySalary = calculatedBaseSalary / daysInMonth;
 
-      // Calculate deductions
-      let totalDeductions = 0;
-      payroll.salaryDetails.deductions.forEach(deduction => {
-          if (deduction.isActive) {
-              totalDeductions += deduction.type === 'percentage'
-                  ? (baseSalary * deduction.value) / 100
-                  : deduction.value;
-          }
-      });
+     // Attendance deduction calculation
+     const [startOfMonth, endOfMonth] = [
+         moment(salaryMonth, 'MM/YYYY').startOf('month').toDate(),
+         moment(salaryMonth, 'MM/YYYY').endOf('month').toDate(),
+     ];
 
-      // Calculate attendance-based salary deductions
-      const attendanceDeductions = (absentDays * salaryPerDay) + (halfDays * salaryPerDay * 0.5);
+     const attendanceRecords = await Attendance.find({
+         code,
+         date: { $gte: startOfMonth, $lte: endOfMonth }
+     });
 
-      // Calculate additions (e.g., incentives)
-      const totalAdditions = payroll.salaryDetails.bonuses
-          ? payroll.salaryDetails.bonuses.reduce((sum, bonus) => sum + bonus.amount, 0)
-          : 0;
+     const attendanceDeduction = attendanceRecords.reduce((total, record) => {
+         if (record.status === 'Absent') return total + perDaySalary;
+         if (record.status === 'Half Day') return total + perDaySalary / 2;
+         return total;
+     }, 0);
 
-      // Final salary calculation
-      const netSalary = Math.round(baseSalary + totalAdditions - totalDeductions - attendanceDeductions);
+     // Add attendance deduction to salary details
+     salaryDetails.deductions = [
+         ...(salaryDetails.deductions || []),
+         { name: 'Attendance Deduction', type: 'fixed', value: attendanceDeduction, isActive: true }
+     ];
 
-      // Update Payroll model with calculated salary
-      payroll.totalSalary = netSalary;
-      await payroll.save();
+     // Handle deduction preferences dynamically
+     const deductionMap = {
+         PF: { type: 'percentage', value: deductionPreferences?.pfPercentage || 12, isActive: deductionPreferences?.pfDeduct || false },
+         ESI: { type: 'percentage', value: 1.75, isActive: deductionPreferences?.esiDeduct || false },
+         'Professional Tax': { type: 'fixed', value: 200, isActive: deductionPreferences?.ptDeduct || false }
+     };
 
-      res.status(200).json({
-          message: 'Salary calculated and saved successfully',
-          data:{
-            attendanceDeductions,
-            payroll
-          }
-      });
+     // Merge existing deductions with default ones efficiently
+     salaryDetails.deductions = [
+         ...salaryDetails.deductions,
+         ...Object.entries(deductionMap)
+             .filter(([name]) => !salaryDetails.deductions.some(d => d.name === name))
+             .map(([name, deduction]) => ({ name, ...deduction }))
+     ];
 
-  } catch (error) {
-      console.error('Error calculating and saving salary:', error);
-      res.status(500).json({ message: 'Internal server error' });
-  }
+     // Salary calculation
+     const totalSalary = [
+         { amount: calculatedBaseSalary },
+         ...(salaryDetails.bonuses || []),
+         ...(salaryDetails.other || []).map(entry => ({
+             amount: entry.type === 'addition' ? entry.amount : -entry.amount
+         })),
+         ...(salaryDetails.deductions || [])
+             .filter(d => d.isActive)
+             .map(deduction => ({
+                 amount: deduction.type === 'percentage'
+                     ? -(calculatedBaseSalary * (deduction.value / 100))
+                     : -deduction.value
+             }))
+     ].reduce((total, entry) => total + entry.amount, 0);
+
+     // Create and save Payroll entry
+     const newPayroll = new Payroll({
+         code,
+         salaryMonth,
+         salaryDetails: {
+             ...salaryDetails,
+             baseSalary: calculatedBaseSalary,
+             CTC: user.CTC
+         },
+         totalSalary
+     });
+
+     await newPayroll.save();
+     res.status(201).json({ message: 'Salary calculated successfully', data: newPayroll });
+
+ } catch (error) {
+     console.error('Error calculating salary:', error);
+     res.status(500).json({ message: 'Internal server error' });
+ }
 };
+
+
+
 
 // get All Salaries 
 exports.getAllSalaries = async (req, res) => {

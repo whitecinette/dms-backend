@@ -4,8 +4,7 @@ const {getAllSalaries, addSalary, generatePayslipByEmp, calculateSalary } = requ
 const { userAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
-router.post('/add-salary', addSalary);
-router.get('/calculate-salary', calculateSalary);
+router.post('/calculate-salary', calculateSalary);
 router.get('/salary-details', getAllSalaries);
 router.get('/get-salary', userAuth, generatePayslipByEmp);
 

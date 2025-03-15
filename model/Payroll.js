@@ -8,7 +8,6 @@ const PayrollSchema = new mongoose.Schema(
       required: true,
     },
     salaryDetails: {
-      CTC: { type: Number, required: true }, // New CTC field
       baseSalary: { type: Number },          // Auto-calculated field
       deductions: [
         {
@@ -37,8 +36,9 @@ const PayrollSchema = new mongoose.Schema(
     },
     totalSalary: { type: Number },
     payrollDate: { type: Date, default: Date.now },
+    salaryMonth: { type: String, required: true } 
   },
-  { timestamps: true }
+  { strict: false, timestamps: true }
 );
 
 // Salary Calculation Logic (Pre-save Hook)
