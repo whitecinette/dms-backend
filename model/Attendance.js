@@ -29,6 +29,8 @@ const attendanceSchema = new mongoose.Schema(
     hoursWorked: { type: Number, default: 0 }, // Ensures default value
     punchOutCode: { type: String },
     punchOutName: { type: String },
+    punchInCode: { type: String },
+    punchInName: { type: String },
 
     latitude: Number,
     longitude: Number,
