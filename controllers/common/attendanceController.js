@@ -316,31 +316,52 @@ exports.getAttendance = async (req, res) => {
   }
 };
 
-exports.getAttendanceByEmployee = async (req, res) => {
+exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
   try {
-    const { code } = req.params; // Extract user code from JWT token
+    const { code} = req.params; 
+    const { date } = req.query;
 
     if (!code) {
-      return res
-        .status(400)
-        .json({ message: "User code is missing in token." });
+      return res.status(400).json({ message: "User code is missing." });
     }
 
-    // Fetch all attendance records for the user
-    const attendanceRecords = await Attendance.find({ code });
+    // Fetch the employee's name using the code
+    const employee = await ActorCode.findOne({ code });
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found." });
+    }
+
+    // Create query filter
+    const query = { code };
+    if (date) {
+      query.date = new Date(date); // Convert string to Date object for filtering
+    }
+
+    // Fetch attendance records with optional date filter, sorted by latest date
+    const attendanceRecords = await Attendance.find(query)
+      .sort({ date: -1 }) // ✅ Sort by latest date first
+      .lean(); // Convert to plain JavaScript objects
 
     if (!attendanceRecords.length) {
       return res.status(404).json({ message: "No attendance records found." });
     }
 
+    // Count attendance statuses
+    const attendanceCount = {
+      leave: attendanceRecords.filter((record) => record.status === "Approved" || record.status === "Rejected").length,
+      absent: attendanceRecords.filter((record) => record.status === "Absent").length,
+      present: attendanceRecords.filter((record) => record.status === "Present").length,
+    };
+
     res.status(200).json({
       message: "Attendance records fetched successfully",
-      attendance: attendanceRecords,
+      employeeName: employee.name, // Include employee name
+      attendance: attendanceRecords, // Sorted attendance records
+      attendanceCount, // Include attendance counts
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching attendance", error: error.message });
+    console.error("Error fetching attendance:", error);
+    res.status(500).json({ message: "Error fetching attendance", error: error.message });
   }
 };
 
