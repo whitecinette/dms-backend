@@ -351,6 +351,7 @@ exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
       leave: attendanceRecords.filter((record) => record.status === "Approved" || record.status === "Rejected").length,
       absent: attendanceRecords.filter((record) => record.status === "Absent").length,
       present: attendanceRecords.filter((record) => record.status === "Present").length,
+      halfday: attendanceRecords.filter((record) => record.status === "Half Day").length,
     };
 
     res.status(200).json({
