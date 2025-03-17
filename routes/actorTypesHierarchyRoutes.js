@@ -1,5 +1,5 @@
 const express = require('express');
-const { addHierarchy, getActorTypesHierarchyByName, getActorTypesHierarchyByAdmin, editActorTypesHierarchyByAdmin, deleteActorTypesHierarchyByAdmin, addActorTypesHierarchyByAdmin } = require('../controllers/admin/actorTypesHierarchyController');
+const { addHierarchy, getActorTypesHierarchyByName, getActorTypesHierarchyByAdmin, editActorTypesHierarchyByAdmin, deleteActorTypesHierarchyByAdmin, addActorTypesHierarchyByAdmin, getAllActorType } = require('../controllers/admin/actorTypesHierarchyController');
 const { adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
@@ -12,5 +12,6 @@ router.get("/actorTypesHierarchy/get-by-admin",  getActorTypesHierarchyByAdmin)
 router.put("/actorTypesHierarchy/edit-by-admin/:id", adminOrSuperAdminAuth, editActorTypesHierarchyByAdmin)
 router.delete("/actorTypesHierarchy/delete-by-admin/:id", adminOrSuperAdminAuth, deleteActorTypesHierarchyByAdmin)
 router.post("/actorTypesHierarchy/add-by-admin", adminOrSuperAdminAuth, addActorTypesHierarchyByAdmin)
+router.get("/actorTypesHierarchy/get-all-by-admin", getAllActorType)
 
 module.exports = router;

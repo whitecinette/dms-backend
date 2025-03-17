@@ -164,3 +164,16 @@ exports.addActorTypesHierarchyByAdmin = async(req, res) => {
     return res.status(500).json({ message: "Internal server error" })
   }
 }
+
+exports.getAllActorType = async(req, res) =>{
+  try{
+    const actorHierarchy = await ActorTypesHierarchy.find()
+    return res.status(200).json({
+      message:"Successfully get Actor Hierarchy",
+      data: actorHierarchy
+    })
+  }catch(error){
+    console.log(error)
+    return res.status(500).json({ message: "Internal server error" })
+  }
+}

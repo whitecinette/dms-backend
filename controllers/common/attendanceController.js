@@ -595,7 +595,8 @@ exports.getAttendanceByDate = async (req, res) => {
 
 exports.getLatestAttendance = async (req, res) => {
   try {
-    const { date } = req.query;
+    const { date, page = 1, limit = 10, search = "" } = req.query;
+
     if (!date) {
       return res.status(400).json({ message: "Date parameter is required." });
     }
@@ -607,47 +608,70 @@ exports.getLatestAttendance = async (req, res) => {
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // Fetch attendance records within the given date range and sort by punchIn (latest first)
+    // Search filter (case-insensitive)
+    let searchFilter = {};
+    if (search) {
+      const regex = new RegExp(search, "i");
+      searchFilter = { $or: [{ name: regex }, { code: regex }] };
+    }
+
+    // Fetch all attendance records first (no pagination applied yet)
     const allAttendance = await Attendance.find({
       date: { $gte: startOfDay, $lte: endOfDay },
-    }).sort({ punchIn: -1 }); // Sorting by punchIn in descending order (latest first)
+      ...searchFilter,
+    }).sort({ punchIn: -1 });
 
     // Categorize attendance
-    const presentEmployees = allAttendance
-      .filter((record) => record.punchIn && record.status === "Pending")
-      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn)); // Sorting present employees
+    const categorizedAttendance = {
+      Pending: [],
+      Absent: [],
+      "Half-Day": [],
+      Leave: [],
+    };
 
-    const absentEmployees = allAttendance
-      .filter((record) => record.status === "Absent")
-      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn));
+    allAttendance.forEach((record) => {
+      if (record.punchIn && record.status === "Pending") {
+        categorizedAttendance.Pending.push(record);
+      } else if (record.status === "Absent") {
+        categorizedAttendance.Absent.push(record);
+      } else if (record.status === "Half Day") {
+        categorizedAttendance["Half-Day"].push(record);
+      } else if (["Approved", "Rejected"].includes(record.status)) {
+        categorizedAttendance.Leave.push(record);
+      }
+    });
 
-    const halfDayEmployees = allAttendance
-      .filter((record) => record.status === "Half Day")
-      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn));
+    // Function to paginate a category
+    const paginateCategory = (category) => {
+      const startIdx = (Number(page) - 1) * Number(limit);
+      const endIdx = startIdx + Number(limit);
+      return category.slice(startIdx, endIdx);
+    };
 
-    const leaveEmployees = allAttendance
-      .filter((record) => ["Approved", "Rejected"].includes(record.status))
-      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn));
+    // Apply pagination within each category
+    const paginatedData = {
+      Pending: paginateCategory(categorizedAttendance.Pending),
+      Absent: paginateCategory(categorizedAttendance.Absent),
+      "Half-Day": paginateCategory(categorizedAttendance["Half-Day"]),
+      Leave: paginateCategory(categorizedAttendance.Leave),
+    };
 
     res.status(200).json({
       message: "Latest attendance summary fetched successfully",
-      data: {
-        Present: presentEmployees,
-        Absent: absentEmployees,
-        "Half-Day": halfDayEmployees, // Ensure this key is in quotes due to the hyphen
-        Leave: leaveEmployees,
-      },
+      currentPage: Number(page),
+      totalPages: Math.ceil(allAttendance.length / limit),
+      data: paginatedData,
     });
   } catch (error) {
     console.error("Error fetching attendance summary:", error);
-    res
-      .status(500)
-      .json({
-        message: "Error fetching attendance summary",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error fetching attendance summary",
+      error: error.message,
+    });
   }
 };
+
+
 
 // exports.getDealersByEmployeeCode = async (req, res) => {
 //     try {
