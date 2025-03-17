@@ -318,7 +318,7 @@ exports.getAttendance = async (req, res) => {
 
 exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
   try {
-    const { code} = req.params; 
+    const { code } = req.params;
     const { date } = req.query;
 
     if (!code) {
@@ -348,10 +348,16 @@ exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
 
     // Count attendance statuses
     const attendanceCount = {
-      leave: attendanceRecords.filter((record) => record.status === "Approved" || record.status === "Rejected").length,
-      absent: attendanceRecords.filter((record) => record.status === "Absent").length,
-      present: attendanceRecords.filter((record) => record.status === "Present").length,
-      halfday: attendanceRecords.filter((record) => record.status === "Half Day").length,
+      leave: attendanceRecords.filter(
+        (record) => record.status === "Approved" || record.status === "Rejected"
+      ).length,
+      absent: attendanceRecords.filter((record) => record.status === "Absent")
+        .length,
+      present: attendanceRecords.filter((record) => record.status === "Present")
+        .length,
+      halfday: attendanceRecords.filter(
+        (record) => record.status === "Half Day"
+      ).length,
     };
 
     res.status(200).json({
@@ -362,7 +368,9 @@ exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching attendance:", error);
-    res.status(500).json({ message: "Error fetching attendance", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching attendance", error: error.message });
   }
 };
 
@@ -582,6 +590,62 @@ exports.getAttendanceByDate = async (req, res) => {
     res
       .status(500)
       .json({ message: "Error fetching attendance", error: error.message });
+  }
+};
+
+exports.getLatestAttendance = async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) {
+      return res.status(400).json({ message: "Date parameter is required." });
+    }
+
+    // Convert date string to actual Date object & match only for that day
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Fetch attendance records within the given date range and sort by punchIn (latest first)
+    const allAttendance = await Attendance.find({
+      date: { $gte: startOfDay, $lte: endOfDay },
+    }).sort({ punchIn: -1 }); // Sorting by punchIn in descending order (latest first)
+
+    // Categorize attendance
+    const presentEmployees = allAttendance
+      .filter((record) => record.punchIn && record.status === "Pending")
+      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn)); // Sorting present employees
+
+    const absentEmployees = allAttendance
+      .filter((record) => record.status === "Absent")
+      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn));
+
+    const halfDayEmployees = allAttendance
+      .filter((record) => record.status === "Half Day")
+      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn));
+
+    const leaveEmployees = allAttendance
+      .filter((record) => ["Approved", "Rejected"].includes(record.status))
+      .sort((a, b) => new Date(b.punchIn) - new Date(a.punchIn));
+
+    res.status(200).json({
+      message: "Latest attendance summary fetched successfully",
+      data: {
+        Present: presentEmployees,
+        Absent: absentEmployees,
+        "Half-Day": halfDayEmployees, // Ensure this key is in quotes due to the hyphen
+        Leave: leaveEmployees,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching attendance summary:", error);
+    res
+      .status(500)
+      .json({
+        message: "Error fetching attendance summary",
+        error: error.message,
+      });
   }
 };
 
