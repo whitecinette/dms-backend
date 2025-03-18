@@ -1,6 +1,6 @@
 const express = require('express');
-const { punchIn, punchOut,  getAttendanceByEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getAttendanceByDate, getAttendanceByEmployeeForAdmin, getLatestAttendance} = require('../controllers/common/attendanceController');
-const { userAuth } = require('../middlewares/authmiddlewares');
+const { punchIn, punchOut,  getAttendanceByEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getAttendanceByDate, getAttendanceByEmployeeForAdmin, getLatestAttendance, editAttendanceByID} = require('../controllers/common/attendanceController');
+const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const { upload } = require("../services/fileUpload");
 const upload_img = require('../middlewares/upload');
 const router = express.Router();
@@ -22,5 +22,6 @@ router.get('/get-all-leaves', getAllEmpLeaves)
 
 router.get('/get-attendance-by-date/:date', getAttendanceByDate)
 router.get('/get-latest-attendance-by-date', getLatestAttendance)
+router.put('/edit-attendance/:id', adminOrSuperAdminAuth, editAttendanceByID)
 
 module.exports = router;

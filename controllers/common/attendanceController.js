@@ -595,7 +595,7 @@ exports.getAttendanceByDate = async (req, res) => {
 
 exports.getLatestAttendance = async (req, res) => {
   try {
-    const { date, page = 1, limit = 10, search = "" } = req.query;
+    const { date, page = 1, limit = 50, search = "" } = req.query;
 
     if (!date) {
       return res.status(400).json({ message: "Date parameter is required." });
@@ -611,56 +611,57 @@ exports.getLatestAttendance = async (req, res) => {
     // Search filter (case-insensitive)
     let searchFilter = {};
     if (search) {
-      const regex = new RegExp(search, "i");
+      const regex = new RegExp(search, "i"); // Case-insensitive search
       searchFilter = { $or: [{ name: regex }, { code: regex }] };
     }
 
-    // Fetch all attendance records first (no pagination applied yet)
+    // Fetch attendance records with filters, pagination, and sorting
     const allAttendance = await Attendance.find({
       date: { $gte: startOfDay, $lte: endOfDay },
       ...searchFilter,
-    }).sort({ punchIn: -1 });
+    })
+      .sort({ punchIn: -1 }) // Sorting by punchIn (latest first)
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit));
 
-    // Categorize attendance
-    const categorizedAttendance = {
-      Pending: [],
-      Absent: [],
-      "Half-Day": [],
-      Leave: [],
-    };
-
-    allAttendance.forEach((record) => {
-      if (record.punchIn && record.status === "Pending") {
-        categorizedAttendance.Pending.push(record);
-      } else if (record.status === "Absent") {
-        categorizedAttendance.Absent.push(record);
-      } else if (record.status === "Half Day") {
-        categorizedAttendance["Half-Day"].push(record);
-      } else if (["Approved", "Rejected"].includes(record.status)) {
-        categorizedAttendance.Leave.push(record);
-      }
+    // Get total count (for pagination)
+    const totalRecords = await Attendance.countDocuments({
+      date: { $gte: startOfDay, $lte: endOfDay },
+      ...searchFilter,
     });
 
-    // Function to paginate a category
-    const paginateCategory = (category) => {
-      const startIdx = (Number(page) - 1) * Number(limit);
-      const endIdx = startIdx + Number(limit);
-      return category.slice(startIdx, endIdx);
-    };
+    // Categorize attendance
+    const presentEmployees = allAttendance.filter(
+      (record) => record.status === "Present"
+    );
+    const pendingEmployees = allAttendance.filter(
+      (record) => record.punchIn && record.status === "Pending"
+    );
 
-    // Apply pagination within each category
-    const paginatedData = {
-      Pending: paginateCategory(categorizedAttendance.Pending),
-      Absent: paginateCategory(categorizedAttendance.Absent),
-      "Half-Day": paginateCategory(categorizedAttendance["Half-Day"]),
-      Leave: paginateCategory(categorizedAttendance.Leave),
-    };
+    const absentEmployees = allAttendance.filter(
+      (record) => record.status === "Absent"
+    );
+
+    const halfDayEmployees = allAttendance.filter(
+      (record) => record.status === "Half Day"
+    );
+
+    const leaveEmployees = allAttendance.filter((record) =>
+      ["Approved", "Rejected"].includes(record.status)
+    );
 
     res.status(200).json({
       message: "Latest attendance summary fetched successfully",
       currentPage: Number(page),
-      totalPages: Math.ceil(allAttendance.length / limit),
-      data: paginatedData,
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data: {
+        Present: presentEmployees,
+        Pending: pendingEmployees,
+        Absent: absentEmployees,
+        "Half-Day": halfDayEmployees, // Key quoted due to hyphen
+        Leave: leaveEmployees,
+      },
     });
   } catch (error) {
     console.error("Error fetching attendance summary:", error);
@@ -670,6 +671,22 @@ exports.getLatestAttendance = async (req, res) => {
     });
   }
 };
+
+
+exports.editAttendanceByID = async(req, res)=>{
+  try{
+    const {id} = req.params
+    const update = req.body
+    const AttendanceEntity = await Attendance.findById(id);
+    if(!AttendanceEntity){
+      return res.status(404).json("user not found");
+    }
+    const updateData = await Attendance.findByIdAndUpdate(id, update, {new: true})
+    return res.status(200).json({message:"user updated successfully"})
+  }catch(error){
+    console.log(error)
+  }
+}
 
 
 
