@@ -596,40 +596,40 @@ exports.getAttendanceByDate = async (req, res) => {
 
 exports.getLatestAttendance = async (req, res) => {
   try {
-    const { date, page = 1, limit = 50, search = "" } = req.query;
+    const { date, page = 1, limit = 10, search = "" } = req.query;
+    console.log(req.query)
 
-    if (!date) {
-      return res.status(400).json({ message: "Date parameter is required." });
+    let filter = {};
+
+    // Apply Date Filter (if date is provided)
+    if (date) {
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      filter.date = { $gte: startOfDay, $lte: endOfDay };
     }
 
-    // Convert date string to actual Date object & match only for that day
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    // Search filter (case-insensitive)
-    let searchFilter = {};
+    // Apply Search Filter (if search is provided)
     if (search) {
-      const regex = new RegExp(search, "i"); // Case-insensitive search
-      searchFilter = { $or: [{ name: regex }, { code: regex }] };
+      const regex = new RegExp(search, "i");
+      filter.$or = [{ code: regex }];
     }
 
     // Fetch attendance records with filters, pagination, and sorting
-    let allAttendance = await Attendance.find({
-      date: { $gte: startOfDay, $lte: endOfDay },
-      ...searchFilter,
-    })
+    let allAttendance = await Attendance.find(filter)
       .sort({ punchIn: -1 })
       .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit));
+      .limit(Number(limit))
+      .lean(); // Use .lean() to improve performance
 
     // Extract all unique codes from attendance records
     const attendanceCodes = allAttendance.map((record) => record.code);
     
     // Fetch employee names from ActorCode model
-    const actors = await ActorCode.find({ code: { $in: attendanceCodes } }, "code name");
+    const actors = await ActorCode.find({ code: { $in: attendanceCodes } }, "code name").lean();
     const actorMap = actors.reduce((acc, actor) => {
       acc[actor.code] = actor.name;
       return acc;
@@ -637,7 +637,7 @@ exports.getLatestAttendance = async (req, res) => {
 
     // Attach employee names to each attendance record
     allAttendance = allAttendance.map((record) => ({
-      ...record.toObject(),
+      ...record,
       name: actorMap[record.code] || "Unknown",
     }));
 
@@ -647,11 +647,8 @@ exports.getLatestAttendance = async (req, res) => {
     res.status(200).json({
       message: "Latest attendance summary fetched successfully",
       currentPage: Number(page),
-      totalRecords: await Attendance.countDocuments({
-        date: { $gte: startOfDay, $lte: endOfDay },
-        ...searchFilter,
-      }),
-      totalPages: Math.ceil(allAttendance.length / limit),
+      totalRecords: await Attendance.countDocuments(filter),
+      totalPages: Math.ceil(await Attendance.countDocuments(filter)/ limit),
       data: {
         Present: categorize("Present"),
         Pending: categorize("Pending"),
@@ -668,6 +665,7 @@ exports.getLatestAttendance = async (req, res) => {
     });
   }
 };
+
 
 
 
