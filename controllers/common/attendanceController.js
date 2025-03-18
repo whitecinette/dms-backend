@@ -4,6 +4,7 @@ const moment = require("moment");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
 const getDistance = require("../../helpers/attendanceHelper");
+const { Parser } = require("json2csv");
 
 const cloudinary = require("../../config/cloudinary");
 // punch in
@@ -616,51 +617,47 @@ exports.getLatestAttendance = async (req, res) => {
     }
 
     // Fetch attendance records with filters, pagination, and sorting
-    const allAttendance = await Attendance.find({
+    let allAttendance = await Attendance.find({
       date: { $gte: startOfDay, $lte: endOfDay },
       ...searchFilter,
     })
-      .sort({ punchIn: -1 }) // Sorting by punchIn (latest first)
+      .sort({ punchIn: -1 })
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit));
 
-    // Get total count (for pagination)
-    const totalRecords = await Attendance.countDocuments({
-      date: { $gte: startOfDay, $lte: endOfDay },
-      ...searchFilter,
-    });
+    // Extract all unique codes from attendance records
+    const attendanceCodes = allAttendance.map((record) => record.code);
+    
+    // Fetch employee names from ActorCode model
+    const actors = await ActorCode.find({ code: { $in: attendanceCodes } }, "code name");
+    const actorMap = actors.reduce((acc, actor) => {
+      acc[actor.code] = actor.name;
+      return acc;
+    }, {});
+
+    // Attach employee names to each attendance record
+    allAttendance = allAttendance.map((record) => ({
+      ...record.toObject(),
+      name: actorMap[record.code] || "Unknown",
+    }));
 
     // Categorize attendance
-    const presentEmployees = allAttendance.filter(
-      (record) => record.status === "Present"
-    );
-    const pendingEmployees = allAttendance.filter(
-      (record) => record.punchIn && record.status === "Pending"
-    );
-
-    const absentEmployees = allAttendance.filter(
-      (record) => record.status === "Absent"
-    );
-
-    const halfDayEmployees = allAttendance.filter(
-      (record) => record.status === "Half Day"
-    );
-
-    const leaveEmployees = allAttendance.filter((record) =>
-      ["Approved", "Rejected"].includes(record.status)
-    );
+    const categorize = (status) => allAttendance.filter((record) => record.status === status);
 
     res.status(200).json({
       message: "Latest attendance summary fetched successfully",
       currentPage: Number(page),
-      totalRecords,
-      totalPages: Math.ceil(totalRecords / limit),
+      totalRecords: await Attendance.countDocuments({
+        date: { $gte: startOfDay, $lte: endOfDay },
+        ...searchFilter,
+      }),
+      totalPages: Math.ceil(allAttendance.length / limit),
       data: {
-        Present: presentEmployees,
-        Pending: pendingEmployees,
-        Absent: absentEmployees,
-        "Half-Day": halfDayEmployees, // Key quoted due to hyphen
-        Leave: leaveEmployees,
+        Present: categorize("Present"),
+        Pending: categorize("Pending"),
+        Absent: categorize("Absent"),
+        "Half-Day": categorize("Half Day"),
+        Leave: allAttendance.filter((record) => ["Approved", "Rejected"].includes(record.status)),
       },
     });
   } catch (error) {
@@ -671,6 +668,7 @@ exports.getLatestAttendance = async (req, res) => {
     });
   }
 };
+
 
 
 exports.editAttendanceByID = async(req, res)=>{
@@ -688,6 +686,40 @@ exports.editAttendanceByID = async(req, res)=>{
   }
 }
 
+
+exports.downloadAllAttendance = async (req, res) => {
+  try {
+    let allAttendance = await Attendance.find().sort({ date: -1 }).lean();
+
+    const attendanceCodes = allAttendance.map((record) => record.code);
+    const actors = await ActorCode.find({ code: { $in: attendanceCodes } }, "code name");
+    const actorMap = actors.reduce((acc, actor) => {
+      acc[actor.code] = actor.name;
+      return acc;
+    }, {});
+
+    allAttendance = allAttendance.map((record) => ({
+      name: actorMap[record.code] || "Unknown",
+      code: record.code,
+      date: record.date ? new Date(record.date).toLocaleDateString() : "", 
+      punchIn: record.punchIn ? new Date(record.punchIn).toLocaleTimeString() : "",
+      punchOut: record.punchOut ? new Date(record.punchOut).toLocaleTimeString() : "",
+      status: record.status,
+      workingHours: record.workingHours || "0",
+    }));
+
+    const fields = ["name", "code", "date", "punchIn", "punchOut", "status", "workingHours"];
+    const parser = new Parser({ fields });
+    const csv = parser.parse(allAttendance);
+
+    res.header("Content-Type", "text/csv");
+    res.attachment("all_attendance_data.csv");
+    return res.send(csv);
+  } catch (error) {
+    console.error("Error downloading attendance data:", error);
+    res.status(500).json({ message: "Error downloading attendance data", error: error.message });
+  }
+};
 
 
 // exports.getDealersByEmployeeCode = async (req, res) => {

@@ -40,7 +40,7 @@ exports.getOrderForAdmin = async (req, res) => {
 
     // ✅ Query the database with correct filter
     const orders = await Order.find(filter)
-      .populate("Products.ProductId", "Model Price")
+      .populate("Products.ProductId", "product_name price")
       .populate("UserId", "name")
       .sort({ OrderDate: -1 })
       .lean();
@@ -76,8 +76,8 @@ exports.editOrderForAdmin = async (req, res) => {
     }
 
     const updatedOrder = await Order.findByIdAndUpdate(id, updates, {
-      new: true,
-      runValidators: true,
+        new: true,
+        runValidators: true,
     });
 
     if (!updatedOrder) {
