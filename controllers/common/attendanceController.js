@@ -596,8 +596,8 @@ exports.getAttendanceByDate = async (req, res) => {
 
 exports.getLatestAttendance = async (req, res) => {
   try {
-    const { date, page = 1, limit = 10, search = "" } = req.query;
-    console.log(req.query)
+    const { date, page = 1, limit = 10, search = "", status= "" } = req.query;
+    // console.log(req.query)
 
     let filter = {};
 
@@ -617,10 +617,13 @@ exports.getLatestAttendance = async (req, res) => {
       const regex = new RegExp(search, "i");
       filter.$or = [{ code: regex }];
     }
+    if(status){
+      filter.status = status
+    }
 
     // Fetch attendance records with filters, pagination, and sorting
     let allAttendance = await Attendance.find(filter)
-      .sort({ punchIn: -1 })
+      .sort({ date: -1, punchIn:-1})
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit))
       .lean(); // Use .lean() to improve performance
@@ -649,13 +652,7 @@ exports.getLatestAttendance = async (req, res) => {
       currentPage: Number(page),
       totalRecords: await Attendance.countDocuments(filter),
       totalPages: Math.ceil(await Attendance.countDocuments(filter)/ limit),
-      data: {
-        Present: categorize("Present"),
-        Pending: categorize("Pending"),
-        Absent: categorize("Absent"),
-        "Half-Day": categorize("Half Day"),
-        Leave: allAttendance.filter((record) => ["Approved", "Rejected"].includes(record.status)),
-      },
+      data: allAttendance,
     });
   } catch (error) {
     console.error("Error fetching attendance summary:", error);
@@ -703,7 +700,7 @@ exports.downloadAllAttendance = async (req, res) => {
       punchIn: record.punchIn ? new Date(record.punchIn).toLocaleTimeString() : "",
       punchOut: record.punchOut ? new Date(record.punchOut).toLocaleTimeString() : "",
       status: record.status,
-      workingHours: record.workingHours || "0",
+      workingHours: record.hoursWorked || "0",
     }));
 
     const fields = ["name", "code", "date", "punchIn", "punchOut", "status", "workingHours"];

@@ -121,17 +121,13 @@ exports.getHierarchEntriesForAdmin = async (req, res) => {
     const {
       page = 1,
       limit = 50,
-      sort = "createdAt",
-      order = "",
-      search = "",
+      hierarchy_name = "",
     } = req.query;
     const filters = {};
-    if (search) {
-      filters.$or = [{ hierarchy_name: { $regex: search, $options: "i" } }];
+    if (hierarchy_name) {
+      filters.$or = [{ hierarchy_name: { $regex: hierarchy_name, $options: "i" } }];
     }
-    const sortOrder = order === "-1" ? -1 : 1;
     const actorTypesHierarchy = await HierarchyEntries.find(filters)
-      .sort({ [sort]: sortOrder })
       .limit(Number(limit))
       .skip((Number(page) - 1) * Number(limit));
 
