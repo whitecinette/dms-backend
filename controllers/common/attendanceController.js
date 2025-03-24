@@ -570,6 +570,9 @@ exports.getAttendanceByDate = async (req, res) => {
     const presentCount = attendanceRecords.filter(
       (record) => record.status === "Present"
     ).length;
+    const pendingCount = attendanceRecords.filter(
+      (record) => record.status === "Pending"
+    ).length;
     const leaveCount = attendanceRecords.filter(
       (record) => record.status === "Rejected" || record.status === "Approved"
     ).length;
@@ -585,6 +588,7 @@ exports.getAttendanceByDate = async (req, res) => {
         present: presentCount,
         leave: leaveCount,
         absent: absentCount,
+        pending: pendingCount
       },
     });
   } catch (error) {
