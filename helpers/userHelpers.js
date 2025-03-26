@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 exports.getAdditionalFields = (role, data) => {
     let additionalFields = {};
     switch (role.toLowerCase()) {
@@ -101,8 +102,8 @@ exports.getAdditionalFields = (role, data) => {
          shop_anniversary: data.shop_anniversary || "01-01-2000",
          credit_limit: data.credit_limit || 0,
          geotag_picture: data.geotag_picture || "Not Available",
-         latitude: data.latitude || "0.0",
-         longitude: data.longitude || "0.0"
+         latitude: mongoose.Types.Decimal128.fromString(data.latitude?.toString() || "0.0"),
+         longitude: mongoose.Types.Decimal128.fromString(data.longitude?.toString() || "0.0")
      };
     break;
 
