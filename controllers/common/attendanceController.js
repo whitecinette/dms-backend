@@ -11,7 +11,6 @@ const cloudinary = require("../../config/cloudinary");
 
 exports.punchIn = async (req, res) => {
   try {
-    console.log("Punch in reaching");
     const { latitude, longitude } = req.body;
     const { code } = req.user;
 
@@ -107,16 +106,11 @@ exports.punchIn = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-      return res.status(400).json({
-        message:
-          "You are too far from the nearest hierarchy member to punch in.",
-        nearestUser: {
-          code: nearestUser?.code || "N/A",
-          name: nearestUser?.name || "Unknown",
-        },
-        distance: minDistance,
-      });
-    }
+     return res.status(400).json({
+       message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(2)} meters away.`,
+     });
+   }
+   
 
     if (!req.file) {
       return res.status(400).json({
@@ -234,12 +228,9 @@ exports.punchOut = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-      return res.status(400).json({
-        message:
-          "You are too far from the nearest hierarchy member to punch out.",
-        nearestUser,
-        distance: minDistance,
-      });
+     return res.status(400).json({
+      message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(2)} meters away.`,
+    });
     }
 
     if (!req.file) {
