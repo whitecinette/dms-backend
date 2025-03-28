@@ -765,7 +765,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     }
 
     console.log("Dealers for dashboard: ", dealerCodes);
-    console.log("No. of dealers: ", dealerCodes.length);
+    // console.log("No. of dealers: ", dealerCodes.length);
 
     // Calculate LMTD date range
     let lmtdStartDate = new Date(startDate);
