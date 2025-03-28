@@ -1,5 +1,5 @@
 const express = require('express');
-const { punchIn, punchOut,  getAttendanceByEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getAttendanceByDate, getAttendanceByEmployeeForAdmin, getLatestAttendance, editAttendanceByID, downloadAllAttendance} = require('../controllers/common/attendanceController');
+const { punchIn, punchOut,  getAttendanceByEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getAttendanceByDate, getAttendanceByEmployeeForAdmin, getLatestAttendance, editAttendanceByID, downloadAllAttendance, deleteAttendanceByID} = require('../controllers/common/attendanceController');
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const { upload } = require("../services/fileUpload");
 const upload_img = require('../middlewares/upload');
@@ -24,5 +24,6 @@ router.get('/get-attendance-by-date/:date', getAttendanceByDate)
 router.get('/get-latest-attendance-by-date', getLatestAttendance)
 router.put('/edit-attendance/:id', adminOrSuperAdminAuth, editAttendanceByID)
 router.get('/download-all-attendance', adminOrSuperAdminAuth, downloadAllAttendance)
+router.delete('/delete-employee-attendance/:id', adminOrSuperAdminAuth, deleteAttendanceByID)
 
 module.exports = router;

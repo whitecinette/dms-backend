@@ -682,7 +682,10 @@ exports.downloadAllAttendance = async (req, res) => {
     let allAttendance = await Attendance.find().sort({ date: -1 }).lean();
 
     const attendanceCodes = allAttendance.map((record) => record.code);
-    const actors = await ActorCode.find({ code: { $in: attendanceCodes } }, "code name");
+    const actors = await ActorCode.find(
+      { code: { $in: attendanceCodes } },
+      "code name"
+    );
     const actorMap = actors.reduce((acc, actor) => {
       acc[actor.code] = actor.name;
       return acc;
@@ -691,14 +694,32 @@ exports.downloadAllAttendance = async (req, res) => {
     allAttendance = allAttendance.map((record) => ({
       name: actorMap[record.code] || "Unknown",
       code: record.code,
-      date: record.date ? new Date(record.date).toLocaleDateString() : "", 
-      punchIn: record.punchIn ? new Date(record.punchIn).toLocaleTimeString() : "",
-      punchOut: record.punchOut ? new Date(record.punchOut).toLocaleTimeString() : "",
+      date: record.punchIn
+        ? new Date(record.punchIn).toISOString().split("T")[0]
+        : "N/A",
+      punchIn: record.punchIn
+        ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : "N/A",
+      punchOut: record.punchOut
+        ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : "N/A",
       status: record.status,
       workingHours: record.hoursWorked || "0",
     }));
 
-    const fields = ["name", "code", "date", "punchIn", "punchOut", "status", "workingHours"];
+    const fields = [
+      "name",
+      "code",
+      "date",
+      "punchIn",
+      "punchOut",
+      "status",
+      "workingHours",
+    ];
     const parser = new Parser({ fields });
     const csv = parser.parse(allAttendance);
 
@@ -707,7 +728,42 @@ exports.downloadAllAttendance = async (req, res) => {
     return res.send(csv);
   } catch (error) {
     console.error("Error downloading attendance data:", error);
-    res.status(500).json({ message: "Error downloading attendance data", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Error downloading attendance data",
+        error: error.message,
+      });
+  }
+};
+
+exports.deleteAttendanceByID = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Id is not given" });
+    }
+
+    const employee = await Attendance.findById(id);
+
+    if (!employee) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Employee not found" });
+    }
+
+    await Attendance.findByIdAndDelete(id);
+
+    return res
+      .status(200)
+      .json({ success: true, message: " successfully delete employee" });
+  } catch (err) {
+    console.log(err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
