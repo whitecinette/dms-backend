@@ -221,12 +221,13 @@ exports.updateWeeklyBeatMappingStatusWithProximity = async (req, res) => {
     ); // Using the given function
 
     if (distance > allowedRadius) {
-      return res.status(403).json({
-        error: "You are too far from the dealer's location.",
-        distanceFromDealer: `${distance.toFixed(2)} meters`,
+     return res.status(403).json({
+       error: "You are too far from the dealer's location.",
+       distanceFromDealer: `${distance.toFixed(2)} meters`
       });
-    }
 
+   }
+   
     // Update the status if the employee is within the allowed radius
     dealer.status = "done";
     dealer.distance = `${distance.toFixed(2)} meters`;

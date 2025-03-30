@@ -1092,6 +1092,7 @@ exports.registerOrUpdateUsersFromActorCodes = async (req, res) => {
                  code: actor.code,
                  password: hashedPassword,
                  role: actor.role,
+                 position: actor.position,
                  status: actor.status,
                  email: actor.email || `${actor.code}@dummyemail.com`,
                  ...getAdditionalFields(actor.role, actor)
