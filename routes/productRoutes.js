@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin, editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById } = require("../controllers/admin/productController");
+const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin, editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById, getUniqueBrands, getProductsByBrand } = require("../controllers/admin/productController");
 const {adminOrSuperAdminAuth} = require("../middlewares/authmiddlewares");
 const { upload } = require('../services/fileUpload');
 // const upload = require("../helpers/multerHelper");
@@ -21,6 +21,9 @@ router.post("/products/upload-csv", upload.single("file"), uploadProductsThrough
 
 // h.D.s
 router.get("/product/by-id/:productId", getProductById);
+
+router.get("/user/get-unique-brands", getUniqueBrands);
+router.post("/user/get-products-by-brand", getProductsByBrand);
 
 
 module.exports = router;

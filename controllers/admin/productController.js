@@ -365,3 +365,50 @@ exports.getProductById = async (req, res) => {
       return res.status(500).json({ error: 'Internal Server Error' });
   }
 };
+
+
+exports.getUniqueBrands = async (req, res) => {
+  try {
+    const brandsData = await Product.aggregate([
+      { $match: { brand: { $ne: null }, status: "active" } }, // optional filter
+      { $group: { _id: "$brand" } },
+      { $sort: { _id: 1 } } // sort alphabetically
+    ]);
+
+    const brands = brandsData.map(b => b._id);
+
+    return res.status(200).json({
+      success: true,
+      brands,
+    });
+  } catch (error) {
+    console.error("Error in getUniqueBrands:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+exports.getProductsByBrand = async (req, res) => {
+  try {
+    const { brand } = req.query; // or use req.body if sending via POST
+
+    if (!brand) {
+      return res.status(400).json({ success: false, message: "Brand is required in query." });
+    }
+
+    const products = await Product.find({ brand: brand.trim(), status: "active" });
+
+    return res.status(200).json({
+      success: true,
+      brand: brand,
+      total: products.length,
+      products,
+    });
+  } catch (error) {
+    console.error("Error in getProductsByBrand:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
