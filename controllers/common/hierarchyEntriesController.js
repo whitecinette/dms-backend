@@ -356,3 +356,65 @@ exports.getSubordinatesForUser = async (req, res) => {
   }
 };
 
+
+exports.getDealersForUser = async (req, res) => {
+  try {
+    const { code } = req.user;
+
+    if (!code) {
+      return res.status(400).json({ success: false, message: "User code is required." });
+    }
+
+    // Find the user in ActorCode
+    const actor = await ActorCode.findOne({ code });
+    if (!actor) {
+      return res.status(404).json({ success: false, message: "Actor not found." });
+    }
+
+    const { position } = actor;
+    if (!position) {
+      return res.status(400).json({ success: false, message: "Position not found for this user." });
+    }
+
+    // Load hierarchy structure
+    const actorHierarchy = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+    if (!actorHierarchy || !actorHierarchy.hierarchy) {
+      return res.status(500).json({ success: false, message: "Hierarchy data not found." });
+    }
+
+    const allPositions = actorHierarchy.hierarchy;
+    const userPositionIndex = allPositions.indexOf(position);
+
+    if (userPositionIndex === -1 || userPositionIndex >= allPositions.length - 1) {
+      return res.status(200).json({ success: true, dealers: [] });
+    }
+
+    // Get all subordinates in hierarchy entries
+    const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
+    if (!hierarchyEntries.length) {
+      return res.status(200).json({ success: true, dealers: [] });
+    }
+
+    // Get the 'dealer' position
+    const dealerPosition = "dealer";
+    if (!allPositions.includes(dealerPosition)) {
+      return res.status(200).json({ success: true, dealers: [] });
+    }
+
+    // Get all dealer codes from the hierarchy
+    let dealerCodes = hierarchyEntries.map(entry => entry[dealerPosition]).filter(Boolean);
+    dealerCodes = [...new Set(dealerCodes)]; // Remove duplicates
+
+    // Fetch only code and name of those dealers
+    const dealers = await ActorCode.find(
+      { code: { $in: dealerCodes } },
+      { code: 1, name: 1, _id: 0 }
+    );
+
+    return res.status(200).json({ success: true, dealers });
+
+  } catch (error) {
+    console.error("Error in getDealersForUser:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};

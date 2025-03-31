@@ -3,7 +3,7 @@ const multer = require('multer');
 const router = express.Router();
 const { uploadHierarchyEntries, getHierarchEntriesForAdmin, editHierarchEntriesByAdmin, deleteHierarchEntriesByAdmin, addHierarchEntriesByAdmin} = require('../controllers/admin/hierarchyEntriesController');
 const { upload } = require('../services/fileUpload');
-const { getSubordinatesByCode, getSubordinatesForUser } = require('../controllers/common/hierarchyEntriesController');
+const { getSubordinatesByCode, getSubordinatesForUser, getDealersForUser } = require('../controllers/common/hierarchyEntriesController');
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 
 // admin 
@@ -17,5 +17,7 @@ router.post("/hierarchy-entries/add-hierarchy-entries-by-admin", adminOrSuperAdm
 // common 
 router.post('/user/get-subordinates-by-code', getSubordinatesByCode);
 router.post("/user/get-subordinates", userAuth, getSubordinatesForUser);
+
+router.get("/user/get-dealers", userAuth, getDealersForUser);
 
 module.exports = router;
