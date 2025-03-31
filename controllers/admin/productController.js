@@ -1,7 +1,7 @@
 const Product = require("../../model/Product");
 const fs = require("fs");
 const csvParser = require("csv-parser");
-const { generateProductCode, cleanHeader, cleanproduct_category, determinesegment, generateIdentifier } = require("../../helpers/productHelper");
+const { generateProductCode, cleanHeader, determinesegment, generateIdentifier, determineSegment } = require("../../helpers/productHelper");
 const { Readable } = require("stream");
 const stream = require("stream");
 
@@ -278,6 +278,7 @@ exports.getAllProducts = async (req, res) => {
 // Rakshita 
 exports.uploadProductsThroughCSV = async (req, res) => {
   try {
+    console.log("Reaching upload prods");
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
@@ -305,10 +306,10 @@ exports.uploadProductsThroughCSV = async (req, res) => {
         });
 
         // Format product_product_category
-        productEntry.product_product_category = cleanproduct_category(productEntry.product_product_category);
+        // productEntry.product_product_category = cleanproduct_category(productEntry.product_product_category);
 
         // Assign segment based on price
-        productEntry.segment = determinesegment(Number(productEntry.price));
+        productEntry.segment = determineSegment(Number(productEntry.price));
 
         // Generate product_name_code if missing
         if (!productEntry.product_name_code) {

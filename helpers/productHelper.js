@@ -32,5 +32,6 @@ exports.determineSegment = (price) => {
   };
 
 exports.generateIdentifier = (name) => {
-    return name.replace(/\s+/g, "_").toLowerCase().substring(0, 12);
+  if (!name || typeof name !== "string") return "unknown";
+  return name.replace(/\s+/g, "_").toLowerCase().substring(0, 12);
   };
