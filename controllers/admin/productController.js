@@ -393,6 +393,7 @@ exports.getUniqueBrands = async (req, res) => {
 
 exports.getProductsByBrand = async (req, res) => {
   try {
+    console.log("Reaching prod by brand");
     const { brand } = req.query; // or use req.body if sending via POST
 
     if (!brand) {
