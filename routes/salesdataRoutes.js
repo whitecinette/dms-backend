@@ -1,6 +1,6 @@
 const express = require('express');
 const { upload } = require('../services/fileUpload');
-const { uploadSalesDataThroughCSV } = require('../controllers/admin/salesdataController');
+const { uploadSalesDataThroughCSV } = require('../controllers/admin/salesDataController');
 const { getSalesReportByCode, getDashboardSalesMetricsByCode, getSalesReportForUser, getDashboardSalesMetricsForUser, masterSalesAPI, getSalesWithHierarchyCSV } = require('../controllers/common/salesDataController');
 const { userAuth, authMiddleware } = require('../middlewares/authmiddlewares');
 const router = express.Router();
