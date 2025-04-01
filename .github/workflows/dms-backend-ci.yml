@@ -29,6 +29,9 @@ jobs:
             echo "🚀 Connecting to EC2..."
             cd /home/ec2-user/dms-backend
 
+            echo "Stashing changes..."
+            git stash
+
             echo "🔄 Pulling latest changes..."
             git pull origin main
 
