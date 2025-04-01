@@ -1,21 +1,27 @@
 const mongoose = require('mongoose');
 
 const extractionRecordSchema = new mongoose.Schema({
-    uploadedBy: {
+    uploaded_by: {
         type: String, // employeeCode
         required: true
     },
-    dealerCode: {
+    dealer: {
         type: String,
         required: true
     },
-    productId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Product',
+    brand: {
+        type: String,
         required: true
     },
-    model_code: {
+    priduct_name : {
+        type: String
+    },
+    product_code: {
         type: String,
+        required: true
+    },
+    price: {
+        type: Number,
         required: true
     },
     quantity: {
@@ -25,8 +31,15 @@ const extractionRecordSchema = new mongoose.Schema({
     amount: {
         type: Number,
         required: true
-    }
-}, { timestamps: true });
+    },
+    segment: {
+        type: String
+    },
+    product_category: {
+        type: String
+    },
+
+}, { timestamps: true, strict: false });
 
 const ExtractionRecord = mongoose.model('ExtractionRecord', extractionRecordSchema);
 
