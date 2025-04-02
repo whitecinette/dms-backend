@@ -119,9 +119,19 @@ exports.punchIn = async (req, res) => {
       });
     }
 
+    // Upload to Cloudinary
     const result = await cloudinary.uploader.upload(req.file.path, {
       folder: "gpunchInImage",
       resource_type: "image",
+    });
+
+    // Delete local file after successful upload
+    fs.unlink(req.file.path, (err) => {
+      if (err) {
+        console.error("Failed to delete temp file:", err);
+      } else {
+        console.log("Temp file deleted:", req.file.path);
+      }
     });
 
     const attendance = new Attendance({
