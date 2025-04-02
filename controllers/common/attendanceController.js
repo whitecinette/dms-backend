@@ -5,6 +5,7 @@ const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
 const getDistance = require("../../helpers/attendanceHelper");
 const { Parser } = require("json2csv");
+const fs = require("fs");
 
 const cloudinary = require("../../config/cloudinary");
 // punch in
