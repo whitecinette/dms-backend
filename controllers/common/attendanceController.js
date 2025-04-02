@@ -8,6 +8,7 @@ const { Parser } = require("json2csv");
 const fs = require("fs");
 
 const cloudinary = require("../../config/cloudinary");
+const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 // punch in
 
 exports.punchIn = async (req, res) => {
@@ -107,11 +108,12 @@ exports.punchIn = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-     return res.status(400).json({
-       message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(2)} meters away.`,
-     });
-   }
-   
+      return res.status(400).json({
+        message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(
+          2
+        )} meters away.`,
+      });
+    }
 
     if (!req.file) {
       return res.status(400).json({
@@ -239,9 +241,11 @@ exports.punchOut = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-     return res.status(400).json({
-      message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(2)} meters away.`,
-    });
+      return res.status(400).json({
+        message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(
+          2
+        )} meters away.`,
+      });
     }
 
     if (!req.file) {
@@ -328,26 +332,30 @@ exports.getAttendance = async (req, res) => {
   }
 };
 exports.getAttendanceForEmployee = async (req, res) => {
- const employeeCode = req.user.code; 
+  const employeeCode = req.user.code;
 
- try {
-     const attendanceData = await Attendance.find({ code: employeeCode }).sort({ date: -1 });
+  try {
+    const attendanceData = await Attendance.find({ code: employeeCode }).sort({
+      date: -1,
+    });
 
-     if (!attendanceData || attendanceData.length === 0) {
-         return res.status(404).json({ message: 'No attendance records found for this employee.' });
-     }
+    if (!attendanceData || attendanceData.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No attendance records found for this employee." });
+    }
 
-     res.status(200).json({
-         success: true,
-         data: attendanceData,
-     });
- } catch (error) {
-     console.error(error);
-     res.status(500).json({
-         success: false,
-         message: 'Error fetching attendance records.',
-     });
- }
+    res.status(200).json({
+      success: true,
+      data: attendanceData,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching attendance records.",
+    });
+  }
 };
 exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
   try {
@@ -620,7 +628,7 @@ exports.getAttendanceByDate = async (req, res) => {
         present: presentCount,
         leave: leaveCount,
         absent: absentCount,
-        pending: pendingCount
+        pending: pendingCount,
       },
     });
   } catch (error) {
@@ -632,62 +640,86 @@ exports.getAttendanceByDate = async (req, res) => {
 
 exports.getLatestAttendance = async (req, res) => {
   try {
-    const { date, page = 1, limit = 10, search = "", status= "" } = req.query;
-    // console.log(req.query)
-
+    const {
+      date,
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      firm = null,
+    } = req.query;
     let filter = {};
+    console.log(req.query);
 
-    // Apply Date Filter (if date is provided)
     if (date) {
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
-
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
-
       filter.date = { $gte: startOfDay, $lte: endOfDay };
     }
 
-    // Apply Search Filter (if search is provided)
     if (search) {
       const regex = new RegExp(search, "i");
       filter.$or = [{ code: regex }];
     }
-    if(status){
-      filter.status = status
+
+    if (status) {
+      filter.status = status;
     }
 
-    // Fetch attendance records with filters, pagination, and sorting
+    let firmPositions = [];
+
+    if (firm) {
+      const firmData = await ActorTypesHierarchy.findById(firm);
+      if (!firmData) {
+        return res.status(400).json({ message: "Invalid firm ID." });
+      }
+
+      if (firmData.hierarchy && Array.isArray(firmData.hierarchy)) {
+        firmPositions = firmData.hierarchy;
+      }
+    }
+
     let allAttendance = await Attendance.find(filter)
-      .sort({ date: -1, punchIn:-1})
+      .sort({ date: -1, punchIn: -1 })
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit))
-      .lean(); // Use .lean() to improve performance
+      .lean();
 
-    // Extract all unique codes from attendance records
     const attendanceCodes = allAttendance.map((record) => record.code);
-    
-    // Fetch employee names from ActorCode model
-    const actors = await ActorCode.find({ code: { $in: attendanceCodes } }, "code name").lean();
+
+    // Fetch employee names and positions from ActorCode model
+    const actors = await ActorCode.find(
+      { code: { $in: attendanceCodes } },
+      "code name position"
+    ).lean();
+
     const actorMap = actors.reduce((acc, actor) => {
-      acc[actor.code] = actor.name;
+      acc[actor.code] = { name: actor.name, position: actor.position };
       return acc;
     }, {});
 
-    // Attach employee names to each attendance record
+    // Filter employees based on firm hierarchy
+    if (firm) {
+      allAttendance = allAttendance.filter((record) => {
+        const employee = actorMap[record.code];
+        return employee && firmPositions.includes(employee.position);
+      });
+    }
+
+    // Attach employee details to each attendance record
     allAttendance = allAttendance.map((record) => ({
       ...record,
-      name: actorMap[record.code] || "Unknown",
+      name: actorMap[record.code]?.name || "Unknown",
+      position: actorMap[record.code]?.position || "Unknown",
     }));
-
-    // Categorize attendance
-    const categorize = (status) => allAttendance.filter((record) => record.status === status);
 
     res.status(200).json({
       message: "Latest attendance summary fetched successfully",
       currentPage: Number(page),
       totalRecords: await Attendance.countDocuments(filter),
-      totalPages: Math.ceil(await Attendance.countDocuments(filter)/ limit),
+      totalPages: Math.ceil((await Attendance.countDocuments(filter)) / limit),
       data: allAttendance,
     });
   } catch (error) {
@@ -699,24 +731,22 @@ exports.getLatestAttendance = async (req, res) => {
   }
 };
 
-
-
-
-exports.editAttendanceByID = async(req, res)=>{
-  try{
-    const {id} = req.params
-    const update = req.body
+exports.editAttendanceByID = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const update = req.body;
     const AttendanceEntity = await Attendance.findById(id);
-    if(!AttendanceEntity){
+    if (!AttendanceEntity) {
       return res.status(404).json("user not found");
     }
-    const updateData = await Attendance.findByIdAndUpdate(id, update, {new: true})
-    return res.status(200).json({message:"user updated successfully"})
-  }catch(error){
-    console.log(error)
+    const updateData = await Attendance.findByIdAndUpdate(id, update, {
+      new: true,
+    });
+    return res.status(200).json({ message: "user updated successfully" });
+  } catch (error) {
+    console.log(error);
   }
-}
-
+};
 
 exports.downloadAllAttendance = async (req, res) => {
   try {
@@ -769,12 +799,10 @@ exports.downloadAllAttendance = async (req, res) => {
     return res.send(csv);
   } catch (error) {
     console.error("Error downloading attendance data:", error);
-    res
-      .status(500)
-      .json({
-        message: "Error downloading attendance data",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Error downloading attendance data",
+      error: error.message,
+    });
   }
 };
 
@@ -807,7 +835,6 @@ exports.deleteAttendanceByID = async (req, res) => {
       .json({ success: false, message: "Internal server error" });
   }
 };
-
 
 // exports.getDealersByEmployeeCode = async (req, res) => {
 //     try {
