@@ -256,6 +256,15 @@ exports.punchOut = async (req, res) => {
       resource_type: "image",
     });
 
+    // ✅ Delete temp file after upload
+    fs.unlink(req.file.path, (err) => {
+      if (err) {
+        console.error("Failed to delete temp file:", err);
+      } else {
+        console.log("Temp file deleted:", req.file.path);
+      }
+    });
+
     const punchOutImage = result.secure_url;
 
     const durationMinutes = moment(punchOutTime).diff(
