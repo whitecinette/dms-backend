@@ -586,55 +586,88 @@ exports.getAllEmpLeaves = async (req, res) => {
 exports.getAttendanceByDate = async (req, res) => {
   try {
     const { date } = req.params;
+    const { firm = "" } = req.query;
 
-    let filter = {};
-    if (date) {
-      filter.date = date; // Assuming date is stored as "YYYY-MM-DD" string
+    if (!date) {
+      return res.status(400).json({ message: "Date is required." });
     }
 
-    const attendanceRecords = await Attendance.find(filter);
+    // Normalize the date
+    const selectedDate = new Date(date);
+    selectedDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(selectedDate);
+    nextDay.setDate(selectedDate.getDate() + 1);
 
-    if (!attendanceRecords.length) {
-      return res
-        .status(404)
-        .json({ message: "No attendance records found for the given date." });
+    // Step 1: Get Firm Positions
+    let firmPositions = [];
+    if (firm) {
+      const firmData = await ActorTypesHierarchy.findById(firm);
+      if (!firmData) {
+        return res.status(400).json({ message: "Invalid firm ID." });
+      }
+      if (Array.isArray(firmData.hierarchy)) {
+        firmPositions = firmData.hierarchy;
+      }
     }
 
-    // Total attendance count
-    const totalRecords = attendanceRecords.length;
+    // Step 2: Fetch Employees Based on Firm Filter (If Applied)
+    let employeeFilter = { role: "employee" };
+    if (firmPositions.length > 0) {
+      employeeFilter.position = { $in: firmPositions };
+    }
+    const employees = await User.find(employeeFilter, "code name position").lean();
 
-    // Count different attendance statuses
-    const halfDayCount = attendanceRecords.filter(
-      (record) => record.status === "Half Day"
-    ).length;
-    const presentCount = attendanceRecords.filter(
-      (record) => record.status === "Present"
-    ).length;
-    const pendingCount = attendanceRecords.filter(
-      (record) => record.status === "Pending"
-    ).length;
-    const leaveCount = attendanceRecords.filter(
-      (record) => record.status === "Rejected" || record.status === "Approved"
-    ).length;
-    const absentCount = attendanceRecords.filter(
-      (record) => record.status === "Absent"
-    ).length;
+    // Step 3: Fetch Attendance Records (Include All)
+    let attendanceRecords = await Attendance.find({
+      date: { $gte: selectedDate, $lt: nextDay },
+      code: { $in: employees.map(emp => emp.code) } // Ensure only firm employees are included
+    }).lean();
+
+    // Step 4: Convert attendance codes to a Set
+    const presentCodes = new Set(attendanceRecords.map((record) => record.code.trim().toLowerCase()));
+
+    // Step 5: Identify Absent Employees from the Firm
+    const absentEmployees = employees.filter((emp) => !presentCodes.has(emp.code.trim().toLowerCase()));
+
+    absentEmployees.forEach((emp) => {
+      attendanceRecords.push({
+        code: emp.code,
+        name: emp.name,
+        position: emp.position,
+        status: "Absent",
+        date: selectedDate,
+      });
+    });
+
+    // Step 6: Initialize and Count Attendance Statuses
+    let attendanceCount = {
+      halfDay: 0,
+      present: 0,
+      leave: 0,
+      absent: 0,
+      pending: 0,
+    };
+
+    attendanceRecords.forEach(({ status }) => {
+      if (status === "Half Day") attendanceCount.halfDay++;
+      else if (status === "Present") attendanceCount.present++;
+      else if (status === "Pending") attendanceCount.pending++;
+      else if (status === "Absent") attendanceCount.absent++;
+      else if (status === "Rejected" || status === "Approved") {
+        attendanceCount.leave++;
+      }
+    });
 
     res.status(200).json({
-      message: "Attendance records fetched successfully",
-      attendance: attendanceRecords,
-      counts: {
-        halfDay: halfDayCount,
-        present: presentCount,
-        leave: leaveCount,
-        absent: absentCount,
-        pending: pendingCount,
-      },
+      message: "Attendance counts fetched successfully",
+      attendanceCount,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching attendance", error: error.message });
+    console.error("Error fetching attendance:", error);
+    res.status(500).json({
+      message: "Error fetching attendance",
+      error: error.message,
+    });
   }
 };
 
@@ -648,28 +681,8 @@ exports.getLatestAttendance = async (req, res) => {
       status = "",
       firm = null,
     } = req.query;
-    let filter = {};
-    console.log(req.query);
-
-    if (date) {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      filter.date = { $gte: startOfDay, $lte: endOfDay };
-    }
-
-    if (search) {
-      const regex = new RegExp(search, "i");
-      filter.$or = [{ code: regex }];
-    }
-
-    if (status) {
-      filter.status = status;
-    }
 
     let firmPositions = [];
-
     if (firm) {
       const firmData = await ActorTypesHierarchy.findById(firm);
       if (!firmData) {
@@ -681,46 +694,109 @@ exports.getLatestAttendance = async (req, res) => {
       }
     }
 
-    let allAttendance = await Attendance.find(filter)
-      .sort({ date: -1, punchIn: -1 })
-      .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit))
-      .lean();
+    // ✅ Step 1: Fetch all employees first
+    let employeeFilter = { role: "employee" };
+    if (firmPositions.length) {
+      employeeFilter.position = { $in: firmPositions };
+    }
 
-    const attendanceCodes = allAttendance.map((record) => record.code);
+    const employees = await User.find(employeeFilter, "code name position").lean();
 
-    // Fetch employee names and positions from ActorCode model
-    const actors = await ActorCode.find(
-      { code: { $in: attendanceCodes } },
-      "code name position"
-    ).lean();
-
-    const actorMap = actors.reduce((acc, actor) => {
-      acc[actor.code] = { name: actor.name, position: actor.position };
-      return acc;
-    }, {});
-
-    // Filter employees based on firm hierarchy
-    if (firm) {
-      allAttendance = allAttendance.filter((record) => {
-        const employee = actorMap[record.code];
-        return employee && firmPositions.includes(employee.position);
+    // ❌ If no employees are found, return an empty response
+    if (!employees.length) {
+      return res.status(200).json({
+        message: "No employees found",
+        currentPage: Number(page),
+        totalRecords: 0,
+        totalPages: 0,
+        data: [],
       });
     }
 
-    // Attach employee details to each attendance record
-    allAttendance = allAttendance.map((record) => ({
-      ...record,
-      name: actorMap[record.code]?.name || "Unknown",
-      position: actorMap[record.code]?.position || "Unknown",
-    }));
+    // ✅ Step 2: Create employee map
+    const employeeMap = employees.reduce((acc, emp) => {
+      acc[emp.code.trim().toLowerCase()] = { name: emp.name, position: emp.position };
+      return acc;
+    }, {});
+
+    const employeeCodes = employees.map((emp) => emp.code);
+
+    let attendanceRecords = [];
+    if (date) {
+      // ✅ Step 3: If date is given, fetch attendance only for employees in the firm
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      attendanceRecords = await Attendance.find({
+        date: { $gte: startOfDay, $lte: endOfDay },
+        code: { $in: employeeCodes },
+      })
+        .sort({ date: -1, punchIn: -1 })
+        .lean();
+
+      // ✅ Step 4: Add absent employees
+      const presentCodes = new Set(
+        attendanceRecords.map((record) => record.code.trim().toLowerCase())
+      );
+
+      employees.forEach((emp) => {
+        const empCode = emp.code.trim().toLowerCase();
+        if (!presentCodes.has(empCode)) {
+          attendanceRecords.push({
+            code: emp.code,
+            name: emp.name,
+            position: emp.position,
+            status: "Absent",
+            date: new Date(date),
+          });
+        }
+      });
+    } else {
+      // ✅ If no date is provided, fetch attendance without a date filter
+      attendanceRecords = await Attendance.find({ code: { $in: employeeCodes } })
+        .sort({ date: -1, punchIn: -1 })
+        .lean();
+    }
+
+    // ✅ Step 5: Attach employee details
+    attendanceRecords = attendanceRecords.map((record) => {
+      const normalizedCode = record.code.trim().toLowerCase();
+      const employee = employeeMap[normalizedCode];
+
+      return {
+        ...record,
+        name: employee ? employee.name : "Unknown",
+        position: employee ? employee.position : "Unknown",
+      };
+    });
+
+    // ✅ Step 6: Apply filters (search & status)
+    if (search) {
+      const regex = new RegExp(search, "i");
+      attendanceRecords = attendanceRecords.filter((rec) => regex.test(rec.code));
+    }
+
+    if (status) {
+      attendanceRecords = attendanceRecords.filter((rec) => rec.status === status);
+    }
+
+    // ✅ Step 7: Apply pagination
+    const totalRecords = attendanceRecords.length;
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    attendanceRecords = attendanceRecords.slice(
+      (Number(page) - 1) * Number(limit),
+      Number(page) * Number(limit)
+    );
 
     res.status(200).json({
       message: "Latest attendance summary fetched successfully",
       currentPage: Number(page),
-      totalRecords: await Attendance.countDocuments(filter),
-      totalPages: Math.ceil((await Attendance.countDocuments(filter)) / limit),
-      data: allAttendance,
+      totalRecords,
+      totalPages,
+      data: attendanceRecords,
     });
   } catch (error) {
     console.error("Error fetching attendance summary:", error);
