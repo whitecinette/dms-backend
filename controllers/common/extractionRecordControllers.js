@@ -2,8 +2,11 @@ const axios = require('axios');
 const ExtractionRecord = require('../../model/ExtractionRecord');
 const Product = require('../../model/Product'); // Adjust path as needed
 const User = require('../../model/User');
+const moment = require("moment");
+const HierarchyEntries = require('../../model/HierarchyEntries');
 
 const { BACKEND_URL } = process.env;
+
 exports.addExtractionRecord = async (req, res) => {
     try {
         console.log("Reaching extraction record API");
@@ -210,3 +213,76 @@ try {
 }
 };
    
+
+
+exports.getExtractionStatus = async (req, res) => {
+    try {
+      const {
+        startDate,
+        endDate,
+        smd = [],
+        asm = [],
+        mdd = []
+      } = req.body;
+  
+      const start = startDate
+        ? new Date(startDate)
+        : moment().startOf("month").toDate();
+      const end = endDate
+        ? new Date(endDate)
+        : moment().endOf("month").toDate();
+  
+      // Step 1: Get relevant hierarchy entries
+      const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+      if (smd.length > 0) hierarchyFilter.smd = { $in: smd };
+      if (asm.length > 0) hierarchyFilter.asm = { $in: asm };
+      if (mdd.length > 0) hierarchyFilter.mdd = { $in: mdd };
+  
+      const hierarchy = await HierarchyEntries.find(hierarchyFilter);
+  
+      const tseToDealers = {};
+  
+      for (let entry of hierarchy) {
+        const tseCode = entry.tse;
+        if (!tseToDealers[tseCode]) tseToDealers[tseCode] = new Set();
+        tseToDealers[tseCode].add(entry.dealer);
+      }
+  
+      const results = [];
+  
+      for (let tseCode in tseToDealers) {
+        const dealers = Array.from(tseToDealers[tseCode]);
+  
+        const doneDealers = await ExtractionRecord.distinct("dealer", {
+          dealer: { $in: dealers },
+          uploaded_by: tseCode,
+          createdAt: { $gte: start, $lte: end }
+        });
+  
+        const doneCount = doneDealers.length;
+        const totalCount = dealers.length;
+        const pendingCount = totalCount - doneCount;
+  
+        const donePercent = totalCount > 0 ? ((doneCount / totalCount) * 100).toFixed(2) : "0.00";
+        const pendingPercent = totalCount > 0 ? ((pendingCount / totalCount) * 100).toFixed(2) : "0.00";
+  
+        // Fetch name from User model
+        const user = await User.findOne({ code: tseCode });
+  
+        results.push({
+          name: user?.name || "N/A",
+          code: tseCode,
+          total: totalCount,
+          done: doneCount,
+          donePercent,
+          pending: pendingCount,
+          pendingPercent
+        });
+      }
+  
+      res.status(200).json({ success: true, data: results });
+    } catch (error) {
+      console.error("Error in getExtractionStatus:", error);
+      res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+  };
