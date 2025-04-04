@@ -1,7 +1,7 @@
 const express = require("express");
 const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerForAdmin, updateBulkLatLongForAdmin } = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
-const { loginUser, editProfileForUser, editUsers, getUsersDetails } = require("../controllers/common/userController");
+const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
@@ -60,6 +60,9 @@ router.post("/app/user/register", registerUserForApp);
 
 router.put("/edit-users-by-code",userAuth, editUsers);
 router.get('/get-users-by-code', userAuth, getUsersDetails);
+
+
+router.post("/admin/get-users-by-positions", getUsersByPositions);
 
 
 

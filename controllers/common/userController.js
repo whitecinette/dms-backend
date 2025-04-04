@@ -219,3 +219,26 @@ exports.getUsersDetails = async (req, res) => {
         res.status(500).json({ message: 'Internal Server Error' });
     }
 };
+
+exports.getUsersByPositions = async (req, res) => {
+    try {
+      const { positions } = req.body;
+  
+      if (!Array.isArray(positions) || positions.length === 0) {
+        return res.status(400).json({ success: false, message: "positions array is required" });
+      }
+  
+      const users = await User.find(
+        { position: { $in: positions } },
+        { name: 1, code: 1, _id: 0 }
+      );
+  
+      res.status(200).json({
+        success: true,
+        data: users
+      });
+    } catch (err) {
+      console.error("Error in getUsersByPositions:", err);
+      res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+  };
