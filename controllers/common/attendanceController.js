@@ -615,19 +615,26 @@ exports.getAttendanceByDate = async (req, res) => {
     if (firmPositions.length > 0) {
       employeeFilter.position = { $in: firmPositions };
     }
-    const employees = await User.find(employeeFilter, "code name position").lean();
+    const employees = await User.find(
+      employeeFilter,
+      "code name position"
+    ).lean();
 
     // Step 3: Fetch Attendance Records (Include All)
     let attendanceRecords = await Attendance.find({
       date: { $gte: selectedDate, $lt: nextDay },
-      code: { $in: employees.map(emp => emp.code) } // Ensure only firm employees are included
+      code: { $in: employees.map((emp) => emp.code) }, // Ensure only firm employees are included
     }).lean();
 
     // Step 4: Convert attendance codes to a Set
-    const presentCodes = new Set(attendanceRecords.map((record) => record.code.trim().toLowerCase()));
+    const presentCodes = new Set(
+      attendanceRecords.map((record) => record.code.trim().toLowerCase())
+    );
 
     // Step 5: Identify Absent Employees from the Firm
-    const absentEmployees = employees.filter((emp) => !presentCodes.has(emp.code.trim().toLowerCase()));
+    const absentEmployees = employees.filter(
+      (emp) => !presentCodes.has(emp.code.trim().toLowerCase())
+    );
 
     absentEmployees.forEach((emp) => {
       attendanceRecords.push({
@@ -700,7 +707,10 @@ exports.getLatestAttendance = async (req, res) => {
       employeeFilter.position = { $in: firmPositions };
     }
 
-    const employees = await User.find(employeeFilter, "code name position").lean();
+    const employees = await User.find(
+      employeeFilter,
+      "code name position"
+    ).lean();
 
     // ❌ If no employees are found, return an empty response
     if (!employees.length) {
@@ -715,7 +725,10 @@ exports.getLatestAttendance = async (req, res) => {
 
     // ✅ Step 2: Create employee map
     const employeeMap = employees.reduce((acc, emp) => {
-      acc[emp.code.trim().toLowerCase()] = { name: emp.name, position: emp.position };
+      acc[emp.code.trim().toLowerCase()] = {
+        name: emp.name,
+        position: emp.position,
+      };
       return acc;
     }, {});
 
@@ -755,7 +768,9 @@ exports.getLatestAttendance = async (req, res) => {
       });
     } else {
       // ✅ If no date is provided, fetch attendance without a date filter
-      attendanceRecords = await Attendance.find({ code: { $in: employeeCodes } })
+      attendanceRecords = await Attendance.find({
+        code: { $in: employeeCodes },
+      })
         .sort({ date: -1, punchIn: -1 })
         .lean();
     }
@@ -775,11 +790,15 @@ exports.getLatestAttendance = async (req, res) => {
     // ✅ Step 6: Apply filters (search & status)
     if (search) {
       const regex = new RegExp(search, "i");
-      attendanceRecords = attendanceRecords.filter((rec) => regex.test(rec.code));
+      attendanceRecords = attendanceRecords.filter((rec) =>
+        regex.test(rec.code)
+      );
     }
 
     if (status) {
-      attendanceRecords = attendanceRecords.filter((rec) => rec.status === status);
+      attendanceRecords = attendanceRecords.filter(
+        (rec) => rec.status === status
+      );
     }
 
     // ✅ Step 7: Apply pagination
@@ -826,23 +845,126 @@ exports.editAttendanceByID = async (req, res) => {
 
 exports.downloadAllAttendance = async (req, res) => {
   try {
-    let allAttendance = await Attendance.find().sort({ date: -1 }).lean();
+    const { date, search = "", status = "", firm = null } = req.query;
 
-    const attendanceCodes = allAttendance.map((record) => record.code);
-    const actors = await ActorCode.find(
-      { code: { $in: attendanceCodes } },
-      "code name"
-    );
-    const actorMap = actors.reduce((acc, actor) => {
-      acc[actor.code] = actor.name;
+    let firmPositions = [];
+    if (firm) {
+      const firmData = await ActorTypesHierarchy.findById(firm);
+      if (!firmData) {
+        return res.status(400).json({ message: "Invalid firm ID." });
+      }
+
+      if (firmData.hierarchy && Array.isArray(firmData.hierarchy)) {
+        firmPositions = firmData.hierarchy;
+      }
+    }
+
+    // Step 1: Fetch all employees first
+    let employeeFilter = { role: "employee" };
+    if (firmPositions.length) {
+      employeeFilter.position = { $in: firmPositions };
+    }
+
+    const employees = await User.find(
+      employeeFilter,
+      "code name position"
+    ).lean();
+
+    // If no employees are found, return an empty response
+    if (!employees.length) {
+      return res.status(200).json({
+        message: "No employees found",
+        data: [],
+      });
+    }
+
+    // Step 2: Create employee map
+    const employeeMap = employees.reduce((acc, emp) => {
+      acc[emp.code.trim().toLowerCase()] = {
+        name: emp.name,
+        position: emp.position,
+      };
       return acc;
     }, {});
 
-    allAttendance = allAttendance.map((record) => ({
-      name: actorMap[record.code] || "Unknown",
+    const employeeCodes = employees.map((emp) => emp.code);
+
+    let attendanceRecords = [];
+    if (date) {
+      // Step 3: If date is given, fetch attendance only for employees in the firm
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      attendanceRecords = await Attendance.find({
+        date: { $gte: startOfDay, $lte: endOfDay },
+        code: { $in: employeeCodes },
+      })
+        .sort({ date: -1, punchIn: -1 })
+        .lean();
+
+      // Step 4: Add absent employees
+      const presentCodes = new Set(
+        attendanceRecords.map((record) => record.code.trim().toLowerCase())
+      );
+
+      employees.forEach((emp) => {
+        const empCode = emp.code.trim().toLowerCase();
+        if (!presentCodes.has(empCode)) {
+          attendanceRecords.push({
+            code: emp.code,
+            name: emp.name,
+            position: emp.position,
+            status: "Absent",
+            date: new Date(date),
+          });
+        }
+      });
+    } else {
+      // If no date is provided, fetch attendance without a date filter
+      attendanceRecords = await Attendance.find({
+        code: { $in: employeeCodes },
+      })
+        .sort({ date: -1, punchIn: -1 })
+        .lean();
+    }
+
+    // Step 5: Attach employee details
+    attendanceRecords = attendanceRecords.map((record) => {
+      const normalizedCode = record.code.trim().toLowerCase();
+      const employee = employeeMap[normalizedCode];
+
+      return {
+        ...record,
+        name: employee ? employee.name : "Unknown",
+        position: employee ? employee.position : "Unknown",
+      };
+    });
+
+    // Step 6: Apply filters (search & status)
+    if (search) {
+      const regex = new RegExp(search, "i");
+      attendanceRecords = attendanceRecords.filter((rec) =>
+        regex.test(rec.code)
+      );
+    }
+
+    if (status) {
+      attendanceRecords = attendanceRecords.filter(
+        (rec) => rec.status === status
+      );
+    }
+
+    // Format data for CSV export
+    const formattedAttendance = attendanceRecords.map((record) => ({
+      name: record.name || "Unknown",
       code: record.code,
+      position: record.position || "Unknown",
       date: record.punchIn
         ? new Date(record.punchIn).toISOString().split("T")[0]
+        : record.date
+        ? new Date(record.date).toISOString().split("T")[0]
         : "N/A",
       punchIn: record.punchIn
         ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
@@ -861,6 +983,7 @@ exports.downloadAllAttendance = async (req, res) => {
     const fields = [
       "name",
       "code",
+      "position",
       "date",
       "punchIn",
       "punchOut",
@@ -868,10 +991,10 @@ exports.downloadAllAttendance = async (req, res) => {
       "workingHours",
     ];
     const parser = new Parser({ fields });
-    const csv = parser.parse(allAttendance);
+    const csv = parser.parse(formattedAttendance);
 
     res.header("Content-Type", "text/csv");
-    res.attachment("all_attendance_data.csv");
+    res.attachment("attendance_data.csv");
     return res.send(csv);
   } catch (error) {
     console.error("Error downloading attendance data:", error);
