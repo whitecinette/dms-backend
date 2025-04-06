@@ -29,7 +29,7 @@ exports.punchIn = async (req, res) => {
       date: formattedDate,
     });
     if (existingAttendance) {
-      return res.status(400).json({
+      return res.status(200).json({
         message: "You have already punched in for today.",
         attendance: existingAttendance,
       });
@@ -108,17 +108,19 @@ exports.punchIn = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-      return res.status(400).json({
-        message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(
-          2
-        )} meters away.`,
-      });
-    }
+     return res.status(200).json({
+       warning: true,
+       message: `You are too far  — approx ${minDistance.toFixed(
+         2
+       )} meters away. Please move closer to a hierarchy member and try again.`,
+     });
+   }
+   
 
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "Punch-in image is required.",
+      return res.status(200).json({
+        warning: true,
+        message: "Please capture an image.",
       });
     }
 
@@ -179,14 +181,18 @@ exports.punchOut = async (req, res) => {
     const attendance = await Attendance.findOne({ code, date: formattedDate });
     if (!attendance) {
       return res
-        .status(400)
-        .json({ message: "You have not punched in yet for today." });
+        .status(200)
+        .json({ 
+         warning: true,
+         message: "You have not punched in yet for today." });
     }
 
     if (attendance.punchOut) {
       return res
-        .status(400)
-        .json({ message: "You have already punched out today." });
+        .status(200)
+        .json({
+         warning: true,
+          message: "You have already punched out today." });
     }
 
     const userHierarchies = await HierarchyEntries.find({});
@@ -241,17 +247,18 @@ exports.punchOut = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-      return res.status(400).json({
-        message: `You are too far from the nearest hierarchy member approx ${minDistance.toFixed(
-          2
-        )} meters away.`,
-      });
-    }
+     return res.status(200).json({
+       warning: true,
+       message: `You are too far  — approx ${minDistance.toFixed(
+         2
+       )} meters away. Please move closer to a hierarchy member and try again.`,
+     });
+   }
 
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Punch-out image is required.",
+        message: "Please capture an image.",
       });
     }
 
