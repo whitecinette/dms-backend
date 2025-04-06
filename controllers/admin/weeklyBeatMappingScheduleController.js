@@ -593,3 +593,43 @@ exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+exports.getAllWeeklyBeatMapping = async (req, res) => {
+ try {
+   const { status } = req.query;
+
+   let mappings = await WeeklyBeatMappingSchedule.find().sort({ createdAt: -1 });
+
+   // If status filter is applied
+   if (status === "done" || status === "pending") {
+     mappings = mappings.map(mapping => {
+       const newSchedule = {};
+
+       for (const [day, dayArray] of Object.entries(mapping.schedule)) {
+         const filteredDealers = dayArray.filter(dealer => dealer.status === status);
+         if (filteredDealers.length > 0) {
+           newSchedule[day] = filteredDealers;
+         }
+       }
+
+       return {
+         ...mapping.toObject(),
+         schedule: newSchedule,
+       };
+     }).filter(mapping => Object.keys(mapping.schedule).length > 0); // remove if schedule is empty
+   }
+
+   res.status(200).json({
+     success: true,
+     message: `Weekly Beat Mappings${status ? ` with status "${status}"` : ''} fetched successfully`,
+     data: mappings,
+   });
+ } catch (error) {
+   console.error("Error fetching weekly beat mappings:", error);
+   res.status(500).json({
+     success: false,
+     message: "Server Error",
+     error: error.message,
+   });
+ }
+};
