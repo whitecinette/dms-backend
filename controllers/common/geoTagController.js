@@ -2,41 +2,51 @@ const ActorCode = require("../../model/ActorCode");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
 const cloudinary = require("../../config/cloudinary");
+
+
 // Controller to get dealers by employee code
 exports.getDealerByEmployee = async (req, res) => {
- const employeeCode = req.user.code; // Extracted from token
+ const employeeCode = req.user.code;
 
  try {
-     // Fetch all matching hierarchy entries for the given employee
-     const hierarchyData = await HierarchyEntries.find({ emp: employeeCode });
+   // Step 1: Fetch all hierarchy entries
+   const allEntries = await HierarchyEntries.find();
 
-     if (!hierarchyData || hierarchyData.length === 0) {
-         return res.status(404).json({ message: "Employee not found in any hierarchy." });
-     }
+   // Step 2: Filter entries where employee code appears in any field
+   const matchedEntries = allEntries.filter(entry => {
+     const entryObj = entry.toObject();
+     return Object.values(entryObj).includes(employeeCode);
+   });
 
-     // Extract all dealer codes
-     const dealerCodes = hierarchyData.map(entry => entry.dealer).filter(Boolean);
+   if (matchedEntries.length === 0) {
+     return res.status(404).json({ message: "Employee not found in any hierarchy." });
+   }
 
-     if (dealerCodes.length === 0) {
-         return res.status(404).json({ message: "No dealers found for this employee." });
-     }
+   // Step 3: Collect all unique dealer codes from matching entries
+   const dealerCodes = [
+     ...new Set(matchedEntries.map(entry => entry.dealer).filter(Boolean))
+   ];
 
-     // Fetch dealer details from ActorCode model
-     const dealerDetails = await ActorCode.find({ code: { $in: dealerCodes } });
+   if (dealerCodes.length === 0) {
+     return res.status(404).json({ message: "No dealers found for this employee." });
+   }
 
-     // Map dealer details to desired format
-     const dealers = dealerDetails.map(dealer => ({
-         code: dealer.code,
-         name: dealer.name
-     }));
+   // Step 4: Fetch dealer details
+   const dealerDetails = await ActorCode.find({ code: { $in: dealerCodes } });
 
-     res.status(200).json({ dealers });
+   const dealers = dealerDetails.map(dealer => ({
+     code: dealer.code,
+     name: dealer.name
+   }));
+
+   res.status(200).json({ dealers });
 
  } catch (error) {
-     console.error(error);
-     res.status(500).json({ message: "Internal server error." });
+   console.error(error);
+   res.status(500).json({ message: "Internal server error." });
  }
 };
+
 
 // update geotag picture lat and long of dealer
 
