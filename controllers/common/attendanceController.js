@@ -339,31 +339,37 @@ exports.getAttendance = async (req, res) => {
   }
 };
 exports.getAttendanceForEmployee = async (req, res) => {
-  const employeeCode = req.user.code;
+ const { code } = req.user;
+ const { status } = req.query; // Fetch status from query parameter
 
-  try {
-    const attendanceData = await Attendance.find({ code: employeeCode }).sort({
-      date: -1,
-    });
+ try {
+   // Build the filter object
+   const filter = { code };
+   if (status) {
+     filter.status = status;
+   }
 
-    if (!attendanceData || attendanceData.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "No attendance records found for this employee." });
-    }
+   const attendanceData = await Attendance.find(filter).sort({ date: -1 });
 
-    res.status(200).json({
-      success: true,
-      data: attendanceData,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching attendance records.",
-    });
-  }
+   if (!attendanceData || attendanceData.length === 0) {
+     return res
+       .status(404)
+       .json({ message: "No attendance records found for this employee." });
+   }
+
+   res.status(200).json({
+     success: true,
+     data: attendanceData,
+   });
+ } catch (error) {
+   console.error(error);
+   res.status(500).json({
+     success: false,
+     message: "Error fetching attendance records.",
+   });
+ }
 };
+
 exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
   try {
     const { code } = req.params;
