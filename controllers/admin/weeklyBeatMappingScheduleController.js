@@ -5,6 +5,7 @@ const { getCurrentWeekDates } = require("../../helpers/dateHelpers");
 const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule");
 const User = require("../../model/User");
 const HierarchyEntries = require("../../model/HierarchyEntries");
+const ActorCode = require("../../model/ActorCode");
 
 // add weekly beat mapping
 exports.addWeeklyBeatMappingSchedule = async (req, res) => {
@@ -596,34 +597,100 @@ exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
 
 exports.getAllWeeklyBeatMapping = async (req, res) => {
  try {
-   const { status } = req.query;
+   const { status, search = '', page = 1, limit = 20 } = req.query;
+   const skip = (parseInt(page) - 1) * parseInt(limit);
+   const query = {};
 
-   let mappings = await WeeklyBeatMappingSchedule.find().sort({ createdAt: -1 });
+   // Step 1: Filter matching employee codes by name/code (if search is provided)
+   if (search) {
+     const matchedActors = await ActorCode.find({
+       $or: [
+         { name: { $regex: search, $options: 'i' } },
+         { code: { $regex: search, $options: 'i' } }
+       ]
+     }).lean();
 
-   // If status filter is applied
-   if (status === "done" || status === "pending") {
-     mappings = mappings.map(mapping => {
-       const newSchedule = {};
+     const matchedCodes = matchedActors.map(actor => actor.code);
+     if (matchedCodes.length === 0) {
+       return res.status(200).json({
+         success: true,
+         message: "No results found",
+         data: [],
+         total: 0,
+         page: parseInt(page),
+         limit: parseInt(limit),
+       });
+     }
+     query.code = { $in: matchedCodes };
+   }
 
-       for (const [day, dayArray] of Object.entries(mapping.schedule)) {
-         const filteredDealers = dayArray.filter(dealer => dealer.status === status);
-         if (filteredDealers.length > 0) {
-           newSchedule[day] = filteredDealers;
+   // Step 2: Count total before pagination
+   const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
+
+   // Step 3: Fetch paginated beat mappings
+   const mappings = await WeeklyBeatMappingSchedule.find(query)
+     .sort({ createdAt: -1 })
+     .skip(skip)
+     .limit(parseInt(limit))
+     .select('code schedule done pending createdAt updatedAt')
+     .lean();
+
+   // Step 4: Get names for all unique codes
+   const codes = [...new Set(mappings.map(m => m.code))];
+   const actorDocs = await ActorCode.find({ code: { $in: codes } }).lean();
+   const actorMap = {};
+   actorDocs.forEach(actor => {
+     actorMap[actor.code] = actor.name;
+   });
+
+   // Step 5: Group data
+   const groupedResult = {};
+
+   for (const mapping of mappings) {
+     const empCode = mapping.code;
+     const empName = actorMap[empCode] || "Unknown";
+
+     // Filter schedule by status if needed
+     let filteredSchedule = mapping.schedule;
+
+     if (status === "done" || status === "pending") {
+       filteredSchedule = {};
+       for (const [day, dealers] of Object.entries(mapping.schedule)) {
+         const filtered = dealers.filter(d => d.status === status);
+         if (filtered.length > 0) {
+           filteredSchedule[day] = filtered;
          }
        }
+       if (Object.keys(filteredSchedule).length === 0) continue;
+     }
 
-       return {
-         ...mapping.toObject(),
-         schedule: newSchedule,
+     if (!groupedResult[empCode]) {
+       groupedResult[empCode] = {
+         code: empCode,
+         employeeName: empName,
+         totalDone: mapping.done || 0,
+         totalPending: mapping.pending || 0,
+         beatMappings: []
        };
-     }).filter(mapping => Object.keys(mapping.schedule).length > 0); // remove if schedule is empty
+     }
+
+     groupedResult[empCode].beatMappings.push({
+       ...mapping,
+       schedule: filteredSchedule
+     });
    }
+
+   const groupedArray = Object.values(groupedResult);
 
    res.status(200).json({
      success: true,
-     message: `Weekly Beat Mappings${status ? ` with status "${status}"` : ''} fetched successfully`,
-     data: mappings,
+     message: `Weekly Beat Mappings${status ? ` with status "${status}"` : ''}`,
+     data: groupedArray,
+     total: totalCount,
+     page: parseInt(page),
+     limit: parseInt(limit),
    });
+
  } catch (error) {
    console.error("Error fetching weekly beat mappings:", error);
    res.status(500).json({
@@ -633,3 +700,5 @@ exports.getAllWeeklyBeatMapping = async (req, res) => {
    });
  }
 };
+
+
