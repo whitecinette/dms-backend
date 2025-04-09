@@ -994,7 +994,7 @@ exports.getSalesReportProductWise = async (req, res) => {
       }
     }
 
-    const products = await Product.find({ segment: segment, status: "active" });
+    const products = await Product.find({ segment: segment, status: "active", brand: "samsung" });
     const productCodeToNameMap = {};
     const productCodes = products.map(p => {
       productCodeToNameMap[p.product_code] = p.product_name;
@@ -1049,7 +1049,7 @@ exports.getSalesReportProductWise = async (req, res) => {
         .reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
 
       reportData.push({
-        "Product": product.product_name,
+        "Segment/Channel": product.product_name,
         "Target": targetValue,
         "MTD": mtdValue,
         "LMTD": lmtdValue,
