@@ -633,8 +633,6 @@ exports.getSalesReportForUser = async (req, res) => {
     filter_type = filter_type || "value";
     report_type = report_type || "segment";
 
-    console.log("Filters: ", start_date, end_date, filter_type, report_type, subordinate_codes);
-
     if (!start_date || !end_date || !code) {
       return res.status(400).json({ success: false, message: "Start date, end date, and code are required." });
     }
@@ -643,31 +641,27 @@ exports.getSalesReportForUser = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid report_type. Choose 'segment' or 'channel'." });
     }
 
-    const convertToIST = (date) => {
-      let d = new Date(date);
-      return new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-    };
-
-    const startDate = convertToIST(new Date(start_date));
-    const endDate = convertToIST(new Date(end_date));
+    const convertToIST = (date) => new Date(new Date(date).getTime() + 5.5 * 60 * 60 * 1000);
+    const startDate = convertToIST(start_date);
+    const endDate = convertToIST(end_date);
+    const lmtdStartDate = new Date(startDate);
+    const lmtdEndDate = new Date(endDate);
+    lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+    lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
 
     const actor = await ActorCode.findOne({ code });
-    if (!actor) {
-      return res.status(404).json({ success: false, message: "Actor not found for the provided code." });
-    }
+    if (!actor) return res.status(404).json({ success: false, message: "Actor not found for the provided code." });
 
     const { role, position } = actor;
     let dealerCodes = [];
 
     if (subordinate_codes && subordinate_codes.length > 0) {
-      // 1. Get dynamic position fields from ActorTypesHierarchies
       const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
       }
 
       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
-
       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
 
       const hierarchyEntries = await HeirarchyEntries.find({
@@ -699,67 +693,71 @@ exports.getSalesReportForUser = async (req, res) => {
     }
 
     const entity = await Entity.findOne({ name: report_type === "segment" ? "segments" : "channels" });
-    if (!entity) {
-      return res.status(400).json({ success: false, message: `No ${report_type} found in the database.` });
-    }
+    if (!entity) return res.status(400).json({ success: false, message: `No ${report_type} found in the database.` });
 
     const reportCategories = entity.value || [];
     const target = await Target.findOne({ entity: code });
-    if (!target) {
-      return res.status(404).json({ success: false, message: "Target not found for the provided code." });
+    if (!target) return res.status(404).json({ success: false, message: "Target not found for the provided code." });
+
+    const matchQuery = {
+      sales_type: "Sell Out",
+      date: { $gte: startDate, $lte: endDate }
+    };
+    if (dealerCodes) matchQuery.buyer_code = { $in: dealerCodes };
+
+    const salesData = await SalesData.aggregate([
+      { $match: matchQuery },
+      { $group: {
+        _id: report_type === "segment" ? "$product_code" : "$channel",
+        total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } },
+        dateArray: { $push: "$date" }
+      }}
+    ]);
+
+    const lastMonthMatch = {
+      sales_type: "Sell Out",
+      date: { $gte: lmtdStartDate, $lte: lmtdEndDate }
+    };
+    if (dealerCodes) lastMonthMatch.buyer_code = { $in: dealerCodes };
+
+    const lastMonthSalesData = await SalesData.aggregate([
+      { $match: lastMonthMatch },
+      { $group: {
+        _id: report_type === "segment" ? "$product_code" : "$channel",
+        total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } }
+      }}
+    ]);
+
+    const productMap = {};
+    if (report_type === "segment") {
+      const products = await Product.find({ status: "active" });
+      products.forEach(p => productMap[p.product_code] = p.segment);
     }
 
-    let lmtdStartDate = new Date(startDate);
-    lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
-    let lmtdEndDate = new Date(endDate);
-    lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+    const salesMap = {};
+    salesData.forEach(row => {
+      const key = report_type === "segment" ? productMap[row._id] : row._id;
+      if (key) salesMap[key] = (salesMap[key] || 0) + row.total;
+    });
 
-    let todayDate = new Date().getDate();
-
-    console.log("Sales Report dealers: ", dealerCodes);
-
-    let salesQuery = { date: { $gte: startDate, $lte: endDate } };
-    if (dealerCodes) {
-      salesQuery.buyer_code = { $in: dealerCodes };
-    }
-    const salesData = await SalesData.find(salesQuery);
-
-    let lastMonthSalesQuery = { date: { $gte: lmtdStartDate, $lte: lmtdEndDate } };
-    if (dealerCodes) {
-      lastMonthSalesQuery.buyer_code = { $in: dealerCodes };
-    }
-    const lastMonthSalesData = await SalesData.find(lastMonthSalesQuery);
-
-    const products = await Product.find({ status: "active" });
-    const productSegmentMap = {};
-    products.forEach((product) => {
-      productSegmentMap[product.product_code] = product.segment;
+    const lastMonthMap = {};
+    lastMonthSalesData.forEach(row => {
+      const key = report_type === "segment" ? productMap[row._id] : row._id;
+      if (key) lastMonthMap[key] = (lastMonthMap[key] || 0) + row.total;
     });
 
     let reportData = [];
+    const todayDate = new Date().getDate();
 
     for (let category of reportCategories) {
-      let categorySales, lastMonthCategorySales, targetValue;
-
-      if (report_type === "segment") {
-        categorySales = salesData.filter(sale => productSegmentMap[sale.product_code] === category);
-        lastMonthCategorySales = lastMonthSalesData.filter(sale => productSegmentMap[sale.product_code] === category);
-        targetValue = target.value[filter_type]?.segment?.[category] || 0;
-      } else {
-        categorySales = salesData.filter(sale => sale.channel === category);
-        lastMonthCategorySales = lastMonthSalesData.filter(sale => sale.channel === category);
-        targetValue = target.value[filter_type]?.channel?.[category] || 0;
-      }
-
-      let mtdValue = categorySales.reduce((sum, sale) => sum + (filter_type === "value" ? sale.total_amount : sale.quantity), 0);
-      let lmtdValue = lastMonthCategorySales.reduce((sum, sale) => sum + (filter_type === "value" ? sale.total_amount : sale.quantity), 0);
-
-      let pending = targetValue - mtdValue;
-      let ads = (mtdValue / todayDate).toFixed(2);
-      let reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
-      let growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : 0;
-      let ftd = categorySales.filter(sale => new Date(sale.date).getDate() === todayDate)
-        .reduce((sum, sale) => sum + (filter_type === "value" ? sale.total_amount : sale.quantity), 0);
+      const mtdValue = salesMap[category] || 0;
+      const lmtdValue = lastMonthMap[category] || 0;
+      const targetValue = target.value[filter_type]?.[report_type]?.[category] || 0;
+      const pending = targetValue - mtdValue;
+      const ads = (mtdValue / todayDate).toFixed(2);
+      const reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
+      const growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : 0;
+      const ftd = 0; // optionally can fetch FTD using separate query
 
       reportData.push({
         "Segment/Channel": category,
@@ -771,18 +769,17 @@ exports.getSalesReportForUser = async (req, res) => {
         "Req. ADS": reqAds,
         "% Growth": growth.toFixed(2),
         "FTD": ftd,
-        "% Contribution": 0,
+        "% Contribution": 0
       });
     }
 
-    let totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
+    const totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
     reportData = reportData.map(row => ({
       ...row,
       "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0
     }));
 
     const headers = ["Segment/Channel", "Target", "MTD", "LMTD", "Pending", "ADS", "Req. ADS", "% Growth", "FTD", "% Contribution"];
-
     res.status(200).json({ headers, data: reportData });
 
   } catch (error) {
@@ -790,6 +787,172 @@ exports.getSalesReportForUser = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+
+// exports.getSalesReportForUser = async (req, res) => {
+//   try {
+//     let { code } = req.user;
+//     let { start_date, end_date, filter_type, report_type, subordinate_codes } = req.body;
+//     filter_type = filter_type || "value";
+//     report_type = report_type || "segment";
+
+//     console.log("Filters: ", start_date, end_date, filter_type, report_type, subordinate_codes);
+
+//     if (!start_date || !end_date || !code) {
+//       return res.status(400).json({ success: false, message: "Start date, end date, and code are required." });
+//     }
+
+//     if (!["segment", "channel"].includes(report_type)) {
+//       return res.status(400).json({ success: false, message: "Invalid report_type. Choose 'segment' or 'channel'." });
+//     }
+
+//     const convertToIST = (date) => {
+//       let d = new Date(date);
+//       return new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+//     };
+
+//     const startDate = convertToIST(new Date(start_date));
+//     const endDate = convertToIST(new Date(end_date));
+
+//     const actor = await ActorCode.findOne({ code });
+//     if (!actor) {
+//       return res.status(404).json({ success: false, message: "Actor not found for the provided code." });
+//     }
+
+//     const { role, position } = actor;
+//     let dealerCodes = [];
+
+//     if (subordinate_codes && subordinate_codes.length > 0) {
+//       // 1. Get dynamic position fields from ActorTypesHierarchies
+//       const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+//       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
+//         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
+//       }
+
+//       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
+
+//       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
+
+//       const hierarchyEntries = await HeirarchyEntries.find({
+//         hierarchy_name: "default_sales_flow",
+//         $or: orFilters,
+//       });
+
+//       const dealersFromHierarchy = hierarchyEntries.map(entry => entry.dealer);
+
+//       const directDealers = await ActorCode.find({
+//         code: { $in: subordinate_codes },
+//         position: "dealer"
+//       }).distinct("code");
+
+//       dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
+//     } else {
+//       if (["admin", "mdd", "super_admin"].includes(role)) {
+//         dealerCodes = null;
+//       } else if (role === "employee" && position) {
+//         const hierarchyEntries = await HeirarchyEntries.find({
+//           hierarchy_name: "default_sales_flow",
+//           [position]: code,
+//         });
+
+//         dealerCodes = hierarchyEntries.map(entry => entry.dealer);
+//       } else {
+//         return res.status(403).json({ success: false, message: "Unauthorized role." });
+//       }
+//     }
+
+//     const entity = await Entity.findOne({ name: report_type === "segment" ? "segments" : "channels" });
+//     if (!entity) {
+//       return res.status(400).json({ success: false, message: `No ${report_type} found in the database.` });
+//     }
+
+//     const reportCategories = entity.value || [];
+//     const target = await Target.findOne({ entity: code });
+//     if (!target) {
+//       return res.status(404).json({ success: false, message: "Target not found for the provided code." });
+//     }
+
+//     let lmtdStartDate = new Date(startDate);
+//     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//     let lmtdEndDate = new Date(endDate);
+//     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     let todayDate = new Date().getDate();
+
+//     console.log("Sales Report dealers: ", dealerCodes);
+
+//     let salesQuery = { date: { $gte: startDate, $lte: endDate } };
+//     if (dealerCodes) {
+//       salesQuery.buyer_code = { $in: dealerCodes };
+//     }
+//     const salesData = await SalesData.find(salesQuery);
+
+//     let lastMonthSalesQuery = { date: { $gte: lmtdStartDate, $lte: lmtdEndDate } };
+//     if (dealerCodes) {
+//       lastMonthSalesQuery.buyer_code = { $in: dealerCodes };
+//     }
+//     const lastMonthSalesData = await SalesData.find(lastMonthSalesQuery);
+
+//     const products = await Product.find({ status: "active" });
+//     const productSegmentMap = {};
+//     products.forEach((product) => {
+//       productSegmentMap[product.product_code] = product.segment;
+//     });
+
+//     let reportData = [];
+
+//     for (let category of reportCategories) {
+//       let categorySales, lastMonthCategorySales, targetValue;
+
+//       if (report_type === "segment") {
+//         categorySales = salesData.filter(sale => productSegmentMap[sale.product_code] === category);
+//         lastMonthCategorySales = lastMonthSalesData.filter(sale => productSegmentMap[sale.product_code] === category);
+//         targetValue = target.value[filter_type]?.segment?.[category] || 0;
+//       } else {
+//         categorySales = salesData.filter(sale => sale.channel === category);
+//         lastMonthCategorySales = lastMonthSalesData.filter(sale => sale.channel === category);
+//         targetValue = target.value[filter_type]?.channel?.[category] || 0;
+//       }
+
+//       let mtdValue = categorySales.reduce((sum, sale) => sum + (filter_type === "value" ? sale.total_amount : sale.quantity), 0);
+//       let lmtdValue = lastMonthCategorySales.reduce((sum, sale) => sum + (filter_type === "value" ? sale.total_amount : sale.quantity), 0);
+
+//       let pending = targetValue - mtdValue;
+//       let ads = (mtdValue / todayDate).toFixed(2);
+//       let reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
+//       let growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : 0;
+//       let ftd = categorySales.filter(sale => new Date(sale.date).getDate() === todayDate)
+//         .reduce((sum, sale) => sum + (filter_type === "value" ? sale.total_amount : sale.quantity), 0);
+
+//       reportData.push({
+//         "Segment/Channel": category,
+//         "Target": targetValue,
+//         "MTD": mtdValue,
+//         "LMTD": lmtdValue,
+//         "Pending": pending,
+//         "ADS": ads,
+//         "Req. ADS": reqAds,
+//         "% Growth": growth.toFixed(2),
+//         "FTD": ftd,
+//         "% Contribution": 0,
+//       });
+//     }
+
+//     let totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
+//     reportData = reportData.map(row => ({
+//       ...row,
+//       "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0
+//     }));
+
+//     const headers = ["Segment/Channel", "Target", "MTD", "LMTD", "Pending", "ADS", "Req. ADS", "% Growth", "FTD", "% Contribution"];
+
+//     res.status(200).json({ headers, data: reportData });
+
+//   } catch (error) {
+//     console.error("Error generating sales report:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
 
 exports.getDashboardSalesMetricsForUser = async (req, res) => {
   try {
