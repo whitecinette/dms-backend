@@ -4,6 +4,7 @@ const Product = require('../../model/Product'); // Adjust path as needed
 const User = require('../../model/User');
 const moment = require("moment");
 const HierarchyEntries = require('../../model/HierarchyEntries');
+const { Parser } = require("json2csv");
 
 const { BACKEND_URL } = process.env;
 
@@ -286,3 +287,158 @@ exports.getExtractionStatus = async (req, res) => {
       res.status(500).json({ success: false, message: "Internal Server Error" });
     }
   };
+
+  // exports.getExtractionRecords = async (req, res) => {
+  //   try {
+  //     const { startDate, endDate, uploadedBy } = req.body;
+  //     console.log("Request Body:", req.body);
+  
+  //     const filter = {};
+  
+  //     // Date range filter
+  //     if (startDate || endDate) {
+  //       filter.createdAt = {};
+  //       if (startDate) filter.createdAt.$gte = new Date(startDate);
+  //       if (endDate) filter.createdAt.$lte = new Date(endDate);
+  //     }
+  
+  //     // Uploaded By filter
+  //     if (uploadedBy) {
+  //       filter.uploaded_by = uploadedBy;
+  //     }
+  
+  //     // Aggregation: Get latest record for each unique dealer
+  //     const records = await ExtractionRecord.aggregate([
+  //       { $match: filter },
+  //       { $sort: { createdAt: -1 } },
+  //       {
+  //         $group: {
+  //           _id: "$dealer",
+  //           record: { $first: "$$ROOT" }
+  //         }
+  //       },
+  //       { $replaceWith: "$record" },
+  //       { $sort: { createdAt: -1 } }
+  //     ]);
+  
+  //     // Format for response
+  //     const formattedRecords = records.map(record => ({
+  //       "Dealer Code": record.dealer,
+  //       uploadedBy: record.uploaded_by,
+  //       Segment: record.segment,
+  //       Brand: record.brand,
+  //       "Product Name": record.product_name,
+  //       "Product Code": record.product_code,
+  //       Price: record.price,
+  //       Quantity: record.quantity,
+  //       Amount: record.amount,
+  //       Product_category: record.product_category,
+  //       "Date": record.createdAt
+  //     }));
+  
+  //     return res.status(200).json({
+  //       success: true,
+  //       data: formattedRecords,
+  //       total: formattedRecords.length
+  //     });
+  
+  //   } catch (error) {
+  //     console.error("Error in getExtractionRecords:", error);
+  //     return res.status(500).json({
+  //       success: false,
+  //       message: "Internal server error"
+  //     });
+  //   }
+  // };
+  
+
+  
+  
+  exports.getExtractionRecordsForDownload = async (req, res) => {
+    try {
+      const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
+  
+      // Step 1: Define default date range
+      const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+      const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+  
+      // Step 2: Build hierarchy filter
+      const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+      if (smd.length) hierarchyFilter.smd = { $in: smd };
+      if (asm.length) hierarchyFilter.asm = { $in: asm };
+      if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
+  
+      const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+      if (!hierarchyEntries.length) {
+        return res.status(200).json({ message: "No records found", data: [], total: 0 });
+      }
+  
+      // Step 3: Group dealers by TSE
+      const tseToDealersMap = {};
+      hierarchyEntries.forEach(({ tse, dealer }) => {
+        if (!tseToDealersMap[tse]) tseToDealersMap[tse] = new Set();
+        tseToDealersMap[tse].add(dealer);
+      });
+  
+      const tseCodes = Object.keys(tseToDealersMap);
+  
+      // Step 4: Get all users once
+      const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
+      const userMap = users.reduce((acc, user) => {
+        acc[user.code] = user.name;
+        return acc;
+      }, {});
+  
+      // Step 5: Fetch extraction records
+      const allRecords = [];
+  
+      for (const tseCode of tseCodes) {
+        const dealers = Array.from(tseToDealersMap[tseCode]);
+  
+        const records = await ExtractionRecord.find({
+          dealer: { $in: dealers },
+          uploaded_by: tseCode,
+          createdAt: { $gte: start, $lte: end },
+        }).sort({ createdAt: -1 }).lean();
+  
+        records.forEach(record => {
+          allRecords.push({
+            name: userMap[tseCode] || "N/A",
+            code: tseCode,
+            dealerCode: record.dealer,
+            segment: `="${record.segment}"`,
+            brand: record.brand,
+            productName: record.product_name,
+            productCode: record.product_code,
+            price: record.price,
+            quantity: record.quantity,
+            amount: record.amount,
+            productCategory: record.product_category,
+            date: new Date(record.createdAt).toISOString().split("T")[0],
+          });
+        });
+      }
+  
+      // Step 6: Format for CSV
+      const fields = [
+        "name", "code", "dealerCode", "segment", "brand", "productName",
+        "productCode", "price", "quantity", "amount", "productCategory", "date",
+      ];
+      const parser = new Parser({ fields });
+      const csv = parser.parse(allRecords);
+  
+      res.header("Content-Type", "text/csv");
+      res.attachment("extraction_records.csv");
+      return res.send(csv);
+  
+    } catch (error) {
+      console.error("Error in getExtractionRecordsForDownload:", error);
+      return res.status(500).json({
+        message: "Error downloading extraction records",
+        error: error.message,
+      });
+    }
+  };
+  
+  
+
