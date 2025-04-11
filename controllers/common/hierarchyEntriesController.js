@@ -461,8 +461,9 @@ exports.getSubordinatesForUser = async (req, res) => {
     // Independent grouping for taluka, district, zone (not in hierarchy)
     const uniqueDealers = await User.find(
       { role: "dealer" },
-      { code: 1, "profile.taluka": 1, "profile.district": 1, "profile.zone": 1 }
+      { code: 1, name: 1, taluka: 1, district: 1, zone: 1 }
     );
+    
 
     const groupByField = async (fieldName, positionLabel) => {
       const allUniqueGroups = await User.distinct(fieldName, { role: "dealer" });
@@ -470,9 +471,13 @@ exports.getSubordinatesForUser = async (req, res) => {
       console.log("Unique grpa:". allUniqueGroups);
 
       for (let groupValue of allUniqueGroups) {
+        console.log("GroupValue: ", groupValue);
         const dealerCodes = uniqueDealers
-          .filter(d => d.profile?.[fieldName] === groupValue)
-          .map(d => d.code);
+        .filter(d => d[fieldName] === groupValue)
+        .map(d => d.code);
+
+        console.log("Delars for talike: ", dealerCodes);
+
 
         let mtdValue = 0;
         let lmtdValue = 0;
