@@ -848,16 +848,21 @@ exports.getSubordinatesForUser = async (req, res) => {
       sub.sell_out_growth = calculateGrowth(mtd, lmtd).toFixed(2);
     });
 
-    const profileDealers = await User.find({ role: "dealer" }, { code: 1, taluka: 1, district: 1, zone: 1 });
+    const profileDealers = await User.find({ role: "dealer" }, { code: 1, taluka: 1, district: 1, zone: 1, labels: 1 });
 
-    const fieldGroups = { taluka: {}, district: {}, zone: {} };
+    const fieldGroups = { taluka: {}, district: {}, zone: {}, dealer_category: {} };
+
     profileDealers.forEach(dealer => {
-      for (const key of Object.keys(fieldGroups)) {
-        const val = dealer[key]; // ✅ Now correctly accessing top-level field like dealer.taluka
+      for (const key of ["taluka", "district", "zone"]) {
+        const val = dealer[key];
         if (val) (fieldGroups[key][val] = fieldGroups[key][val] || []).push(dealer.code);
       }
+      if (Array.isArray(dealer.labels)) {
+        dealer.labels.forEach(label => {
+          if (label) (fieldGroups.dealer_category[label] = fieldGroups.dealer_category[label] || []).push(dealer.code);
+        });
+      }
     });
-    
 
     for (const [field, groupMap] of Object.entries(fieldGroups)) {
       for (const [group, codes] of Object.entries(groupMap)) {
@@ -877,7 +882,7 @@ exports.getSubordinatesForUser = async (req, res) => {
       }
     }
 
-    const finalPositions = [...new Set([...subordinatePositions, "taluka", "district", "zone"])]
+    const finalPositions = [...new Set([...subordinatePositions, "taluka", "district", "zone", "dealer_category"])]
     res.status(200).json({ success: true, positions: finalPositions, subordinates });
 
   } catch (error) {
@@ -885,6 +890,138 @@ exports.getSubordinatesForUser = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+// exports.getSubordinatesForUser = async (req, res) => {
+//   try {
+//     console.log("Subods reaching");
+//     const { code } = req.user;
+//     const { filter_type = "value", start_date, end_date } = req.body;
+
+//     if (!code || !start_date || !end_date) {
+//       return res.status(400).json({ success: false, message: "Code, start_date, and end_date are required." });
+//     }
+
+//     const actor = await ActorCode.findOne({ code });
+//     if (!actor) return res.status(404).json({ success: false, message: "Actor not found." });
+//     const { position } = actor;
+//     if (!position) return res.status(400).json({ success: false, message: "Position not found for this user." });
+
+//     const actorHierarchy = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+//     if (!actorHierarchy || !actorHierarchy.hierarchy) {
+//       return res.status(500).json({ success: false, message: "Hierarchy data not found." });
+//     }
+
+//     const allPositions = actorHierarchy.hierarchy;
+//     const userPositionIndex = allPositions.indexOf(position);
+//     if (userPositionIndex === -1 || userPositionIndex >= allPositions.length - 1) {
+//       return res.status(200).json({ success: true, positions: [], subordinates: [] });
+//     }
+
+//     const subordinatePositions = allPositions.slice(userPositionIndex + 1);
+//     const hierarchyEntries = await HierarchyEntries.find({ [position]: code });
+
+//     const subordinates = [];
+//     const allDealerCodesSet = new Set();
+
+//     for (const subPosition of subordinatePositions) {
+//       const subCodes = [...new Set(hierarchyEntries.map(entry => entry[subPosition]).filter(Boolean))];
+//       const subs = await ActorCode.find({ code: { $in: subCodes } }, { code: 1, name: 1, _id: 0 });
+
+//       for (const sub of subs) {
+//         const subHierarchyDealers = hierarchyEntries
+//           .filter(entry => entry[subPosition] === sub.code && entry.dealer)
+//           .map(entry => entry.dealer);
+
+//         subHierarchyDealers.forEach(code => allDealerCodesSet.add(code));
+
+//         if (subPosition === 'dealer') allDealerCodesSet.add(sub.code);
+
+//         subordinates.push({
+//           code: sub.code,
+//           name: sub.name,
+//           position: subPosition
+//         });
+//       }
+//     }
+
+//     const convertToIST = (date) => new Date(new Date(date).getTime() + 5.5 * 60 * 60 * 1000);
+//     const startDate = convertToIST(start_date);
+//     const endDate = convertToIST(end_date);
+//     const lmtdStartDate = new Date(startDate); lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//     const lmtdEndDate = new Date(endDate); lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     const allDealerCodes = [...allDealerCodesSet];
+
+//     const mtdSales = await SalesData.aggregate([
+//       { $match: { buyer_code: { $in: allDealerCodes }, sales_type: "Sell Out", date: { $gte: startDate, $lte: endDate } } },
+//       { $group: { _id: "$buyer_code", total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } }
+//     ]);
+
+//     const lmtdSales = await SalesData.aggregate([
+//       { $match: { buyer_code: { $in: allDealerCodes }, sales_type: "Sell Out", date: { $gte: lmtdStartDate, $lte: lmtdEndDate } } },
+//       { $group: { _id: "$buyer_code", total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } }
+//     ]);
+
+//     const mtdMap = Object.fromEntries(mtdSales.map(e => [e._id, e.total]));
+//     const lmtdMap = Object.fromEntries(lmtdSales.map(e => [e._id, e.total]));
+
+//     const calculateGrowth = (current, last) => (last !== 0 ? ((current - last) / last) * 100 : 0);
+
+//     subordinates.forEach(sub => {
+//       const dealerCodes = hierarchyEntries
+//         .filter(entry => entry[sub.position] === sub.code && entry.dealer)
+//         .map(entry => entry.dealer);
+
+//       if (sub.position === 'dealer') dealerCodes.push(sub.code);
+
+//       let mtd = 0, lmtd = 0;
+//       dealerCodes.forEach(code => {
+//         mtd += mtdMap[code] || 0;
+//         lmtd += lmtdMap[code] || 0;
+//       });
+
+//       sub.mtd_sell_out = mtd;
+//       sub.lmtd_sell_out = lmtd;
+//       sub.sell_out_growth = calculateGrowth(mtd, lmtd).toFixed(2);
+//     });
+
+//     const profileDealers = await User.find({ role: "dealer" }, { code: 1, taluka: 1, district: 1, zone: 1 });
+
+//     const fieldGroups = { taluka: {}, district: {}, zone: {} };
+//     profileDealers.forEach(dealer => {
+//       for (const key of Object.keys(fieldGroups)) {
+//         const val = dealer[key]; // ✅ Now correctly accessing top-level field like dealer.taluka
+//         if (val) (fieldGroups[key][val] = fieldGroups[key][val] || []).push(dealer.code);
+//       }
+//     });
+    
+
+//     for (const [field, groupMap] of Object.entries(fieldGroups)) {
+//       for (const [group, codes] of Object.entries(groupMap)) {
+//         let mtd = 0, lmtd = 0;
+//         codes.forEach(code => {
+//           mtd += mtdMap[code] || 0;
+//           lmtd += lmtdMap[code] || 0;
+//         });
+//         subordinates.push({
+//           code: group,
+//           name: group,
+//           position: field,
+//           mtd_sell_out: mtd,
+//           lmtd_sell_out: lmtd,
+//           sell_out_growth: calculateGrowth(mtd, lmtd).toFixed(2)
+//         });
+//       }
+//     }
+
+//     const finalPositions = [...new Set([...subordinatePositions, "taluka", "district", "zone"])]
+//     res.status(200).json({ success: true, positions: finalPositions, subordinates });
+
+//   } catch (error) {
+//     console.error("Error in getSubordinatesForUser:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
 
 
 
