@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const ActorCode = require("../../model/ActorCode");
 const { getAdditionalFields } = require("../../helpers/userHelpers");
 const Decimal128 = mongoose.Types.Decimal128;
+const csv = require('csv-parser');
 
 
 /////////////// SUPER ADMIN ///////////////////////////
@@ -1109,3 +1110,53 @@ exports.registerOrUpdateUsersFromActorCodes = async (req, res) => {
      res.status(500).json({ message: "Internal server error" });
  }
 };
+
+
+exports.updateUserLabelsFromCSV = async (req, res) => {
+  try {
+    const filePath = req.file.path;
+    const dealerMap = {}; // code -> Set of labels
+
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on('data', (row) => {
+        const code = row['Code']?.trim();
+        const rawLabel = row['Category']?.trim();
+
+        if (!code || !rawLabel) return;
+        const label = rawLabel.toUpperCase();
+
+        if (!dealerMap[code]) dealerMap[code] = new Set();
+        dealerMap[code].add(label);
+      })
+      .on('end', async () => {
+        const bulkOps = [];
+
+        for (const [code, labels] of Object.entries(dealerMap)) {
+          const user = await User.findOne({ code });
+
+          if (!user) continue;
+
+          const existingLabels = user.labels || [];
+          const newLabels = [...labels].filter(label => !existingLabels.includes(label));
+
+          if (newLabels.length > 0) {
+            bulkOps.push({
+              updateOne: {
+                filter: { code },
+                update: { $addToSet: { labels: { $each: newLabels } } },
+              }
+            });
+          }
+        }
+
+        if (bulkOps.length > 0) await User.bulkWrite(bulkOps);
+        res.status(200).json({ success: true, message: 'Dealer labels updated successfully.' });
+      });
+
+  } catch (error) {
+    console.error('Error updating dealer labels:', error);
+    res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+

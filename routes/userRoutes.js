@@ -1,5 +1,6 @@
 const express = require("express");
-const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerForAdmin, updateBulkLatLongForAdmin } = require("../controllers/admin/userController");
+const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerForAdmin, updateBulkLatLongForAdmin, 
+    updateUserLabelsFromCSV } = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
@@ -63,6 +64,8 @@ router.get('/get-users-by-code', userAuth, getUsersDetails);
 
 
 router.post("/admin/get-users-by-positions", getUsersByPositions);
+
+router.put("/admin/update-user-labels", upload.single('file'), updateUserLabelsFromCSV);
 
 
 
