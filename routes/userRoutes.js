@@ -1,6 +1,7 @@
 const express = require("express");
 const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerForAdmin, updateBulkLatLongForAdmin, 
-    updateUserLabelsFromCSV } = require("../controllers/admin/userController");
+    updateUserLabelsFromCSV, 
+    updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
@@ -25,7 +26,9 @@ router.put("/edit-admin-profile/:id", editAdminProfile );
 router.post("/register-user-by-admin", adminAuth, registerUserByAdmin);
 router.patch("/deactivate-user-by-admin/:id", adminAuth, deactivateUserByAdmin);
 
-router.put("/bulk-lats-longs-upload", upload.single("file"), updateBulkLatLongForAdmin);
+// router.put("/bulk-lats-longs-upload", upload.single("file"), updateBulkLatLongForAdmin);
+
+router.put("/bulk-update-dealers", upload.single("file"), updateBulkDealersFromCSV);
 
 //  =========================== /ADMIN ================================
 
