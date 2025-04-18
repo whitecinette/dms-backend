@@ -946,3 +946,50 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+exports.markDealerDone = async (req, res) => {
+  try {
+    console.log("Done rach")
+    const { dealerCode, distance } = req.body;
+    const userCode = req.user.code;
+
+    if (!dealerCode || distance === undefined) {
+      return res.status(400).json({ message: "dealerCode and distance are required" });
+    }
+
+    const nowIST = moment().tz("Asia/Kolkata");
+
+    const scheduleDoc = await WeeklyBeatMappingSchedule.findOne({
+      code: userCode,
+      startDate: { $lte: nowIST.toDate() },
+      endDate: { $gte: nowIST.toDate() },
+    });
+
+    if (!scheduleDoc) {
+      return res.status(404).json({ message: "No active schedule found" });
+    }
+
+    const dealer = scheduleDoc.schedule.find(d => d.code === dealerCode);
+
+    if (!dealer) {
+      return res.status(404).json({ message: "Dealer not found in schedule" });
+    }
+
+    if (dealer.status === "done") {
+      return res.status(200).json({ message: "Already marked as done" });
+    }
+
+    dealer.status = "done";
+    dealer.distance = distance;
+
+    scheduleDoc.done += 1;
+    scheduleDoc.pending -= 1;
+
+    await scheduleDoc.save();
+
+    return res.status(200).json({ message: "Dealer marked as done successfully" });
+  } catch (error) {
+    console.error("Error in markDealerDone:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
