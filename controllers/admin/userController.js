@@ -966,102 +966,211 @@ exports.getAllDealerForAdmin = async (req, res) => {
 
 
   
-  exports.updateBulkLatLongForAdmin = async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ message: "CSV file is required." });
-      }
+  // exports.updateBulkLatLongForAdmin = async (req, res) => {
+  //   try {
+  //     if (!req.file) {
+  //       return res.status(400).json({ message: "CSV file is required." });
+  //     }
   
-      const results = [];
-      const errors = [];
-      const filePath = req.file.path;
+  //     const results = [];
+  //     const errors = [];
+  //     const filePath = req.file.path;
   
-      fs.createReadStream(filePath)
-        .pipe(
-          csvParser({
-            mapHeaders: ({ header }) => header.toLowerCase().trim().replace(/\s+/g, "_")
-          })
-        )
-        .on("data", (row) => {
-          let cleanedRow = {};
-          Object.keys(row).forEach((key) => {
-            let cleanedKey = key.toLowerCase().trim().replace(/\s+/g, "_");
-            let cleanedValue = row[key]?.trim();
+  //     fs.createReadStream(filePath)
+  //       .pipe(
+  //         csvParser({
+  //           mapHeaders: ({ header }) => header.toLowerCase().trim().replace(/\s+/g, "_")
+  //         })
+  //       )
+  //       .on("data", (row) => {
+  //         let cleanedRow = {};
+  //         Object.keys(row).forEach((key) => {
+  //           let cleanedKey = key.toLowerCase().trim().replace(/\s+/g, "_");
+  //           let cleanedValue = row[key]?.trim();
   
-            // Convert lat/long to Decimal128
-            if (["latitude", "longitude"].includes(cleanedKey)) {
-              try {
-                cleanedValue = cleanedValue ? Decimal128.fromString(String(cleanedValue)) : null;
-              } catch (error) {
-                errors.push({ row, message: `Invalid ${cleanedKey} value: ${row[key]}` });
-                return; // Skip this row on error
-              }
-            }
+  //           // Convert lat/long to Decimal128
+  //           if (["latitude", "longitude"].includes(cleanedKey)) {
+  //             try {
+  //               cleanedValue = cleanedValue ? Decimal128.fromString(String(cleanedValue)) : null;
+  //             } catch (error) {
+  //               errors.push({ row, message: `Invalid ${cleanedKey} value: ${row[key]}` });
+  //               return; // Skip this row on error
+  //             }
+  //           }
   
-            cleanedRow[cleanedKey] = cleanedValue;
-          });
+  //           cleanedRow[cleanedKey] = cleanedValue;
+  //         });
   
-          if (!cleanedRow.code || !cleanedRow.latitude || !cleanedRow.longitude) {
-            errors.push({ row, message: "Missing required 'code', 'latitude', or 'longitude' field." });
-          } else {
-            results.push(cleanedRow);
+  //         if (!cleanedRow.code || !cleanedRow.latitude || !cleanedRow.longitude) {
+  //           errors.push({ row, message: "Missing required 'code', 'latitude', or 'longitude' field." });
+  //         } else {
+  //           results.push(cleanedRow);
+  //         }
+  //       })
+  //       .on("end", async () => {
+  //         try {
+  //           const updatedData = [];
+  
+  //           await Promise.all(
+  //             results.map(async (data, index) => {
+  //               console.log(`🔄 Processing User ${index + 1} of ${results.length}: ${data.code}`);
+  //               const { code, latitude, longitude } = data;
+  
+  //               let existingUser = await User.findOne({ code });
+  
+  //               if (existingUser) {
+  //                 console.log(`Updating user: ${existingUser.code} with lat: ${latitude}, long: ${longitude}`);
+  
+  //                 // Force conversion to Decimal128 in update logic (even if schema isn't updated)
+  //                 const updatedFields = {
+  //                   latitude: Decimal128.fromString(String(latitude)),
+  //                   longitude: Decimal128.fromString(String(longitude))
+  //                 };
+  
+  //                 const result = await User.updateOne(
+  //                   { code },
+  //                   { $set: updatedFields }
+  //                 );
+  
+  //                 if (result.modifiedCount > 0) {
+  //                   console.log(`✅ Successfully updated user: ${existingUser.code}`);
+  //                   updatedData.push(existingUser);
+  //                 } else {
+  //                   console.log(`⚠️ No changes detected for user: ${existingUser.code}`);
+  //                 }
+  //               } else {
+  //                 errors.push({ row: data, message: `No user found with code: ${code}. Skipping entry.` });
+  //               }
+  //             })
+  //           );
+  
+  //           fs.unlinkSync(filePath); // Delete CSV file after processing
+  
+  //           res.status(200).json({
+  //             message: "CSV processed successfully",
+  //             updatedCount: updatedData.length,
+  //             errors,
+  //           });
+  //         } catch (err) {
+  //           console.error("❌ Error processing CSV:", err);
+  //           res.status(500).json({ message: "Internal server error." });
+  //         }
+  //       });
+  //   } catch (error) {
+  //     console.error("❌ Upload Error:", error);
+  //     res.status(500).json({ message: "Internal server error." });
+  //   }
+  // };
+  
+
+
+
+  exports.updateBulkDealersFromCSV = async (req, res) => {
+   try {
+     if (!req.file) {
+       return res.status(400).json({ message: "CSV file is required." });
+     }
+ 
+     const results = [];
+     const errors = [];
+     const filePath = req.file.path;
+ 
+     fs.createReadStream(filePath)
+       .pipe(
+         csvParser({
+           mapHeaders: ({ header }) =>
+             header.toLowerCase().trim().replace(/\s+/g, "_"),
+         })
+       )
+       .on("data", (row) => {
+         let cleanedRow = {};
+         for (let key in row) {
+           let cleanedKey = key.toLowerCase().trim().replace(/\s+/g, "_");
+           let value = row[key]?.trim();
+ 
+           // Try parsing JSON strings (for nested objects/arrays)
+           try {
+             if ((value.startsWith("{") && value.endsWith("}")) || (value.startsWith("[") && value.endsWith("]"))) {
+               value = JSON.parse(value);
+             }
+           } catch {
+             // leave value as string if not JSON
+           }
+ 
+           // Convert latitude/longitude to Decimal128
+           if (["latitude", "longitude"].includes(cleanedKey)) {
+             try {
+               value = value ? Decimal128.fromString(String(value)) : null;
+             } catch (error) {
+               errors.push({
+                 row,
+                 message: `Invalid ${cleanedKey} value: ${row[key]}`,
+               });
+               return; // skip this row
+             }
+           }
+ 
+           cleanedRow[cleanedKey] = value;
+         }
+ 
+         // Make sure required key `code` exists
+         if (!cleanedRow.code) {
+           errors.push({
+             row,
+             message: "Missing required 'code' field.",
+           });
+         } else {
+           results.push(cleanedRow);
+         }
+       })
+       .on("end", async () => {
+         try {
+           const updatedData = [];
+ 
+           await Promise.all(
+             results.map(async (data, index) => {
+               const code = data.code;
+               const updateData = { ...data };
+               delete updateData.code; // exclude code from update fields
+ 
+               console.log(`🔄 Updating dealer ${index + 1}/${results.length}: ${code}`);
+ 
+               const result = await User.updateOne(
+                 { code },
+                 { $set: updateData },
+                 { upsert: true }
+               );
+ 
+               if (result.modifiedCount > 0 || result.upsertedCount > 0) {
+                 console.log(`✅ Dealer ${code} updated.`);
+                 updatedData.push(code);
+               } else {
+                 console.log(`⚠️ No changes for dealer ${code}.`);
+               }
+             })
+           );
+ 
+           try {
+            fs.unlinkSync(filePath);
+          } catch (unlinkErr) {
+            console.warn("⚠️ Could not delete file:", unlinkErr.message);
           }
-        })
-        .on("end", async () => {
-          try {
-            const updatedData = [];
-  
-            await Promise.all(
-              results.map(async (data, index) => {
-                console.log(`🔄 Processing User ${index + 1} of ${results.length}: ${data.code}`);
-                const { code, latitude, longitude } = data;
-  
-                let existingUser = await User.findOne({ code });
-  
-                if (existingUser) {
-                  console.log(`Updating user: ${existingUser.code} with lat: ${latitude}, long: ${longitude}`);
-  
-                  // Force conversion to Decimal128 in update logic (even if schema isn't updated)
-                  const updatedFields = {
-                    latitude: Decimal128.fromString(String(latitude)),
-                    longitude: Decimal128.fromString(String(longitude))
-                  };
-  
-                  const result = await User.updateOne(
-                    { code },
-                    { $set: updatedFields }
-                  );
-  
-                  if (result.modifiedCount > 0) {
-                    console.log(`✅ Successfully updated user: ${existingUser.code}`);
-                    updatedData.push(existingUser);
-                  } else {
-                    console.log(`⚠️ No changes detected for user: ${existingUser.code}`);
-                  }
-                } else {
-                  errors.push({ row: data, message: `No user found with code: ${code}. Skipping entry.` });
-                }
-              })
-            );
-  
-            fs.unlinkSync(filePath); // Delete CSV file after processing
-  
-            res.status(200).json({
-              message: "CSV processed successfully",
-              updatedCount: updatedData.length,
-              errors,
-            });
-          } catch (err) {
-            console.error("❌ Error processing CSV:", err);
-            res.status(500).json({ message: "Internal server error." });
-          }
-        });
-    } catch (error) {
-      console.error("❌ Upload Error:", error);
-      res.status(500).json({ message: "Internal server error." });
-    }
-  };
-  
+           res.status(200).json({
+             message: "CSV processed successfully",
+             updatedCount: updatedData.length,
+             updatedCodes: updatedData,
+             errors,
+           });
+         } catch (err) {
+           console.error("❌ Error updating dealers:", err);
+           res.status(500).json({ message: "Error while updating dealers." });
+         }
+       });
+   } catch (error) {
+     console.error("❌ Unexpected error:", error);
+     res.status(500).json({ message: "Internal server error." });
+   }
+ };
 
 
   // Rakshita implemented by Nameera
