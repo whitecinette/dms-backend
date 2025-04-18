@@ -1,6 +1,6 @@
 
 const express = require("express");
-const { addWeeklyBeatMappingSchedule, getWeeklyBeatMappingSchedule, updateWeeklyBeatMappingStatus, updateWeeklyBeatMappingStatusWithProximity, addWeeklyBeatMappingUsingCSV, getWeeklyBeatMappingScheduleForAdmin,editWeeklyBeatMappingScheduleByAdmin, getAllWeeklyBeatMapping } = require("../controllers/admin/weeklyBeatMappingScheduleController");
+const { addWeeklyBeatMappingSchedule, getWeeklyBeatMappingSchedule, updateWeeklyBeatMappingStatus, updateWeeklyBeatMappingStatusWithProximity, addWeeklyBeatMappingUsingCSV, getWeeklyBeatMappingScheduleForAdmin,editWeeklyBeatMappingScheduleByAdmin, getAllWeeklyBeatMapping, addDailyBeatMapping, getBeatMappingReport, getDropdownValuesForBeatMappingFilters } = require("../controllers/admin/weeklyBeatMappingScheduleController");
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const { upload } = require('../services/fileUpload');
 const router = express.Router();
@@ -15,6 +15,13 @@ router.post('/add-beat-mapping-using-csv', upload.single("file"), addWeeklyBeatM
 router.get("/get-weekly-beat-mapping-schedule-for-admin", getWeeklyBeatMappingScheduleForAdmin)
 router.put("/edit-weekly-beat-mapping-schedule-for-admin/:id", adminOrSuperAdminAuth, editWeeklyBeatMappingScheduleByAdmin)
 router.get('/get-all-weekly-beat-mapping', getAllWeeklyBeatMapping);
+
+
+// Rakshita New 
+// admin
+router.put("/add-daily-beat-mapping", addDailyBeatMapping);
+router.post("/get-beat-mapping-report", userAuth, getBeatMappingReport);
+router.get("/beat-mapping/dropdown", getDropdownValuesForBeatMappingFilters);
 
 module.exports = router;
 
