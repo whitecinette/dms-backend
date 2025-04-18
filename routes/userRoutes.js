@@ -28,7 +28,7 @@ router.patch("/deactivate-user-by-admin/:id", adminAuth, deactivateUserByAdmin);
 
 // router.put("/bulk-lats-longs-upload", upload.single("file"), updateBulkLatLongForAdmin);
 
-router.put("/bulk-update-dealers", upload.single("file"), updateBulkDealersFromCSV);
+router.put("/bulk-update-dealers", upload.single("file"), updateBulkDealersFromCSV); 
 
 //  =========================== /ADMIN ================================
 
