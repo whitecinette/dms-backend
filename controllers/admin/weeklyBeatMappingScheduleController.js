@@ -954,7 +954,7 @@ exports.markDealerDone = async (req, res) => {
     const userCode = req.user.code;
 
     if (!dealerCode || distance === undefined) {
-      return res.status(400).json({ message: "dealerCode and distance are required" });
+      return res.status(400).json({ message: "dealerCode and distance are required " });
     }
 
     const nowIST = moment().tz("Asia/Kolkata");
