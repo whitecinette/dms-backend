@@ -100,7 +100,7 @@ exports.punchIn = async (req, res) => {
 
       if (isNaN(relLat) || isNaN(relLon)) return;
 
-      const distance = getDistance(userLat, userLon, relLat, relLon);
+      const distance = attendanceHelpers.getDistance(userLat, userLon, relLat, relLon);
       if (distance < minDistance) {
         minDistance = distance;
         nearestUser = relUser;
@@ -253,7 +253,7 @@ exports.punchOut = async (req, res) => {
 
      if (isNaN(relLat) || isNaN(relLon)) return;
 
-     const distance = getDistance(userLat, userLon, relLat, relLon);
+     const distance = attendanceHelpers.getDistance(userLat, userLon, relLat, relLon);
      if (distance < minDistance) {
        minDistance = distance;
        nearestUser = relUser;
