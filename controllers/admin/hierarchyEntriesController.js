@@ -60,7 +60,10 @@ exports.uploadHierarchyEntries = async (req, res) => {
           }
 
           // 🔥 3️⃣ Validate Actor Codes Before Insertion
-          const allCodes = results.flatMap(entry => Object.values(entry).slice(1)); // Exclude hierarchy_name
+          // const allCodes = results.flatMap(entry => Object.values(entry).slice(1)); // Exclude hierarchy_name
+
+          const allCodes = results.flatMap(entry => Object.values(entry).slice(1).filter(code => code !== ""));
+
           const existingCodes = await ActorCode.find({ code: { $in: allCodes } }).select("code");
 
           const existingCodesSet = new Set(existingCodes.map(c => c.code));
