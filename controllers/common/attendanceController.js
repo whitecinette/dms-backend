@@ -615,7 +615,7 @@ exports.getAllEmpLeaves = async (req, res) => {
 exports.getAttendanceByDate = async (req, res) => {
   try {
     const { date } = req.params;
-    const { firm = "" } = req.query;
+    const { firms = [] } = req.query; // Changed to array
 
     if (!date) {
       return res.status(400).json({ message: "Date is required." });
@@ -629,18 +629,23 @@ exports.getAttendanceByDate = async (req, res) => {
 
     // Step 1: Get Firm Positions
     let firmPositions = [];
-    if (firm) {
-      const firmData = await ActorTypesHierarchy.findById(firm);
-      if (!firmData) {
-        return res.status(400).json({ message: "Invalid firm ID." });
+    if (firms.length) {
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } }); // Changed to find multiple firms
+      if (!firmData.length) {
+        return res.status(400).json({ message: "Invalid firm IDs." });
       }
-      if (Array.isArray(firmData.hierarchy)) {
-        firmPositions = firmData.hierarchy;
-      }
+      
+      // Collect positions from all firms
+      firmPositions = firmData.reduce((positions, firm) => {
+        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+          positions.push(...firm.hierarchy);
+        }
+        return positions;
+      }, []);
     }
 
     // Step 2: Fetch Employees Based on Firm Filter (If Applied)
-    let employeeFilter = { role: "employee" };
+    let employeeFilter = { role: { $in: ["admin", "employee"] } };
     if (firmPositions.length > 0) {
       employeeFilter.position = { $in: firmPositions };
     }
@@ -715,23 +720,26 @@ exports.getLatestAttendance = async (req, res) => {
       limit = 10,
       search = "",
       status = "",
-      firm = null,
+      firms = [], // Changed firm to firms array
     } = req.query;
-
+    
     let firmPositions = [];
-    if (firm) {
-      const firmData = await ActorTypesHierarchy.findById(firm);
-      if (!firmData) {
-        return res.status(400).json({ message: "Invalid firm ID." });
+    if (firms.length) {
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      if (!firmData.length) {
+        return res.status(400).json({ message: "Invalid firm IDs." });
       }
 
-      if (firmData.hierarchy && Array.isArray(firmData.hierarchy)) {
-        firmPositions = firmData.hierarchy;
-      }
+      firmPositions = firmData.reduce((positions, firm) => {
+        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+          positions.push(...firm.hierarchy);
+        }
+        return positions;
+      }, []);
     }
 
     // ✅ Step 1: Fetch all employees first
-    let employeeFilter = { role: "employee" };
+    let employeeFilter = { role: { $in: ["admin", "employee"] } };
     if (firmPositions.length) {
       employeeFilter.position = { $in: firmPositions };
     }
@@ -874,22 +882,25 @@ exports.editAttendanceByID = async (req, res) => {
 
 exports.downloadAllAttendance = async (req, res) => {
   try {
-    const { date, search = "", status = "", firm = null } = req.query;
+    const { date, search = "", status = "", firms = [] } = req.query;
 
     let firmPositions = [];
-    if (firm) {
-      const firmData = await ActorTypesHierarchy.findById(firm);
-      if (!firmData) {
-        return res.status(400).json({ message: "Invalid firm ID." });
+    if (firms.length) {
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      if (!firmData.length) {
+        return res.status(400).json({ message: "Invalid firm IDs." });
       }
 
-      if (firmData.hierarchy && Array.isArray(firmData.hierarchy)) {
-        firmPositions = firmData.hierarchy;
-      }
+      firmPositions = firmData.reduce((positions, firm) => {
+        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+          positions.push(...firm.hierarchy);
+        }
+        return positions;
+      }, []);
     }
 
     // Step 1: Fetch all employees first
-    let employeeFilter = { role: "employee" };
+    let employeeFilter = { role: { $in: ["admin", "employee"] } };
     if (firmPositions.length) {
       employeeFilter.position = { $in: firmPositions };
     }

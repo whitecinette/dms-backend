@@ -1269,3 +1269,70 @@ exports.updateUserLabelsFromCSV = async (req, res) => {
   }
 };
 
+exports.updateData = async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No file uploaded" });
+    }
+
+    const filePath = file.path;
+    const data = [];
+
+    // Read and Parse CSV
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on("data", (row) => {
+        data.push(row);
+      })
+      .on("end", async () => {
+        try {
+          // Process each row
+          for (const item of data) {
+            if (!item.code) {
+              throw new Error(
+                "CSV must contain 'code' field for matching records"
+              );
+            }
+
+            // Find existing document by code and update, adding any new fields
+            await User.findOneAndUpdate(
+              { code: item.code },
+              { $set: item },
+              { upsert: true, new: true }
+            );
+          }
+
+          // Delete file after processing
+          fs.unlinkSync(filePath);
+
+          res.status(200).json({
+            success: true,
+            message: "Data updated successfully",
+            processedCount: data.length,
+          });
+        } catch (err) {
+          console.error(err);
+          res.status(500).json({
+            success: false,
+            message: err.message || "Error updating data in database",
+          });
+        }
+      })
+      .on("error", (error) => {
+        console.error(error);
+        res.status(500).json({
+          success: false,
+          message: "Error processing CSV file",
+        });
+      });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};

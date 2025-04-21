@@ -240,12 +240,13 @@ exports.editActorCode = async (req, res) => {
       !req.body.name ||
       !req.body.position ||
       !req.body.role ||
-      !req.body.status
+      !req.body.status ||
+      !req.body.parent_code
     ) {
       return res.status(400).json({ message: "All fields are required." });
     }
 
-    let { code, name, position, role, status } = req.body;
+    let { code, name, position, role, status, parent_code } = req.body;
     code = code.toUpperCase();
     const actorId = req.params.id;
 
@@ -265,20 +266,28 @@ exports.editActorCode = async (req, res) => {
       await editUser(actor.code, code, name, position, role, status);
     }
 
-    actor.code = code;
-    actor.name = name;
-    actor.position = position;
-    actor.role = role;
-    actor.status = status;
+    // Update the actor using findByIdAndUpdate to ensure all fields are updated
+    const updatedActor = await ActorCode.findByIdAndUpdate(
+      actorId,
+      {
+        code,
+        name,
+        position,
+        role,
+        status,
+        parent_code,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
 
-    await actor.save();
     if (status === "active") {
       await assignActorToUser(code);
     }
 
     return res
       .status(200)
-      .json({ message: "Actor updated successfully.", actor });
+      .json({ message: "Actor updated successfully.", actor: updatedActor });
   } catch (error) {
     console.error("Error editing actor:", error);
     return res.status(500).json({ message: "Internal server error." });

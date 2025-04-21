@@ -7,10 +7,11 @@ exports.getEmpForHr = async (req, res) => {
     limit = 50,
     search = "",
     firm = null, 
+    role = "employee", // Default to employee role
   } = req.query;
 
   try {
-    const filters = { role: "employee" }; // Filter for employees only
+    const filters = { role: role }; // Filter for employees only
 
     // Apply search filter (case-insensitive)
     if (search) {
