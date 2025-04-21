@@ -3,7 +3,7 @@ const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBy
     updateUserLabelsFromCSV, 
     updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
-const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions } = require("../controllers/common/userController");
+const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
@@ -59,6 +59,7 @@ router.get("/user/get-dealer-for-admin", adminOrSuperAdminAuth, getAllDealerForA
 // USER APIS 
 router.post("/app/user/login", loginUserForApp);
 router.post("/app/user/register", registerUserForApp);
+router.post("/user/change-password", changeUserPassword);
 
 // edit user by thier role 
 
@@ -69,7 +70,6 @@ router.get('/get-users-by-code', userAuth, getUsersDetails);
 router.post("/admin/get-users-by-positions", getUsersByPositions);
 
 router.put("/admin/update-user-labels", upload.single('file'), updateUserLabelsFromCSV);
-
 
 
 
