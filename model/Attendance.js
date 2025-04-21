@@ -16,7 +16,7 @@ const attendanceSchema = new mongoose.Schema(
         "Approved",
         "Rejected",
       ], // Fixed "Half-day"
-      default: "Pending",
+      default: "Present",
     },
     punchInImage: { type: String, default: null },
     punchOutImage: { type: String, default: null },

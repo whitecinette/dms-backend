@@ -143,7 +143,7 @@ exports.punchIn = async (req, res) => {
       code,
       date: formattedDate,
       punchIn: punchInTime,
-      status: "Pending",
+      status: "Present",
       latitude,
       longitude,
       punchInImage: result.secure_url,
@@ -282,9 +282,14 @@ exports.punchOut = async (req, res) => {
      resource_type: "image",
    });
 
-   fs.unlink(req.file.path, (err) => {
-     if (err) console.error("Failed to delete temp file:", err);
-   });
+  // Delete local file after successful upload
+  fs.unlink(req.file.path, (err) => {
+   if (err) {
+     console.error("Failed to delete temp file:", err);
+   } else {
+     console.log("Temp file deleted:", req.file.path);
+   }
+ });
 
    const punchOutImage = result.secure_url;
 
