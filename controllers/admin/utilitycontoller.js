@@ -11,25 +11,25 @@ function getDaysLeftInMonth() {
   return endOfMonth.date() - today.date() + 1;
 }
 
-function formatSP10(spTarget, spAch, spAchPercent, spRequiredAds) {
-  return `Target: ${spTarget} | Achievement: ${spAch} | Achievement %: ${spAchPercent}% | Required ADS: ${spRequiredAds}`;
+function formatSP10(spTarget, spAch, spAchPercent, spRequiredAds, currentMonth) {
+  return `Target ${currentMonth} : ${spTarget} | Achievement: ${spAch} | Achievement %: ${spAchPercent}% | Required ADS: ${spRequiredAds}`;
 }
 
-function formatBlackBox(bbTarget, bbAch, bbAchPercent, bbRequiredAds) {
-  return `Target: ${bbTarget} | Achievement: ${bbAch} | Achievement %: ${bbAchPercent}% | Required ADS: ${bbRequiredAds}`;
+function formatBlackBox(bbTarget, bbAch, bbAchPercent, bbRequiredAds, currentMonth) {
+  return `Target ${currentMonth} : ${bbTarget} | Achievement: ${bbAch} | Achievement %: ${bbAchPercent}% | Required ADS: ${bbRequiredAds}`;
 }
 
-function generateRow(original, daysLeft) {
+function generateRow(original, daysLeft, currentMonth, currentDate) {
   const spTarget = Number(original["10k SP Target"] || 0);
   const spAch = Number(original["10k SP Ach"] || 0);
   const bbTarget = Number(original["Black Box Target"] || 0);
   const bbAch = Number(original["Black Box Ach"] || 0);
 
   const spAchPercent = spTarget ? ((spAch / spTarget) * 100).toFixed(2) : "0.00";
-  const spRequiredAds = spTarget - spAch > 0 ? ((spTarget - spAch) / daysLeft).toFixed(0) : "0";
+  const spRequiredAds = spTarget - spAch > 0 ? ((spTarget - spAch) / daysLeft).toFixed(1) : "0.0";
 
   const bbAchPercent = bbTarget ? ((bbAch / bbTarget) * 100).toFixed(1) : "0.0";
-  const bbRequiredAds = bbTarget - bbAch > 0 ? ((bbTarget - bbAch) / daysLeft).toFixed(0) : "0";
+  const bbRequiredAds = bbTarget - bbAch > 0 ? ((bbTarget - bbAch) / daysLeft).toFixed(1) : "0.0";
 
   return {
     Name: original["DEALER Name"] || original["Dealer Name"],
@@ -40,17 +40,19 @@ function generateRow(original, daysLeft) {
     "User Id": original["User Id"] || "",
     City: original["City"] || "",
     Area: original["Area"] || "",
-    SP10: formatSP10(spTarget, spAch, spAchPercent, spRequiredAds),
-    Blackbox: formatBlackBox(bbTarget, bbAch, bbAchPercent, bbRequiredAds),
+    "SP10": formatSP10(spTarget, spAch, spAchPercent, spRequiredAds, currentMonth),
+    Blackbox: formatBlackBox(bbTarget, bbAch, bbAchPercent, bbRequiredAds, currentMonth),
   };
 }
-
 
 // Controller
 exports.AlphaMessages = async (req, res) => {
   const filePath = req.file.path;
   const daysLeft = getDaysLeftInMonth();
   const formattedRows = [];
+
+  const currentMonth = dayjs().format("MMM'YY"); // Example: Apr'25
+  const currentDate = dayjs().format("DD-MM-YYYY");
 
   let headersValidated = false;
   let headerErrorSent = false;
@@ -72,7 +74,7 @@ exports.AlphaMessages = async (req, res) => {
       const missingHeaders = requiredHeaders.filter(
         (required) => !normalizedHeaders.includes(required.toLowerCase())
       );
-    
+
       if (missingHeaders.length > 0) {
         headerErrorSent = true;
         res.status(400).json({
@@ -82,10 +84,9 @@ exports.AlphaMessages = async (req, res) => {
         headersValidated = true;
       }
     })
-    
     .on("data", (data) => {
       if (headersValidated) {
-        const row = generateRow(data, daysLeft);
+        const row = generateRow(data, daysLeft, currentMonth, currentDate);
         formattedRows.push(row);
       }
     })
@@ -101,7 +102,7 @@ exports.AlphaMessages = async (req, res) => {
       const outputPath = path.join(outputDir, `formatted_dealers_${Date.now()}.csv`);
       const fields = [
         "Name", "Phone Number", "Country Code", "Email",
-        "WhatsApp Opted", "User Id", "City", "Area", "SP10", "Blackbox"
+        "WhatsApp Opted", "User Id", "City", "Area", "SP>10k", "Blackbox"
       ];
       const json2csvParser = new Parser({ fields });
       const csv = json2csvParser.parse(formattedRows);
@@ -123,4 +124,3 @@ exports.AlphaMessages = async (req, res) => {
       });
     });
 };
-

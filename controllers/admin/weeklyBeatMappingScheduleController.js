@@ -1043,3 +1043,167 @@ exports.markDealerDone = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+//get Employee schedules by code
+exports.getEmployeeSchedulesByCode = async (req, res) => {
+  const { code } = req.params;
+  let { startDate, endDate, status, search } = req.query;  // Use query params for GET request
+
+  try {
+    if (!code) {
+      return res.status(400).json({ error: "Employee code is required." });
+    }
+
+    // Build Mongo filter
+    const scheduleFilters = { code };
+
+    if (startDate && endDate) {
+      const start = new Date(new Date(startDate).setUTCHours(0, 0, 0, 0));
+      const end = new Date(new Date(endDate).setUTCHours(23, 59, 59, 999));
+    
+      scheduleFilters.createdAt = { $gte: start, $lte: end };
+    }
+      
+
+    // console.log("→ Mongo filter:", JSON.stringify(scheduleFilters));
+
+    // Fetch all matching beat schedules
+    const beatMappings = await WeeklyBeatMappingSchedule.find(scheduleFilters).lean();
+    // console.log("→ beatMappings found:", beatMappings.length);
+
+    if (beatMappings.length === 0) {
+      return res.status(404).json({ message: "No schedules found for this employee." });
+    }
+
+    // Flatten dealer entries from each beatMapping schedule
+    let allDealers = [];
+    beatMappings.forEach((bm, idx) => {
+      // console.log(`  • mapping[${idx}] _id=${bm._id}, dates=${bm.startDate.toISOString()}→${bm.endDate.toISOString()}`);
+      bm.schedule.forEach(dealer => {
+        allDealers.push({
+          id:        dealer._id,
+          code:      dealer.code,
+          name:      dealer.name,
+          latitude:  Number(dealer.latitude?.$numberDecimal || dealer.latitude || 0),
+          longitude: Number(dealer.longitude?.$numberDecimal || dealer.longitude || 0),
+          position:  dealer.position  || "",
+          district:  dealer.district  || "",
+          taluka:    dealer.taluka    || "",
+          zone:      dealer.zone      || "",
+          status:    dealer.status,
+          distance:  dealer.distance  || null,
+          startDate: bm.startDate,
+          endDate:   bm.endDate
+        });
+      });
+    });
+    // console.log("→ total dealer entries flattened:", allDealers.length);
+
+    // Apply status / search filters if present
+    if (status) {
+      allDealers = allDealers.filter(d => d.status === status);
+    }
+    if (search) {
+      const re = new RegExp(search, "i");
+      allDealers = allDealers.filter(d => re.test(d.code) || re.test(d.name) ||
+                                          re.test(d.district) || re.test(d.taluka) || re.test(d.zone));
+    }
+
+    // Fetch the employee record
+    const employee = await ActorCode.findOne({ code }).lean();
+
+    // Return everything
+    return res.status(200).json({
+      filer: scheduleFilters,
+      employee,
+      dealers: allDealers
+    });
+
+  } catch (err) {
+    console.error("Error fetching employee schedules:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+//edit employee schedules
+exports.editEmployeeSchedulesByCode = async (req, res) => {
+  const { code } = req.params;
+  const schedule  = req.body;
+
+  try {
+    console.log("Edit employee schedules:", code, schedule);
+    if (!code || !schedule || !schedule.id) {
+      return res.status(400).json({ error: "Employee code and schedule.id are required." });
+    }
+
+    // Step 1: Find the document and the dealer
+    const scheduleDoc = await WeeklyBeatMappingSchedule.findOne({
+      code,
+      "schedule._id": schedule.id
+    });
+
+    if (!scheduleDoc) {
+      return res.status(404).json({ message: "Dealer schedule not found." });
+    }
+
+    const dealerIndex = scheduleDoc.schedule.findIndex(d => d._id.toString() === schedule.id);
+    if (dealerIndex === -1) {
+      return res.status(404).json({ message: "Dealer not found in schedule." });
+    }
+
+    const currentDealer = scheduleDoc.schedule[dealerIndex];
+    const oldStatus = currentDealer.status;
+
+    // Step 2: If name is changed, update fields from master
+    if (schedule.code && schedule.code !== currentDealer.code) {
+      const masterDealer = await User.findOne({ code: schedule.code });
+      if (!masterDealer) {
+        return res.status(404).json({ error: "No matching dealer found in master records." });
+      }
+
+      // Replace key fields from master record + provided status/distance if included
+      scheduleDoc.schedule[dealerIndex] = {
+        ...currentDealer.toObject(),
+        code: masterDealer.code,
+        name: masterDealer.name,
+        latitude: masterDealer.latitude,
+        longitude: masterDealer.longitude,
+        district: masterDealer.district,
+        taluka: masterDealer.taluka,
+        zone: masterDealer.zone,
+        position: masterDealer.position,
+        status: schedule.status || currentDealer.status,
+        distance: schedule.distance || currentDealer.distance
+      };
+    } else if (schedule.status && schedule.status !== oldStatus) {
+      // Step 3: Only allow status change if name is same
+      scheduleDoc.schedule[dealerIndex].status = schedule.status;
+    }
+
+    // Step 4: Update done/pending count if status was changed
+    if (schedule.status && schedule.status !== oldStatus) {
+      let doneCount = 0, pendingCount = 0;
+      scheduleDoc.schedule.forEach(dealer => {
+        if (dealer.status === "done") doneCount++;
+        else if (dealer.status === "pending") pendingCount++;
+      });
+
+      scheduleDoc.done = doneCount;
+      scheduleDoc.pending = pendingCount;
+    }
+
+    // Step 5: Save the update
+    await scheduleDoc.save();
+
+    return res.status(200).json({
+      message: "Dealer schedule updated successfully.",
+      updatedDealer: scheduleDoc.schedule[dealerIndex],
+      totalDone: scheduleDoc.totalDone,
+      totalPending: scheduleDoc.totalPending
+    });
+
+  } catch (err) {
+    console.error("Error updating employee schedules:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};

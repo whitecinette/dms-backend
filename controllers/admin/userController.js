@@ -943,9 +943,9 @@ exports.activateAllUsersInAllCases = async (req, res) => {
 };
 
 ///get all the dealer for admin
-exports.getAllDealerForAdmin = async (req, res) => {
+exports.getAllDealerAndMddForAdmin = async (req, res) => {
     try {
-      const dealers = await User.find({ role: "dealer" }); // Fetch all dealers
+      const dealers = await User.find({ role: { $in: ["dealer", "mdd"] } });//get all dealer and mdd
   
       if (!dealers || dealers.length === 0) {
         return res.status(400).json({ message: "No dealers found" });
