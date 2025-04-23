@@ -336,23 +336,35 @@ exports.punchOut = async (req, res) => {
 
 
 exports.getAttendance = async (req, res) => {
-  try {
-    // Fetch all attendance records for the user
-    const attendanceRecords = await Attendance.find();
+ try {
+   // Fetch all attendance records
+   const attendanceRecords = await Attendance.find();
 
-    if (!attendanceRecords.length) {
-      return res.status(404).json({ message: "No attendance records found." });
-    }
+   if (!attendanceRecords.length) {
+     return res.status(404).json({ message: "No attendance records found." });
+   }
 
-    res.status(200).json({
-      message: "Attendance records fetched successfully",
-      attendance: attendanceRecords,
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching attendance", error: error.message });
-  }
+   // For each record, get the corresponding user's name by code
+   const attendanceWithNames = await Promise.all(
+     attendanceRecords.map(async (record) => {
+       const user = await User.findOne({ code: record.code });
+       return {
+         ...record._doc,
+         name: user ? user.name : "Unknown",
+       };
+     })
+   );
+
+   res.status(200).json({
+     message: "Attendance records fetched successfully",
+     attendance: attendanceWithNames,
+   });
+ } catch (error) {
+   res.status(500).json({
+     message: "Error fetching attendance",
+     error: error.message,
+   });
+ }
 };
 exports.getAttendanceForEmployee = async (req, res) => {
  const { code } = req.user;
