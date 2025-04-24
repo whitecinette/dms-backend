@@ -11,11 +11,23 @@ function getDaysLeftInMonth() {
   return endOfMonth.date() - today.date() + 1;
 }
 
-function formatSP10(spTarget, spAch, spAchPercent, spRequiredAds, currentMonth) {
+function formatSP10(
+  spTarget,
+  spAch,
+  spAchPercent,
+  spRequiredAds,
+  currentMonth
+) {
   return `Target ${currentMonth} : ${spTarget} | Achievement: ${spAch} | Achievement %: ${spAchPercent}% | Required ADS: ${spRequiredAds}`;
 }
 
-function formatBlackBox(bbTarget, bbAch, bbAchPercent, bbRequiredAds, currentMonth) {
+function formatBlackBox(
+  bbTarget,
+  bbAch,
+  bbAchPercent,
+  bbRequiredAds,
+  currentMonth
+) {
   return `Target ${currentMonth} : ${bbTarget} | Achievement: ${bbAch} | Achievement %: ${bbAchPercent}% | Required ADS: ${bbRequiredAds}`;
 }
 
@@ -25,11 +37,15 @@ function generateRow(original, daysLeft, currentMonth, currentDate) {
   const bbTarget = Number(original["Black Box Target"] || 0);
   const bbAch = Number(original["Black Box Ach"] || 0);
 
-  const spAchPercent = spTarget ? ((spAch / spTarget) * 100).toFixed(2) : "0.00";
-  const spRequiredAds = spTarget - spAch > 0 ? ((spTarget - spAch) / daysLeft).toFixed(1) : "0.0";
+  const spAchPercent = spTarget
+    ? ((spAch / spTarget) * 100).toFixed(2)
+    : "0.00";
+  const spRequiredAds =
+    spTarget - spAch > 0 ? ((spTarget - spAch) / daysLeft).toFixed(1) : "0.0";
 
   const bbAchPercent = bbTarget ? ((bbAch / bbTarget) * 100).toFixed(1) : "0.0";
-  const bbRequiredAds = bbTarget - bbAch > 0 ? ((bbTarget - bbAch) / daysLeft).toFixed(1) : "0.0";
+  const bbRequiredAds =
+    bbTarget - bbAch > 0 ? ((bbTarget - bbAch) / daysLeft).toFixed(1) : "0.0";
 
   return {
     Name: original["DEALER Name"] || original["Dealer Name"],
@@ -40,8 +56,20 @@ function generateRow(original, daysLeft, currentMonth, currentDate) {
     "User Id": original["User Id"] || "",
     City: original["City"] || "",
     Area: original["Area"] || "",
-    "SP10": formatSP10(spTarget, spAch, spAchPercent, spRequiredAds, currentMonth),
-    Blackbox: formatBlackBox(bbTarget, bbAch, bbAchPercent, bbRequiredAds, currentMonth),
+    SP10: formatSP10(
+      spTarget,
+      spAch,
+      spAchPercent,
+      spRequiredAds,
+      currentMonth
+    ),
+    Blackbox: formatBlackBox(
+      bbTarget,
+      bbAch,
+      bbAchPercent,
+      bbRequiredAds,
+      currentMonth
+    ),
   };
 }
 
@@ -64,7 +92,7 @@ exports.AlphaMessages = async (req, res) => {
     "10k SP Ach",
     "Black Box Target",
     "Black Box Ach",
-    "Phone Number"
+    "Phone Number",
   ];
 
   fs.createReadStream(filePath)
@@ -78,7 +106,9 @@ exports.AlphaMessages = async (req, res) => {
       if (missingHeaders.length > 0) {
         headerErrorSent = true;
         res.status(400).json({
-          message: `Invalid format: Missing required headers - ${missingHeaders.join(", ")}`,
+          message: `Invalid format: Missing required headers - ${missingHeaders.join(
+            ", "
+          )}`,
         });
       } else {
         headersValidated = true;
@@ -97,12 +127,24 @@ exports.AlphaMessages = async (req, res) => {
       }
 
       const outputDir = path.join(__dirname, "../../output");
-      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+      if (!fs.existsSync(outputDir))
+        fs.mkdirSync(outputDir, { recursive: true });
 
-      const outputPath = path.join(outputDir, `formatted_dealers_${Date.now()}.csv`);
+      const outputPath = path.join(
+        outputDir,
+        `formatted_dealers_${Date.now()}.csv`
+      );
       const fields = [
-        "Name", "Phone Number", "Country Code", "Email",
-        "WhatsApp Opted", "User Id", "City", "Area", "SP>10k", "Blackbox"
+        "Name",
+        "Phone Number",
+        "Country Code",
+        "Email",
+        "WhatsApp Opted",
+        "User Id",
+        "City",
+        "Area",
+        "SP10",
+        "Blackbox",
       ];
       const json2csvParser = new Parser({ fields });
       const csv = json2csvParser.parse(formattedRows);
