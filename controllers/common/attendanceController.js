@@ -344,20 +344,28 @@ exports.getAttendance = async (req, res) => {
      return res.status(404).json({ message: "No attendance records found." });
    }
 
-   // For each record, get the corresponding user's name by code
-   const attendanceWithNames = await Promise.all(
+   // Count total punches per code
+   const punchCounts = {};
+   attendanceRecords.forEach((record) => {
+     punchCounts[record.code] = (punchCounts[record.code] || 0) + 1;
+   });
+
+   // For each attendance record, add user name and total punches
+   const attendanceWithDetails = await Promise.all(
      attendanceRecords.map(async (record) => {
        const user = await User.findOne({ code: record.code });
+
        return {
          ...record._doc,
          name: user ? user.name : "Unknown",
+         totalPunches: punchCounts[record.code],
        };
      })
    );
 
    res.status(200).json({
      message: "Attendance records fetched successfully",
-     attendance: attendanceWithNames,
+     attendance: attendanceWithDetails,
    });
  } catch (error) {
    res.status(500).json({

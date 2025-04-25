@@ -138,7 +138,12 @@ exports.userAuth = async (req, res, next) => {
 
       next(); // Move to the next middleware or route handler
   } catch (error) {
-      res.status(401).json({ message: "Invalid or expired token.", error: error.message });
+      // Warning-style response
+    res.status(403).json({
+     warning: true,
+     message: "Session expired. Please log in again to continue.",
+     error: error.message
+    });
   }
 };
 
