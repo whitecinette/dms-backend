@@ -218,3 +218,121 @@ exports.addHierarchEntriesByAdmin = async (req, res) => {
     return res.status(500).json({ message: "Internal server Error" });
   }
 };  
+
+// update dealers in hierarchy
+exports.updateHierarchyEntries = async (req, res) => {
+ try {
+   if (!req.file) {
+     return res.status(400).json({ success: false, message: "No file uploaded" });
+   }
+
+   const { hierarchy_name } = req.body;
+   if (!hierarchy_name) {
+     return res.status(400).json({ success: false, message: "Hierarchy name is required" });
+   }
+
+   // 1️⃣ Hierarchy config fetch karo
+   const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: hierarchy_name });
+   if (!hierarchyConfig) {
+     return res.status(400).json({ success: false, message: `Hierarchy '${hierarchy_name}' not found.` });
+   }
+
+   const allowedFields = hierarchyConfig.hierarchy.map(field => field.toLowerCase());
+
+   let csvRows = [];
+   const stream = new Readable();
+   stream.push(req.file.buffer);
+   stream.push(null);
+
+   let isFirstRow = true;
+   let headersMatched = false;
+
+   stream
+     .pipe(csvParser())
+     .on("headers", (headers) => {
+       const csvHeaders = headers.map(h => h.trim().toLowerCase());
+
+       // Yaha par matching check
+       const fieldsMatched = allowedFields.every(field => csvHeaders.includes(field)) &&
+                              csvHeaders.every(header => allowedFields.includes(header));
+
+       if (!fieldsMatched) {
+         return res.status(400).json({
+           success: false,
+           message: "CSV headers do not match expected hierarchy fields.",
+           expectedFields: allowedFields,
+           receivedFields: csvHeaders
+         });
+       }
+       headersMatched = true;
+     })
+     .on("data", (row) => {
+       csvRows.push(row);
+     })
+     .on("end", async () => {
+       if (!headersMatched) {
+         return; // Response already sent if headers didn't match
+       }
+
+       if (csvRows.length === 0) {
+         return res.status(400).json({ success: false, message: "No data found in CSV file." });
+       }
+
+       try {
+         let updatedCount = 0;
+         let insertedCount = 0;
+
+         for (const row of csvRows) {
+           const filter = { hierarchy_name };
+
+           // Dynamic filter and update creation
+           allowedFields.forEach(field => {
+             if (row[field]) {
+               filter[field] = row[field].trim().toUpperCase();
+             }
+           });
+
+           const updateData = {};
+           allowedFields.forEach(field => {
+             if (row[field]) {
+               updateData[field] = row[field].trim().toUpperCase();
+             }
+           });
+
+           // **Check if entry exists**
+           const existingEntry = await HierarchyEntries.findOne(filter);
+
+           if (existingEntry) {
+             // Existing entry update
+             const result = await HierarchyEntries.updateOne(
+               filter,
+               { $set: updateData }
+             );
+             if (result.modifiedCount > 0) {
+               updatedCount++;
+             }
+           } else {
+             // **Insert new entry if not found**
+             const newEntry = new HierarchyEntries({ hierarchy_name, ...updateData });
+             await newEntry.save();
+             insertedCount++;
+             
+           }
+         }
+
+         return res.status(200).json({
+           success: true,
+           message: `${updatedCount} records updated and ${insertedCount} new records added.`,
+         });
+
+       } catch (error) {
+         console.error("Error updating hierarchy entries:", error);
+         return res.status(500).json({ success: false, message: "Error updating entries." });
+       }
+     });
+
+ } catch (error) {
+   console.error("Error in updateHierarchyEntries:", error);
+   res.status(500).json({ success: false, message: "Internal server error." });
+ }
+};
