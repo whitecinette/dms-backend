@@ -4,9 +4,8 @@ const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewa
 const { upload } = require("../services/fileUpload");
 const upload_img = require('../middlewares/upload');
 const router = express.Router();
-const memoryUpload = require('../middlewares/multerMemory');
 
-router.post('/punch-in', memoryUpload.single('punchInImage'), userAuth, punchIn);
+router.post('/punch-in', upload_img.single('punchInImage'), userAuth, punchIn);
 router.post('/punch-out', upload_img.single('punchOutImage'), userAuth, punchOut);
 
 

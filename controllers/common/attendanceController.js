@@ -10,26 +10,6 @@ const fsPromises = require("fs/promises");
 const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 // punch in
-const streamifier = require('streamifier');
-
-
-// ✅ Add this just below your imports
-const streamUpload = (buffer) => {
- return new Promise((resolve, reject) => {
-   const stream = cloudinary.uploader.upload_stream(
-     {
-       folder: "gpunchInImage",
-       resource_type: "image",
-     },
-     (error, result) => {
-       if (result) resolve(result);
-       else reject(error);
-     }
-   );
-   streamifier.createReadStream(buffer).pipe(stream);
- });
-};
-
 exports.punchIn = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
