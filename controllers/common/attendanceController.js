@@ -113,17 +113,12 @@ exports.punchIn = async (req, res) => {
     });
   }
   
-  let result;
-  try {
-    result = await streamUpload(req.file.buffer); // Upload directly from memory
-  } catch (uploadErr) {
-    return res.status(500).json({
-      message: "Image upload failed.",
-      error: uploadErr.message,
-    });
-  }
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+     folder: "gpunchInImage",
+     resource_type: "image",
+   });
   
-
     // delete temp file
     if (req.file?.path) {
      try {
