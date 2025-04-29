@@ -6,7 +6,7 @@ const User = require("../../model/User");
 const attendanceHelpers = require("../../helpers/attendanceHelper")
 const { Parser } = require("json2csv");
 const fs = require("fs");
-
+const fsPromises = require("fs/promises");
 const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 // punch in
@@ -130,14 +130,15 @@ exports.punchIn = async (req, res) => {
       resource_type: "image",
     });
 
-    // Delete local file after successful upload
-    fs.unlink(req.file.path, (err) => {
-      if (err) {
-        console.error("Failed to delete temp file:", err);
-      } else {
-        console.log("Temp file deleted:", req.file.path);
-      }
-    });
+    // delete temp file
+    if (req.file?.path) {
+     try {
+       await fsPromises.unlink(req.file.path);
+       console.log("Temp file deleted:", req.file.path);
+     } catch (err) {
+       console.error("Failed to delete temp file:", err);
+     }
+   }
 
     const attendance = new Attendance({
       code,
@@ -282,14 +283,15 @@ exports.punchOut = async (req, res) => {
      resource_type: "image",
    });
 
-  // Delete local file after successful upload
-  fs.unlink(req.file.path, (err) => {
-   if (err) {
-     console.error("Failed to delete temp file:", err);
-   } else {
-     console.log("Temp file deleted:", req.file.path);
-   }
- });
+   // delete temp file
+   if (req.file?.path) {
+    try {
+      await fsPromises.unlink(req.file.path);
+      console.log("Temp file deleted:", req.file.path);
+    } catch (err) {
+      console.error("Failed to delete temp file:", err);
+    }
+  }
 
    const punchOutImage = result.secure_url;
 
