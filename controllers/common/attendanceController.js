@@ -35,52 +35,42 @@ exports.punchIn = async (req, res) => {
       });
     }
 
-    // Dynamic hierarchy handling logic
-    const userHierarchies = await HierarchyEntries.find({});
+    // // Dynamic hierarchy handling logic
+    // const userHierarchies = await HierarchyEntries.find({});
+    const userHierarchies = await HierarchyEntries.find({
+     $or: Object.keys(HierarchyEntries.schema.obj)
+       .filter(key => !["_id", "__v", "hierarchy_name"].includes(key))
+       .map(key => ({ [key]: code }))
+   });
+   
+   const allCodesSet = new Set();
 
-    const matchedHierarchies = userHierarchies.filter((hierarchy) => {
-      const hierarchyKeys = Object.keys(hierarchy.toObject()).filter(
-        (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-      );
-      return hierarchyKeys.some((key) => hierarchy[key] === code);
-    });
+   userHierarchies.forEach((hierarchy) => {
+     Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
+       if (!["_id", "__v", "hierarchy_name"].includes(key)) {
+         if (Array.isArray(value)) {
+           value.forEach(v => v && allCodesSet.add(v));
+         } else if (value) {
+           allCodesSet.add(value);
+         }
+       }
+     });
+   });
 
-    let allCodes = [];
-    matchedHierarchies.forEach((hierarchy) => {
-      const hierarchyKeys = Object.keys(hierarchy.toObject()).filter(
-        (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-      );
-      const relatedCodes = hierarchyKeys
-        .flatMap((key) => hierarchy[key])
-        .filter(Boolean);
-      allCodes.push(...relatedCodes);
-    });
-
-    allCodes = [...new Set(allCodes)];
-
+   const allCodes = Array.from(allCodesSet);
+    
     if (!allCodes.length) {
       return res
         .status(404)
         .json({ message: "No related employees found in the hierarchy." });
     }
 
-    const relatedUsers = await User.aggregate([
-      {
-        $match: {
-          code: { $in: allCodes }, // Match only relevant users
-          latitude: { $type: "decimal" },
-          longitude: { $type: "decimal" },
-        },
-      },
-      {
-        $project: {
-          code: 1,
-          name: 1,
-          latitude: 1,
-          longitude: 1,
-        },
-      },
-    ]);
+    const relatedUsers = await User.find({
+     code: { $in: allCodes },
+     latitude: { $type: "decimal" },
+     longitude: { $type: "decimal" },
+   }).select("code name latitude longitude");
+   
 
     if (!relatedUsers.length) {
       return res
