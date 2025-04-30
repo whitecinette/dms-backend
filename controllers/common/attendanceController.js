@@ -64,11 +64,16 @@ exports.punchIn = async (req, res) => {
         .json({ message: "No related employees found in the hierarchy." });
     }
 
-    const relatedUsers = await User.find({
-     code: { $in: allCodes },
-     latitude: { $type: "decimal" },
-     longitude: { $type: "decimal" },
-   }).select("code name latitude longitude");
+    const relatedUsers = await User.aggregate([
+     {
+       $match: {
+         code: { $in: allCodes },
+         latitude: { $type: "decimal" },
+         longitude: { $type: "decimal" },
+       },
+     },
+     { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
+   ]);
    
 
     if (!relatedUsers.length) {
@@ -367,21 +372,32 @@ exports.getAttendance = async (req, res) => {
 };
 exports.getAttendanceForEmployee = async (req, res) => {
  const { code } = req.user;
- const { status } = req.query; // Fetch status from query parameter
+ const { status, startDate, endDate } = req.query;
 
  try {
    // Build the filter object
    const filter = { code };
+
    if (status) {
      filter.status = status;
+   }
+
+   if (startDate || endDate) {
+     filter.date = {};
+     if (startDate) {
+       filter.date.$gte = new Date(startDate);
+     }
+     if (endDate) {
+       filter.date.$lte = new Date(endDate);
+     }
    }
 
    const attendanceData = await Attendance.find(filter).sort({ date: -1 });
 
    if (!attendanceData || attendanceData.length === 0) {
-     return res
-       .status(404)
-       .json({ message: "No attendance records found for this employee." });
+     return res.status(404).json({
+       message: "No attendance records found for this employee.",
+     });
    }
 
    res.status(200).json({
