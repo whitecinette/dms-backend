@@ -89,32 +89,7 @@ exports.adminOrSuperAdminAuth = async (req, res, next) => {
   }
 };
 
-///////find user with token/////
-exports.findUserWithToken = async (req, res, next) => {
-  try {
-    const token = req.header("Authorization");
-    if (!token) {
-      return res
-        .status(401)
-        .send({ message: "Access Denied. No token provided." });
-    }
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded.id) {
-      return res.status(401).json({ message: "Invalid token." });
-    }
-    const user = await User.findOne({ _id: decoded.id });
-    if (!user) {
-      return res
-        .status(401)
-        .send({ message: "Access Denied. You are not a user" });
-    }
-    req.user = user;
-    next();
-  } catch (err) {
-    console.log(err);
-    return res.status(500).json({ message: "Invalid or expired token." });
-  }
-};
+
 
 exports.userAuth = async (req, res, next) => {
   try {

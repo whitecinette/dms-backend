@@ -371,46 +371,66 @@ exports.getAttendance = async (req, res) => {
  }
 };
 exports.getAttendanceForEmployee = async (req, res) => {
- const { code } = req.user;
- const { status, startDate, endDate } = req.query;
+  const { code } = req.user;
+  const { status, startDate, endDate, page, limit } = req.query;
 
- try {
-   // Build the filter object
-   const filter = { code };
+  try {
+    const filter = { code };
 
-   if (status) {
-     filter.status = status;
-   }
+    if (status) {
+      filter.status = status;
+    }
 
-   if (startDate || endDate) {
-     filter.date = {};
-     if (startDate) {
-       filter.date.$gte = new Date(startDate);
-     }
-     if (endDate) {
-       filter.date.$lte = new Date(endDate);
-     }
-   }
+    if (startDate || endDate) {
+      filter.date = {};
+      if (startDate) {
+        filter.date.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        filter.date.$lte = new Date(endDate);
+      }
+    }
 
-   const attendanceData = await Attendance.find(filter).sort({ date: -1 });
+    let attendanceData;
+    let totalRecords;
 
-   if (!attendanceData || attendanceData.length === 0) {
-     return res.status(404).json({
-       message: "No attendance records found for this employee.",
-     });
-   }
+    if (page && limit) {
+      const pageNumber = parseInt(page, 10) || 1;
+      const pageSize = parseInt(limit, 10) || 10;
+      const skip = (pageNumber - 1) * pageSize;
 
-   res.status(200).json({
-     success: true,
-     data: attendanceData,
-   });
- } catch (error) {
-   console.error(error);
-   res.status(500).json({
-     success: false,
-     message: "Error fetching attendance records.",
-   });
- }
+      totalRecords = await Attendance.countDocuments(filter);
+      attendanceData = await Attendance.find(filter)
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(pageSize);
+
+      return res.status(200).json({
+        success: true,
+        data: attendanceData,
+        pagination: {
+          totalRecords,
+          totalPages: Math.ceil(totalRecords / pageSize),
+          currentPage: pageNumber,
+          pageSize,
+        },
+      });
+    } else {
+      // No pagination — return all data
+      attendanceData = await Attendance.find(filter).sort({ date: -1 });
+
+      return res.status(200).json({
+        success: true,
+        data: attendanceData,
+      });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching attendance records.",
+    });
+  }
 };
 
 exports.getAttendanceByEmployeeForAdmin = async (req, res) => {

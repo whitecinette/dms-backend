@@ -92,69 +92,21 @@ exports.loginUser = async (req, res) => {
 
 exports.editProfileForUser = async (req, res) => {
   try {
-    const user = req.user; // Assumed that the user is populated by authentication middleware
-    console.log("User to update: ", user);
-
+    const user = req.user;
     const update = req.body;
-    const previousData = { ...user.toObject() }; // Save the current data to compare later
 
-    // Check if the email format is valid (only if the email is provided)
-    if (update.email && !validateEmail(update.email)) {
-      return res.status(400).json({ message: "Invalid email format." });
-    }
 
-    // If a new password is provided, hash it (no need to store plain text password)
-    if (update.password) {
-      update.password = await bcrypt.hash(update.password, 10);
-    }
-
-    // Update user profile with the provided fields
-    const updatedUser = await User.findByIdAndUpdate(user._id, update, {
-      new: true,
-    });
+    // Update user profile
+    const updatedUser = await User.findByIdAndUpdate(
+      user.id,  // Changed from user._id to user.id since req.user contains decoded token data
+      { $set: update },
+      { new: true }
+    ).select("-password"); // Added select to exclude password from response
 
     if (!updatedUser) {
       return res.status(404).json({ message: "Failed to update user profile" });
     }
 
-    // Compare old data with the updated data to check for changes
-    const changes = [];
-    for (let key in update) {
-      if (update[key] !== previousData[key]) {
-        // If the password field is changed, just indicate it was updated
-        if (key === "password") {
-          changes.push({
-            field: "password",
-            oldValue: "**********", // Mask the old password
-            newValue: "**********", // Show that the password was updated, but not the new value
-          });
-        } else {
-          changes.push({
-            field: key,
-            oldValue: previousData[key],
-            newValue: update[key],
-          });
-        }
-      }
-    }
-
-    // If the email was updated, update the "fromEmail" for sending notification
-    const userMakingChangesEmail = update.email || user.email;
-
-    // If there are any changes, notify the admin and super admin
-    if (changes.length > 0) {
-      console.log(
-        `Changes detected, notifying admins with sender email: ${userMakingChangesEmail}`
-      );
-      await sendNotificationToAdmins(
-        changes,
-        previousData,
-        updatedUser,
-        userMakingChangesEmail
-      ); // This function will send notifications
-    }
-
-    // Return the updated user profile
     res.status(200).json({
       message: "User profile updated successfully",
       user: updatedUser,
@@ -336,6 +288,35 @@ exports.changeUserPassword = async (req, res) => {
   } catch (error) {
     console.error("Error changing password:", error);
     return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+// get Profile
+exports.getProfile = async (req, res) => {
+  try {
+    const { code } = req.user; // Extract employee code from authenticated user
+
+    const user = await User.findOne({ code }).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User profile not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Profile fetched successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    res.status(500).json({
       success: false,
       message: "Internal server error",
     });

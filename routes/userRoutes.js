@@ -2,8 +2,8 @@ const express = require("express");
 const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerAndMddForAdmin, updateBulkLatLongForAdmin, 
     updateUserLabelsFromCSV, 
     updateBulkDealersFromCSV} = require("../controllers/admin/userController");
-const { superAdminAuth, findUserWithToken, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
-const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword } = require("../controllers/common/userController");
+const { superAdminAuth, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
+const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
@@ -35,7 +35,7 @@ router.put("/bulk-update-dealers", upload.single("file"), updateBulkDealersFromC
 //user
 router.post("/login-admin-or-super-admin", loginAdminOrSuperAdmin)
 router.post("/login-user", loginUser);
-router.put("/edit-profile", findUserWithToken, editProfileForUser);
+router.put("/edit-profile", userAuth, editProfileForUser);
 
 //admin and super admin common routes
 router.put("/user/edit-by-admins/:id", adminOrSuperAdminAuth, editUserByAdmins);
@@ -60,6 +60,7 @@ router.get("/user/get-dealer-for-admin", adminOrSuperAdminAuth, getAllDealerAndM
 router.post("/app/user/login", loginUserForApp);
 router.post("/app/user/register", registerUserForApp);
 router.post("/user/change-password", changeUserPassword);
+router.get("/user/get-profile", userAuth, getProfile);
 
 // edit user by thier role 
 
