@@ -625,6 +625,7 @@ exports.getAllEmpLeaves = async (req, res) => {
 // get attendance by date
 exports.getAttendanceByDate = async (req, res) => {
   try {
+    const { role } = req.user;
     const { date } = req.params;
     const { firms = [] } = req.query; // Changed to array
 
@@ -645,7 +646,7 @@ exports.getAttendanceByDate = async (req, res) => {
       if (!firmData.length) {
         return res.status(400).json({ message: "Invalid firm IDs." });
       }
-      
+
       // Collect positions from all firms
       firmPositions = firmData.reduce((positions, firm) => {
         if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
@@ -654,9 +655,13 @@ exports.getAttendanceByDate = async (req, res) => {
         return positions;
       }, []);
     }
-
-    // Step 2: Fetch Employees Based on Firm Filter (If Applied)
-    let employeeFilter = { role: { $in: ["admin", "employee"] } };
+    let employeeFilter;
+    if (role === "admin") {
+      // Step 2: Fetch Employees Based on Firm Filter (If Applied)
+      employeeFilter = { role: { $in: ["admin", "employee"] } };
+    } else {
+      employeeFilter = { role: { $in: ["employee"] } };
+    }
     if (firmPositions.length > 0) {
       employeeFilter.position = { $in: firmPositions };
     }
@@ -725,6 +730,7 @@ exports.getAttendanceByDate = async (req, res) => {
 
 exports.getLatestAttendance = async (req, res) => {
   try {
+    const { role } = req.user;
     const {
       date,
       page = 1,
@@ -733,7 +739,7 @@ exports.getLatestAttendance = async (req, res) => {
       status = "",
       firms = [], // Changed firm to firms array
     } = req.query;
-    
+
     let firmPositions = [];
     if (firms.length) {
       const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
@@ -749,8 +755,13 @@ exports.getLatestAttendance = async (req, res) => {
       }, []);
     }
 
-    // ✅ Step 1: Fetch all employees first
-    let employeeFilter = { role: { $in: ["admin", "employee"] } };
+    let employeeFilter;
+    if (role === "admin") {
+      employeeFilter = { role: { $in: ["admin", "employee"] } };
+    } else {
+      employeeFilter = { role: { $in: ["employee"] } };
+    }
+
     if (firmPositions.length) {
       employeeFilter.position = { $in: firmPositions };
     }
@@ -838,8 +849,8 @@ exports.getLatestAttendance = async (req, res) => {
     // ✅ Step 6: Apply filters (search & status)
     if (search) {
       const regex = new RegExp(search, "i");
-      attendanceRecords = attendanceRecords.filter((rec) =>
-        regex.test(rec.code)
+      attendanceRecords = attendanceRecords.filter(
+        (rec) => regex.test(rec.code) || regex.test(rec.name)
       );
     }
 
@@ -876,18 +887,46 @@ exports.getLatestAttendance = async (req, res) => {
 
 exports.editAttendanceByID = async (req, res) => {
   try {
+    const { role } = req.user;
+    // Check if role is one of the allowed roles
+    if (!["admin", "superAdmin", "hr"].includes(role)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
     const { id } = req.params;
     const update = req.body;
     const AttendanceEntity = await Attendance.findById(id);
     if (!AttendanceEntity) {
-      return res.status(404).json("user not found");
+      return res.status(404).json({ message: "Attendance record not found" });
     }
+
+    // Calculate hoursWorked if both punchIn and punchOut are provided
+    if (update.punchIn && update.punchOut) {
+      const punchInTime = new Date(update.punchIn);
+      const punchOutTime = new Date(update.punchOut);
+
+      // Calculate difference in milliseconds
+      const diffMs = punchOutTime - punchInTime;
+
+      // Convert to hours
+      const hoursWorked = diffMs / (1000 * 60 * 60);
+
+      // Add hoursWorked to the update object
+      update.hoursWorked = hoursWorked.toFixed(2);
+    }
+
     const updateData = await Attendance.findByIdAndUpdate(id, update, {
       new: true,
     });
-    return res.status(200).json({ message: "user updated successfully" });
+    return res.status(200).json({
+      message: "Attendance record updated successfully",
+      data: updateData,
+    });
   } catch (error) {
-    console.log(error);
+    console.error("Error updating attendance:", error);
+    return res.status(500).json({
+      message: "Error updating attendance",
+      error: error.message,
+    });
   }
 };
 
@@ -996,8 +1035,8 @@ exports.downloadAllAttendance = async (req, res) => {
     // Step 6: Apply filters (search & status)
     if (search) {
       const regex = new RegExp(search, "i");
-      attendanceRecords = attendanceRecords.filter((rec) =>
-        regex.test(rec.code)
+      attendanceRecords = attendanceRecords.filter(
+        (rec) => regex.test(rec.code) || regex.test(rec.name)
       );
     }
 

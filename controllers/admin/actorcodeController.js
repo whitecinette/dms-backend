@@ -235,6 +235,11 @@ exports.addActorCode = async (req, res) => {
 ///update actor codes
 exports.editActorCode = async (req, res) => {
   try {
+    const userRole = req.user.role;
+    // Check if role is one of the allowed roles
+    if (!["admin", "superAdmin", "hr"].includes(userRole)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
     if (
       !req.body.code ||
       !req.body.name ||

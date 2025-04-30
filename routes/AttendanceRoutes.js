@@ -20,9 +20,9 @@ router.get('/get-all-leaves', getAllEmpLeaves)
 
 // router.get('/dealers/:code', getDealersByEmployeeCode);
 
-router.get('/get-attendance-by-date/:date', getAttendanceByDate)
-router.get('/get-latest-attendance-by-date', getLatestAttendance)
-router.put('/edit-attendance/:id', adminOrSuperAdminAuth, editAttendanceByID)
+router.get('/get-attendance-by-date/:date', userAuth, getAttendanceByDate)
+router.get('/get-latest-attendance-by-date', userAuth, getLatestAttendance)
+router.put('/edit-attendance/:id', userAuth, editAttendanceByID)
 router.get('/download-all-attendance', adminOrSuperAdminAuth, downloadAllAttendance)
 router.delete('/delete-employee-attendance/:id', adminOrSuperAdminAuth, deleteAttendanceByID)
 
