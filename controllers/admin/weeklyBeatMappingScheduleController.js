@@ -6,8 +6,10 @@ const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule
 const User = require("../../model/User");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const ActorCode = require("../../model/ActorCode");
+const mongoose = require('mongoose');
 
 const moment = require("moment-timezone");
+const RoutePlan = require("../../model/RoutePlan");
 
 
 
@@ -334,8 +336,8 @@ exports.addWeeklyBeatMappingUsingCSV = async (req, res) => {
                     schedule[day.substring(0, 3)].push({
                       code: dealerCode,
                       name: dealer.name,
-                      latitude: dealer.latitude || 0.0,
-                      longitude: dealer.longitude || 0.0,
+                      latitude: dealer.latitude ? Number(dealer.latitude) : null,
+                      longitude: dealer.longitude ? Number(dealer.longitude) : null,
                       status: "pending",
                       distance: null,
                     });
@@ -1207,3 +1209,143 @@ exports.editEmployeeSchedulesByCode = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+exports.getFilteredBeatMapping = async (req, res) => {
+  try {
+    console.log("Hereee")
+    let {
+      startDate,
+      endDate,
+      status = [],
+      zone = [],
+      district = [],
+      taluka = [],
+      dealers = [],
+      routes = [],
+      code, // for admin
+    } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "Start and End date are required" });
+    }
+
+    startDate = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
+    endDate = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+
+    const userCode = req.user.role === "admin" ? code : req.user.code;
+    if (!userCode) return res.status(400).json({ error: "User code is missing" });
+
+    // Fetch beat mappings
+    const schedules = await WeeklyBeatMappingSchedule.find({
+      code: userCode,
+      startDate: { $lte: endDate },
+      endDate: { $gte: startDate },
+    });
+
+    // Get all route plans if route filters are provided (by _id or name)
+    let routeItineraryFilters = [];
+    if (routes.length > 0) {
+      const routeQuery = {
+        code: userCode,
+        startDate: { $lte: endDate },
+        endDate: { $gte: startDate },
+        $or: [
+          { _id: { $in: routes.filter(id => mongoose.Types.ObjectId.isValid(id)) } },
+          { name: { $in: routes } },
+        ]
+      };
+
+      const routePlans = await RoutePlan.find(routeQuery);
+
+      for (const route of routePlans) {
+        const { itinerary } = route;
+        const filter = {};
+        if (itinerary.zone?.length) filter.zone = itinerary.zone;
+        if (itinerary.district?.length) filter.district = itinerary.district;
+        if (itinerary.taluka?.length) filter.taluka = itinerary.taluka;
+        routeItineraryFilters.push(filter);
+      }
+    }
+
+    const dealerMap = {}; // key: code
+
+    for (const entry of schedules) {
+      for (const dealer of entry.schedule) {
+        const dCode = dealer.code;
+
+        if (!dealerMap[dCode]) {
+          dealerMap[dCode] = {
+            code: dCode,
+            name: dealer.name,
+            zone: dealer.zone || "Unknown",
+            district: dealer.district || "Unknown",
+            taluka: dealer.taluka || "Unknown",
+            position: dealer.position || "dealer",
+            visits: 0,
+            doneCount: 0,
+            totalAppearances: 0,
+            latitude: dealer.latitude || null,
+            longitude: dealer.longitude || null,
+            status: dealer.status || "pending",
+          };
+        }
+
+        dealerMap[dCode].totalAppearances += 1;
+        if (dealer.status === "done") {
+          dealerMap[dCode].doneCount += 1;
+        }
+      }
+    }
+
+    const result = Object.values(dealerMap).map((d) => {
+      const isDone = d.doneCount > 0;
+      return {
+        code: d.code,
+        name: d.name,
+        zone: d.zone,
+        district: d.district,
+        taluka: d.taluka,
+        position: d.position,
+        status: isDone ? "done" : "pending",
+        visits: isDone ? d.doneCount : 0,
+        latitude: d.latitude,
+        longitude: d.longitude,
+      };
+    });
+
+    // Apply all filters
+    const filtered = result.filter((entry) => {
+      const matchStatus = !status.length || status.includes(entry.status);
+      const matchZone = !zone.length || zone.includes(entry.zone);
+      const matchDistrict = !district.length || district.includes(entry.district);
+      const matchTaluka = !taluka.length || taluka.includes(entry.taluka);
+      const matchDealer = !dealers.length || dealers.includes(entry.code);
+
+      let matchRoute = true;
+      if (routeItineraryFilters.length > 0) {
+        matchRoute = routeItineraryFilters.some(f => {
+          return (!f.zone || f.zone.includes(entry.zone)) &&
+                 (!f.district || f.district.includes(entry.district)) &&
+                 (!f.taluka || f.taluka.includes(entry.taluka));
+        });
+      }
+
+      return matchStatus && matchZone && matchDistrict && matchTaluka && matchDealer && matchRoute;
+    });
+
+    const total = filtered.length;
+    const done = filtered.filter(d => d.status === "done").length;
+    const pending = total - done;
+
+    return res.status(200).json({
+      total,
+      done,
+      pending,
+      data: filtered,
+    });
+  } catch (error) {
+    console.error("Error in getFilteredBeatMapping:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
