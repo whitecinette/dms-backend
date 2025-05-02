@@ -121,3 +121,55 @@ exports.addRoutePlan = async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 };
+
+
+exports.getRoutePlansForUser = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+    const userCode = req.user.code;
+
+    const query = { code: userCode };
+
+    if (startDate && endDate) {
+      query.startDate = { $lte: new Date(endDate) };
+      query.endDate = { $gte: new Date(startDate) };
+    }
+
+    const routes = await RoutePlan.find(query);
+
+    const formattedRoutes = routes.map(route => {
+      const itinerary = route.itinerary || {};
+      let mergedArray = [];
+
+      // ✅ Convert Map or Object safely
+      if (itinerary instanceof Map) {
+        mergedArray = Array.from(itinerary.values()).flat();
+      } else if (typeof itinerary === 'object' && itinerary !== null) {
+        mergedArray = Object.values(itinerary).filter(Array.isArray).flat();
+      }
+
+      return {
+        _id: route._id,
+        code: route.code,
+        name: route.name,
+        startDate: route.startDate,
+        endDate: route.endDate,
+        status: route.status,
+        approved: route.approved,
+        itinerary: mergedArray, // ✅ Final merged array
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: formattedRoutes,
+    });
+
+  } catch (err) {
+    console.error("Error in getRoutePlansForUser:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+
