@@ -128,3 +128,126 @@ exports.updateGeotagLatLong = async (req, res) => {
     });
   }
 };
+
+
+// get geotag dealers 
+// exports.getGeotaggedDealers = async (req, res) => {
+//  try {
+//    const dealers = await User.find({
+//      latitude: { $ne: null },
+//      longitude: { $ne: null },
+//      geotag_picture: {
+//        $exists: true,
+//        $nin: [null, ""],
+//        $not: { $regex: /^not available$/i }
+//      }
+//    }).select('name code geotag_picture latitude longitude');
+
+//    if (dealers.length === 0) {
+//      return res.status(404).json({ message: "No geotagged dealers found." });
+//    }
+
+//    // Prepare data for CSV
+//    const dealerData = dealers.map(dealer => ({
+//      name: dealer.name || "N/A",
+//      code: dealer.code || "N/A",
+//      latitude: dealer.latitude || "N/A",
+//      longitude: dealer.longitude || "N/A",
+//      geotag_picture: dealer.geotag_picture || "N/A",
+//      geotagging_status: dealer.geotag_picture ? "DONE" : "PENDING"
+//    }));
+
+//    // Define CSV columns
+//    const columns = ["name", "code", "latitude", "longitude", "geotag_picture", "geotagging_status"];
+
+//    // Build CSV string
+//    let csvContent = columns.join(",") + "\n";
+//    dealerData.forEach(dealer => {
+//      const row = columns.map(col => {
+//        const val = dealer[col];
+//        return typeof val === "string" ? val.replace(/,/g, "") : val;
+//      });
+//      csvContent += row.join(",") + "\n";
+//    });
+
+//    // Set headers and return CSV
+//    res.header("Content-Type", "text/csv");
+//    res.header("Content-Disposition", "attachment; filename=geotagged_dealers.csv");
+//    return res.status(200).send(csvContent);
+//  } catch (error) {
+//    console.error("Error exporting geotagged dealers to CSV:", error);
+//    return res.status(500).json({ error: "Internal Server Error" });
+//  }
+// };
+
+exports.getGeotaggedDealers = async (req, res) => {
+ try {
+  const dealers = await User.find({
+    latitude: { $ne: null },
+    longitude: { $ne: null },
+    geotag_picture: {
+      $exists: true,
+      $nin: [null, ""],
+      $not: { $regex: /^not available$/i }
+    }
+  }).select('name code geotag_picture latitude longitude');
+
+  if (dealers.length === 0) {
+    return res.status(404).json({ message: "No geotagged dealers found." });
+  }
+
+  const dealerData = [];
+  const dynamicFieldsSet = new Set();
+
+  for (const dealer of dealers) {
+    // Fetch hierarchy based on the "dealer" field in the HierarchyEntries collection
+    const hierarchy = await HierarchyEntries.findOne({
+      dealer: dealer.code  // Use "dealer" field here instead of "dealers"
+    }).lean();
+
+    // Collect hierarchy fields dynamically (excluding `_id`, `dealer`, `createdAt`, and `updatedAt`)
+    const hierarchyFields = {};
+    if (hierarchy) {
+      Object.entries(hierarchy).forEach(([key, value]) => {
+        if (!['_id', 'dealer', 'createdAt', 'updatedAt', '__v'].includes(key)) {  // Excluding 'createdAt' and 'updatedAt'
+          hierarchyFields[key] = value || "N/A";
+          dynamicFieldsSet.add(key);
+        }
+      });
+    }
+
+    dealerData.push({
+      name: dealer.name || "N/A",
+      code: dealer.code || "N/A",
+      latitude: dealer.latitude || "N/A",
+      longitude: dealer.longitude || "N/A",
+      geotag_picture: dealer.geotag_picture || "N/A",
+      geotagging_status: dealer.geotag_picture ? "DONE" : "PENDING",
+      ...hierarchyFields
+    });
+  }
+
+  // Static columns
+  const baseColumns = ["name", "code", "latitude", "longitude", "geotag_picture", "geotagging_status"];
+  // Dynamic hierarchy columns
+  const dynamicColumns = Array.from(dynamicFieldsSet);
+  const columns = [...baseColumns, ...dynamicColumns];
+
+  // Build CSV string
+  let csvContent = columns.join(",") + "\n";
+  dealerData.forEach(dealer => {
+    const row = columns.map(col => {
+      const val = dealer[col];
+      return typeof val === "string" ? val.replace(/,/g, "") : val;
+    });
+    csvContent += row.join(",") + "\n";
+  });
+
+  res.header("Content-Type", "text/csv");
+  res.header("Content-Disposition", "attachment; filename=geotagged_dealers_with_hierarchy.csv");
+  return res.status(200).send(csvContent);
+} catch (error) {
+  console.error("Error exporting geotagged dealers to CSV:", error);
+  return res.status(500).json({ error: "Internal Server Error" });
+}
+};

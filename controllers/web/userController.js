@@ -104,6 +104,7 @@ exports.loginUserForApp = async (req, res) => {
         code: user.code,
         name: user.name,
         role: user.role,       // Role is retrieved from the user document
+        position: user.position,
         status: user.status,
         isVerified: user.isVerified,
       };
@@ -124,6 +125,7 @@ exports.loginUserForApp = async (req, res) => {
           email: user.email,
           status: user.status,
           role: user.role,
+          position: user.position,
           isVerified: user.isVerified,
           version: user.version,
         },
