@@ -128,6 +128,7 @@ exports.loginUserForApp = async (req, res) => {
           position: user.position,
           isVerified: user.isVerified,
           version: user.version,
+          position: user.position,
         },
         token, // Include the generated JWT token in the response
       });

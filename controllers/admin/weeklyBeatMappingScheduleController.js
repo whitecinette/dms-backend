@@ -6,7 +6,9 @@ const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule
 const User = require("../../model/User");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const ActorCode = require("../../model/ActorCode");
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
+const DeletedData = require("../../model/DeletedData");
+const bcrypt = require("bcrypt");
 
 const moment = require("moment-timezone");
 const RoutePlan = require("../../model/RoutePlan");
@@ -1048,7 +1050,7 @@ exports.markDealerDone = async (req, res) => {
 
 //get Employee schedules by code
 exports.getEmployeeSchedulesByCode = async (req, res) => {
-  const { code } = req.params;
+  const { code } = req.query || (req.user && req.user.code);
   let { startDate, endDate, status, search } = req.query;  // Use query params for GET request
 
   try {
@@ -1063,39 +1065,79 @@ exports.getEmployeeSchedulesByCode = async (req, res) => {
       const start = new Date(new Date(startDate).setUTCHours(0, 0, 0, 0));
       const end = new Date(new Date(endDate).setUTCHours(23, 59, 59, 999));
     
-      scheduleFilters.createdAt = { $gte: start, $lte: end };
-    }
+      scheduleFilters.$or = [
+        {
+          startDate: { $lte: end },
+          endDate: { $gte: start }
+        }
+      ];
       
+    }
+
+    const employeeData = await WeeklyBeatMappingSchedule.find(scheduleFilters)
+      .sort({ createdAt: -1 }) // descending: latest first
+      .lean();
+
+    if (!employeeData) {
+      return res.status(404).json({ message: "Employee not found." });
+    }
+
+    const totalCounts = [];
+    let total = 0;
+    let totalDone = 0;
+    let totalPending = 0;
+    for (const emp of employeeData) {
+      totalDone += emp.done;
+      totalPending += emp.pending;
+    }
+
+    total = totalDone + totalPending;
+
+    totalCounts.push({
+      total,
+      done: totalDone,
+      pending: totalPending,
+    });
 
     // console.log("→ Mongo filter:", JSON.stringify(scheduleFilters));
 
     // Fetch all matching beat schedules
-    const beatMappings = await WeeklyBeatMappingSchedule.find(scheduleFilters).lean();
+    const beatMappings = await WeeklyBeatMappingSchedule.find(scheduleFilters)
+      .sort({ startDate: -1 }) // descending: latest first
+      .lean();
+
     // console.log("→ beatMappings found:", beatMappings.length);
 
     if (beatMappings.length === 0) {
-      return res.status(404).json({ message: "No schedules found for this employee." });
+      return res
+        .status(404)
+        .json({ message: "No schedules found for this employee." });
     }
 
     // Flatten dealer entries from each beatMapping schedule
     let allDealers = [];
     beatMappings.forEach((bm, idx) => {
       // console.log(`  • mapping[${idx}] _id=${bm._id}, dates=${bm.startDate.toISOString()}→${bm.endDate.toISOString()}`);
-      bm.schedule.forEach(dealer => {
+      bm.schedule.forEach((dealer) => {
         allDealers.push({
-          id:        dealer._id,
-          code:      dealer.code,
-          name:      dealer.name,
-          latitude:  Number(dealer.latitude?.$numberDecimal || dealer.latitude || 0),
-          longitude: Number(dealer.longitude?.$numberDecimal || dealer.longitude || 0),
-          position:  dealer.position  || "",
-          district:  dealer.district  || "",
-          taluka:    dealer.taluka    || "",
-          zone:      dealer.zone      || "",
-          status:    dealer.status,
-          distance:  dealer.distance  || null,
+          scheduleId: bm._id,
+          dealerId: dealer._id,
+          code: dealer.code,
+          name: dealer.name,
+          latitude: Number(
+            dealer.latitude?.$numberDecimal || dealer.latitude || 0
+          ),
+          longitude: Number(
+            dealer.longitude?.$numberDecimal || dealer.longitude || 0
+          ),
+          position: dealer.position || "",
+          district: dealer.district || "",
+          taluka: dealer.taluka || "",
+          zone: dealer.zone || "",
+          status: dealer.status,
+          distance: dealer.distance || null,
           startDate: bm.startDate,
-          endDate:   bm.endDate
+          endDate: bm.endDate,
         });
       });
     });
@@ -1103,12 +1145,18 @@ exports.getEmployeeSchedulesByCode = async (req, res) => {
 
     // Apply status / search filters if present
     if (status) {
-      allDealers = allDealers.filter(d => d.status === status);
+      allDealers = allDealers.filter((d) => d.status === status);
     }
     if (search) {
       const re = new RegExp(search, "i");
-      allDealers = allDealers.filter(d => re.test(d.code) || re.test(d.name) ||
-                                          re.test(d.district) || re.test(d.taluka) || re.test(d.zone));
+      allDealers = allDealers.filter(
+        (d) =>
+          re.test(d.code) ||
+          re.test(d.name) ||
+          re.test(d.district) ||
+          re.test(d.taluka) ||
+          re.test(d.zone)
+      );
     }
 
     // Fetch the employee record
@@ -1116,11 +1164,10 @@ exports.getEmployeeSchedulesByCode = async (req, res) => {
 
     // Return everything
     return res.status(200).json({
-      filer: scheduleFilters,
+      totalCounts,
       employee,
-      dealers: allDealers
+      dealers: allDealers,
     });
-
   } catch (err) {
     console.error("Error fetching employee schedules:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -1130,25 +1177,28 @@ exports.getEmployeeSchedulesByCode = async (req, res) => {
 //edit employee schedules
 exports.editEmployeeSchedulesByCode = async (req, res) => {
   const { code } = req.params;
-  const schedule  = req.body;
+  const schedule = req.body;
 
   try {
-    console.log("Edit employee schedules:", code, schedule);
     if (!code || !schedule || !schedule.id) {
-      return res.status(400).json({ error: "Employee code and schedule.id are required." });
+      return res
+        .status(400)
+        .json({ error: "Employee code and schedule.id are required." });
     }
 
     // Step 1: Find the document and the dealer
     const scheduleDoc = await WeeklyBeatMappingSchedule.findOne({
       code,
-      "schedule._id": schedule.id
+      "schedule._id": schedule.id,
     });
 
     if (!scheduleDoc) {
       return res.status(404).json({ message: "Dealer schedule not found." });
     }
 
-    const dealerIndex = scheduleDoc.schedule.findIndex(d => d._id.toString() === schedule.id);
+    const dealerIndex = scheduleDoc.schedule.findIndex(
+      (d) => d._id.toString() === schedule.id
+    );
     if (dealerIndex === -1) {
       return res.status(404).json({ message: "Dealer not found in schedule." });
     }
@@ -1160,7 +1210,9 @@ exports.editEmployeeSchedulesByCode = async (req, res) => {
     if (schedule.code && schedule.code !== currentDealer.code) {
       const masterDealer = await User.findOne({ code: schedule.code });
       if (!masterDealer) {
-        return res.status(404).json({ error: "No matching dealer found in master records." });
+        return res
+          .status(404)
+          .json({ error: "No matching dealer found in master records." });
       }
 
       // Replace key fields from master record + provided status/distance if included
@@ -1175,7 +1227,7 @@ exports.editEmployeeSchedulesByCode = async (req, res) => {
         zone: masterDealer.zone,
         position: masterDealer.position,
         status: schedule.status || currentDealer.status,
-        distance: schedule.distance || currentDealer.distance
+        distance: schedule.distance || currentDealer.distance,
       };
     } else if (schedule.status && schedule.status !== oldStatus) {
       // Step 3: Only allow status change if name is same
@@ -1184,8 +1236,9 @@ exports.editEmployeeSchedulesByCode = async (req, res) => {
 
     // Step 4: Update done/pending count if status was changed
     if (schedule.status && schedule.status !== oldStatus) {
-      let doneCount = 0, pendingCount = 0;
-      scheduleDoc.schedule.forEach(dealer => {
+      let doneCount = 0,
+        pendingCount = 0;
+      scheduleDoc.schedule.forEach((dealer) => {
         if (dealer.status === "done") doneCount++;
         else if (dealer.status === "pending") pendingCount++;
       });
@@ -1201,9 +1254,8 @@ exports.editEmployeeSchedulesByCode = async (req, res) => {
       message: "Dealer schedule updated successfully.",
       updatedDealer: scheduleDoc.schedule[dealerIndex],
       totalDone: scheduleDoc.totalDone,
-      totalPending: scheduleDoc.totalPending
+      totalPending: scheduleDoc.totalPending,
     });
-
   } catch (err) {
     console.error("Error updating employee schedules:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -1334,7 +1386,7 @@ exports.getFilteredBeatMapping = async (req, res) => {
     });
 
     const total = filtered.length;
-    const done = filtered.filter(d => d.status === "done").length;
+    const done = filtered.filter((d) => d.status === "done").length;
     const pending = total - done;
 
     return res.status(200).json({
@@ -1346,6 +1398,98 @@ exports.getFilteredBeatMapping = async (req, res) => {
   } catch (error) {
     console.error("Error in getFilteredBeatMapping:", error);
     return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+//delete weekly beat mapping schedule
+exports.deleteDealerFromSchedule = async (req, res) => {
+  try {
+    const securityKey = req.query.securityKey;
+    if(!securityKey){
+      return res.status(400).json({ success: false, message: "Security key is required" });
+    }
+    //check the security key of admin and super admin
+    const isMatch = await bcrypt.compare(securityKey, req.user.securityKey);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Security key is incorrect" });
+    }
+    const { scheduleId, dealerID } = req.params;
+    const deletedBy = {
+      name: req.user?.name || "unknown",
+      code: req.user?.code || "unknown",
+    };
+
+    if (!scheduleId || !dealerID) {
+      return res.status(400).json({
+        success: false,
+        message: "Schedule ID and dealer code are required",
+      });
+    }
+
+    const schedule = await WeeklyBeatMappingSchedule.findById(scheduleId);
+    if (!schedule) {
+      return res.status(404).json({
+        success: false,
+        message: "Schedule not found",
+      });
+    }
+
+    const dealerDoc = schedule.schedule.find(
+      (d) => d._id.toString() === dealerID
+    );
+
+    if (!dealerDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Dealer not found in schedule",
+      });
+    }
+
+    // Attach beat mapping ID for DeletedData logging
+    const dealerData = {
+      ...dealerDoc.toObject(),
+      BeatMappingID: schedule._id,
+    };
+    
+
+    // ✅ ACTUAL DELETE
+    schedule.schedule = schedule.schedule.filter(
+       (d) => d._id.toString() !== dealerID
+     );
+
+    // Update counts
+    schedule.total = schedule.schedule.length;
+    schedule.done = schedule.schedule.filter((d) => d.status === "done").length;
+    schedule.pending = schedule.total - schedule.done;
+
+    await schedule.save();
+
+    await DeletedData.create({
+      collectionName: "DealerSchedule",
+      data: dealerData,
+      deletedBy,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Dealer deleted successfully",
+      data: {
+        scheduleId: schedule._id,
+        deletedDealer: dealerDoc,
+        updatedCounts: {
+          total: schedule.total,
+          done: schedule.done,
+          pending: schedule.pending,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error deleting dealer from schedule:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 

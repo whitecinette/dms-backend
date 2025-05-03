@@ -1,7 +1,6 @@
 const express = require("express");
 const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerAndMddForAdmin, updateBulkLatLongForAdmin, 
-    updateUserLabelsFromCSV, 
-    updateBulkDealersFromCSV} = require("../controllers/admin/userController");
+    updateUserLabelsFromCSV, createSecurityKey, updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
@@ -72,7 +71,6 @@ router.post("/admin/get-users-by-positions", getUsersByPositions);
 
 router.put("/admin/update-user-labels", upload.single('file'), updateUserLabelsFromCSV);
 
-
-
+router.post("/admin/create-security-key", superAdminAuth, createSecurityKey);
 
 module.exports = router;    

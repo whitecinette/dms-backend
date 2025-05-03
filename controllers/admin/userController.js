@@ -49,6 +49,7 @@ exports.registerSuperAdmin = async (req, res) => {
             role: "super_admin",
             isVerified: true,
             version: 1,
+            securityKey: hashedPassword,
         });
 
         await superAdmin.save();
@@ -222,6 +223,7 @@ exports.registerAdminForSuperAdmin = async (req, res) => {
             role: "admin",
             isVerified: true,
             version: 1,
+            securityKey: hashedPassword,
         });
 
         // Save the admin user to the database
@@ -1335,4 +1337,32 @@ exports.updateData = async (req, res) => {
       message: "Internal server error",
     });
   }
+};
+
+//edit  security key of admin and super admin by Super Admin
+exports.createSecurityKey = async (req, res) => {
+  const oldKey = req.body.oldKey;
+  const newKey = req.body.newKey;
+
+  if (!oldKey || !newKey) {
+    return res.status(400).json({ success: false, message: "oldKey and newKey are required" });
+  }
+
+  const isMatch = await bcrypt.compare(oldKey, req.user.securityKey);
+  if (!isMatch) {
+    return res.status(400).json({ success: false, message: "oldKey is incorrect" });
+  }
+
+  const hashedKey = await bcrypt.hash(newKey, 10);
+  //find all admin and super admin and store the security oldKey in the user
+  const admins = await User.find({ role: { $in: ["admin", "super_admin"] } });
+  for (const admin of admins) {
+    await User.findOneAndUpdate(
+      { code: admin.code },
+      { $set: { securityKey: hashedKey } }
+    );
+  }
+
+  // Update the security oldKey in the user
+  res.status(200).json({ success: true, message: "Security oldKey created successfully" });
 };
