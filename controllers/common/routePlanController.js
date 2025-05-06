@@ -178,14 +178,12 @@ exports.getRoutePlansForUser = async (req, res) => {
 // USER MODEL APIS 
 exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
   try {
+    console.log("Dopppped")
     const { code: userCode, position } = req.user;
 
     if (!position) {
       return res.status(400).json({ success: false, message: 'User position missing in token' });
     }
-
-
-
 
     const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: 'default_sales_flow' });
     if (!hierarchyConfig) {
@@ -220,8 +218,10 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      district: [...districts],
+      status: ['done', 'pending'],
+      ['dealer/mdd']: ['dealer', 'mdd'],
       taluka: [...talukas],
+      district: [...districts],
       zone: [...zones],
     });
 
@@ -230,5 +230,6 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
 
 
