@@ -3,6 +3,7 @@ const moment = require('moment-timezone');
 const RoutePlan = require('../../model/RoutePlan');
 const WeeklyBeatMappingSchedule = require('../../model/WeeklyBeatMappingSchedule');
 const HierarchyEntries = require('../../model/HierarchyEntries');
+const ActorTypesHierarchy = require('../../model/ActorTypesHierarchy');
 
 exports.addRoutePlan = async (req, res) => {
   try {
@@ -125,6 +126,7 @@ exports.addRoutePlan = async (req, res) => {
 
 exports.getRoutePlansForUser = async (req, res) => {
   try {
+    console.log("Reaching route plan");
     const { startDate, endDate } = req.body;
     const userCode = req.user.code;
 
@@ -135,7 +137,8 @@ exports.getRoutePlansForUser = async (req, res) => {
       query.endDate = { $gte: new Date(startDate) };
     }
 
-    const routes = await RoutePlan.find(query);
+    const routes = await RoutePlan.find(query).sort({ createdAt: -1 });
+
 
     const formattedRoutes = routes.map(route => {
       const itinerary = route.itinerary || {};
@@ -171,5 +174,61 @@ exports.getRoutePlansForUser = async (req, res) => {
   }
 };
 
+
+// USER MODEL APIS 
+exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
+  try {
+    const { code: userCode, position } = req.user;
+
+    if (!position) {
+      return res.status(400).json({ success: false, message: 'User position missing in token' });
+    }
+
+
+
+
+    const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: 'default_sales_flow' });
+    if (!hierarchyConfig) {
+      return res.status(400).json({ success: false, message: 'Hierarchy config not found' });
+    }
+
+    const positionKey = position.toLowerCase();
+    if (!hierarchyConfig.hierarchy.includes(positionKey)) {
+      return res.status(400).json({ success: false, message: 'User position not in hierarchy flow' });
+    }
+
+    const hierarchyEntries = await HierarchyEntries.find({
+      hierarchy_name: 'default_sales_flow',
+      [positionKey]: userCode,
+    });
+
+    const mddCodes = hierarchyEntries.map(entry => entry.mdd).filter(Boolean);
+    const dealerCodes = hierarchyEntries.map(entry => entry.dealer).filter(Boolean);
+    const allCodes = [...new Set([...mddCodes, ...dealerCodes])];
+
+    const users = await User.find({ code: { $in: allCodes } });
+
+    const districts = new Set();
+    const talukas = new Set();
+    const zones = new Set();
+
+    users.forEach(user => {
+      if (user.district) districts.add(user.district);
+      if (user.taluka) talukas.add(user.taluka);
+      if (user.zone) zones.add(user.zone);
+    });
+
+    return res.status(200).json({
+      success: true,
+      district: [...districts],
+      taluka: [...talukas],
+      zone: [...zones],
+    });
+
+  } catch (error) {
+    console.error("Error in getDropdownOptionsForMarketCoverage:", error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
 
 
