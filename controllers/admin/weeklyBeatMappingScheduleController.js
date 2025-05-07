@@ -13,8 +13,6 @@ const bcrypt = require("bcrypt");
 const moment = require("moment-timezone");
 const RoutePlan = require("../../model/RoutePlan");
 
-
-
 // add weekly beat mapping
 exports.addWeeklyBeatMappingSchedule = async (req, res) => {
   try {
@@ -230,13 +228,12 @@ exports.updateWeeklyBeatMappingStatusWithProximity = async (req, res) => {
     ); // Using the given function
 
     if (distance > allowedRadius) {
-     return res.status(403).json({
-       error: "You are too far from the dealer's location.",
-       distanceFromDealer: `${distance.toFixed(2)} meters`
+      return res.status(403).json({
+        error: "You are too far from the dealer's location.",
+        distanceFromDealer: `${distance.toFixed(2)} meters`,
       });
+    }
 
-   }
-   
     // Update the status if the employee is within the allowed radius
     dealer.status = "done";
     dealer.distance = `${distance.toFixed(2)} meters`;
@@ -338,8 +335,12 @@ exports.addWeeklyBeatMappingUsingCSV = async (req, res) => {
                     schedule[day.substring(0, 3)].push({
                       code: dealerCode,
                       name: dealer.name,
-                      latitude: dealer.latitude ? Number(dealer.latitude) : null,
-                      longitude: dealer.longitude ? Number(dealer.longitude) : null,
+                      latitude: dealer.latitude
+                        ? Number(dealer.latitude)
+                        : null,
+                      longitude: dealer.longitude
+                        ? Number(dealer.longitude)
+                        : null,
                       status: "pending",
                       distance: null,
                     });
@@ -437,6 +438,12 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
+    // Fetch route plans for the date range
+    const routePlans = await RoutePlan.find({
+      startDate: { $lte: end },
+      endDate: { $gte: start },
+    }).lean();
+
     const formattedSchedules = schedules.map((schedule) => {
       let dealers = schedule.schedule || [];
 
@@ -447,11 +454,42 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       const normalizedCode = schedule.code?.trim().toLowerCase();
       const employeeName = employeeMap[normalizedCode] || "Unknown";
 
-      const transformedSchedule = dealers.map((dealer) => ({
-        ...dealer,
-        latitude: dealer.latitude ? dealer.latitude.toString() : null,
-        longitude: dealer.longitude ? dealer.longitude.toString() : null,
-      }));
+      // Find matching route name
+      const matchingRoute = routePlans.find((route) => {
+        const routeStartStr = new Date(route.startDate)
+          .toISOString()
+          .split("T")[0];
+        const routeEndStr = new Date(route.endDate).toISOString().split("T")[0];
+        const scheduleStartStr = new Date(schedule.startDate)
+          .toISOString()
+          .split("T")[0];
+        const scheduleEndStr = new Date(schedule.endDate)
+          .toISOString()
+          .split("T")[0];
+
+        return (
+          route.code === schedule.code &&
+          routeStartStr === scheduleStartStr &&
+          routeEndStr === scheduleEndStr
+        );
+      });
+
+      // Create a map to count dealer visits
+      const dealerVisitMap = {};
+      dealers.forEach((dealer) => {
+        const key = `${dealer.code}-${dealer.status}`;
+        if (!dealerVisitMap[key]) {
+          dealerVisitMap[key] = {
+            ...dealer,
+            visitCount: dealer.status === "done" ? 1 : 0,
+          };
+        } else {
+          dealerVisitMap[key].visitCount += 1;
+        }
+      });
+
+      // Convert map to array of unique dealers with visit counts
+      const uniqueDealers = Object.values(dealerVisitMap);
 
       return {
         _id: schedule._id,
@@ -462,7 +500,9 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
         total: schedule.total,
         done: schedule.done,
         pending: schedule.pending,
-        schedule: transformedSchedule,
+        schedule: uniqueDealers,
+        routeName: matchingRoute?.name || null,
+        routeStatus: matchingRoute?.status || null,
       };
     });
 
@@ -470,8 +510,9 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
     let filteredSchedules = formattedSchedules;
     if (search) {
       const searchRegex = new RegExp(search, "i");
-      filteredSchedules = formattedSchedules.filter((schedule) =>
-        searchRegex.test(schedule.code) || searchRegex.test(schedule.name)
+      filteredSchedules = formattedSchedules.filter(
+        (schedule) =>
+          searchRegex.test(schedule.code) || searchRegex.test(schedule.name)
       );
     }
 
@@ -495,7 +536,6 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
   }
 };
 
-
 // Edit beat mapping for admin
 exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
   try {
@@ -510,7 +550,6 @@ exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
 
     schedule.name = name;
     schedule.code = code;
-    
 
     const calculateStats = (schedule) => {
       let total = 0,
@@ -601,112 +640,111 @@ exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
 };
 
 exports.getAllWeeklyBeatMapping = async (req, res) => {
- try {
-   const { status, search = '', page = 1, limit = 20 } = req.query;
-   const skip = (parseInt(page) - 1) * parseInt(limit);
-   const query = {};
+  try {
+    const { status, search = "", page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const query = {};
 
-   // Step 1: Filter matching employee codes by name/code (if search is provided)
-   if (search) {
-     const matchedActors = await ActorCode.find({
-       $or: [
-         { name: { $regex: search, $options: 'i' } },
-         { code: { $regex: search, $options: 'i' } }
-       ]
-     }).lean();
+    // Step 1: Filter matching employee codes by name/code (if search is provided)
+    if (search) {
+      const matchedActors = await ActorCode.find({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { code: { $regex: search, $options: "i" } },
+        ],
+      }).lean();
 
-     const matchedCodes = matchedActors.map(actor => actor.code);
-     if (matchedCodes.length === 0) {
-       return res.status(200).json({
-         success: true,
-         message: "No results found",
-         data: [],
-         total: 0,
-         page: parseInt(page),
-         limit: parseInt(limit),
-       });
-     }
-     query.code = { $in: matchedCodes };
-   }
+      const matchedCodes = matchedActors.map((actor) => actor.code);
+      if (matchedCodes.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: "No results found",
+          data: [],
+          total: 0,
+          page: parseInt(page),
+          limit: parseInt(limit),
+        });
+      }
+      query.code = { $in: matchedCodes };
+    }
 
-   // Step 2: Count total before pagination
-   const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
+    // Step 2: Count total before pagination
+    const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
 
-   // Step 3: Fetch paginated beat mappings
-   const mappings = await WeeklyBeatMappingSchedule.find(query)
-     .sort({ createdAt: -1 })
-     .skip(skip)
-     .limit(parseInt(limit))
-     .select('code schedule done pending createdAt updatedAt')
-     .lean();
+    // Step 3: Fetch paginated beat mappings
+    const mappings = await WeeklyBeatMappingSchedule.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .select("code schedule done pending createdAt updatedAt")
+      .lean();
 
-   // Step 4: Get names for all unique codes
-   const codes = [...new Set(mappings.map(m => m.code))];
-   const actorDocs = await ActorCode.find({ code: { $in: codes } }).lean();
-   const actorMap = {};
-   actorDocs.forEach(actor => {
-     actorMap[actor.code] = actor.name;
-   });
+    // Step 4: Get names for all unique codes
+    const codes = [...new Set(mappings.map((m) => m.code))];
+    const actorDocs = await ActorCode.find({ code: { $in: codes } }).lean();
+    const actorMap = {};
+    actorDocs.forEach((actor) => {
+      actorMap[actor.code] = actor.name;
+    });
 
-   // Step 5: Group data
-   const groupedResult = {};
+    // Step 5: Group data
+    const groupedResult = {};
 
-   for (const mapping of mappings) {
-     const empCode = mapping.code;
-     const empName = actorMap[empCode] || "Unknown";
+    for (const mapping of mappings) {
+      const empCode = mapping.code;
+      const empName = actorMap[empCode] || "Unknown";
 
-     // Filter schedule by status if needed
-     let filteredSchedule = mapping.schedule;
+      // Filter schedule by status if needed
+      let filteredSchedule = mapping.schedule;
 
-     if (status === "done" || status === "pending") {
-       filteredSchedule = {};
-       for (const [day, dealers] of Object.entries(mapping.schedule)) {
-         const filtered = dealers.filter(d => d.status === status);
-         if (filtered.length > 0) {
-           filteredSchedule[day] = filtered;
-         }
-       }
-       if (Object.keys(filteredSchedule).length === 0) continue;
-     }
+      if (status === "done" || status === "pending") {
+        filteredSchedule = {};
+        for (const [day, dealers] of Object.entries(mapping.schedule)) {
+          const filtered = dealers.filter((d) => d.status === status);
+          if (filtered.length > 0) {
+            filteredSchedule[day] = filtered;
+          }
+        }
+        if (Object.keys(filteredSchedule).length === 0) continue;
+      }
 
-     if (!groupedResult[empCode]) {
-       groupedResult[empCode] = {
-         code: empCode,
-         employeeName: empName,
-         totalDone: mapping.done || 0,
-         totalPending: mapping.pending || 0,
-         beatMappings: []
-       };
-     }
+      if (!groupedResult[empCode]) {
+        groupedResult[empCode] = {
+          code: empCode,
+          employeeName: empName,
+          totalDone: mapping.done || 0,
+          totalPending: mapping.pending || 0,
+          beatMappings: [],
+        };
+      }
 
-     groupedResult[empCode].beatMappings.push({
-       ...mapping,
-       schedule: filteredSchedule
-     });
-   }
+      groupedResult[empCode].beatMappings.push({
+        ...mapping,
+        schedule: filteredSchedule,
+      });
+    }
 
-   const groupedArray = Object.values(groupedResult);
+    const groupedArray = Object.values(groupedResult);
 
-   res.status(200).json({
-     success: true,
-     message: `Weekly Beat Mappings${status ? ` with status "${status}"` : ''}`,
-     data: groupedArray,
-     total: totalCount,
-     page: parseInt(page),
-     limit: parseInt(limit),
-   });
-
- } catch (error) {
-   console.error("Error fetching weekly beat mappings:", error);
-   res.status(500).json({
-     success: false,
-     message: "Server Error",
-     error: error.message,
-   });
- }
+    res.status(200).json({
+      success: true,
+      message: `Weekly Beat Mappings${
+        status ? ` with status "${status}"` : ""
+      }`,
+      data: groupedArray,
+      total: totalCount,
+      page: parseInt(page),
+      limit: parseInt(limit),
+    });
+  } catch (error) {
+    console.error("Error fetching weekly beat mappings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message,
+    });
+  }
 };
-
-
 
 // Rakshita new
 const parseLatLong = (val) => {
@@ -731,19 +769,19 @@ const parseLatLong = (val) => {
   return 0.0;
 };
 
-
-
 exports.addDailyBeatMapping = async (req, res) => {
   try {
     const IST_START = moment().tz("Asia/Kolkata").startOf("day").toDate(); // 12:00 AM IST
-    const IST_END = moment().tz("Asia/Kolkata").endOf("day").toDate();     // 11:59 PM IST
+    const IST_END = moment().tz("Asia/Kolkata").endOf("day").toDate(); // 11:59 PM IST
 
-    const hierarchy = await HierarchyEntries.find({ hierarchy_name: "default_sales_flow" });
+    const hierarchy = await HierarchyEntries.find({
+      hierarchy_name: "default_sales_flow",
+    });
 
     // Step 1: Map ASM to all dealers & MDDs under them
     const asmMap = {}; // { asmCode: { dealers: Set, mdds: Set } }
 
-    hierarchy.forEach(entry => {
+    hierarchy.forEach((entry) => {
       const asm = entry.asm;
       if (!asmMap[asm]) {
         asmMap[asm] = { dealers: new Set(), mdds: new Set() };
@@ -780,7 +818,7 @@ exports.addDailyBeatMapping = async (req, res) => {
         district: user.district || "",
         taluka: user.taluka || "",
         zone: user.zone || "",
-        position: user.position || ""
+        position: user.position || "",
       }));
 
       const total = schedule.length;
@@ -802,13 +840,11 @@ exports.addDailyBeatMapping = async (req, res) => {
       message: "Daily beat mapping created successfully.",
       totalMappedASMs: insertedCount,
     });
-
   } catch (error) {
     console.error("Error in daily beat mapping:", error);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };
-
 
 exports.getBeatMappingReport = async (req, res) => {
   try {
@@ -863,9 +899,7 @@ exports.getBeatMappingReport = async (req, res) => {
             totalAppearances: 0,
             latitude: parseLatLong(dealer.latitude),
             longitude: parseLatLong(dealer.longitude),
-
           };
-          
         }
 
         dealerMap[dCode].totalAppearances += 1;
@@ -888,7 +922,7 @@ exports.getBeatMappingReport = async (req, res) => {
         status: isDone ? "done" : "pending",
         visits: isDone ? d.doneCount : 0,
         latitude: d.latitude,
-        longitude: d.longitude
+        longitude: d.longitude,
       };
     });
 
@@ -896,7 +930,8 @@ exports.getBeatMappingReport = async (req, res) => {
     const filtered = result.filter((entry) => {
       const matchStatus = !status.length || status.includes(entry.status);
       const matchZone = !zone.length || zone.includes(entry.zone);
-      const matchDistrict = !district.length || district.includes(entry.district);
+      const matchDistrict =
+        !district.length || district.includes(entry.district);
       const matchTaluka = !taluka.length || taluka.includes(entry.taluka);
       // Travel filter can be added here later if defined
       return matchStatus && matchZone && matchDistrict && matchTaluka;
@@ -935,11 +970,15 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
     // Allowed dynamic fields
     const allowedFields = ["zone", "district", "taluka"];
     if (!allowedFields.includes(field)) {
-      return res.status(400).json({ error: "Invalid dropdown field requested." });
+      return res
+        .status(400)
+        .json({ error: "Invalid dropdown field requested." });
     }
 
     // Get distinct values from User model
-    const values = await User.distinct(field, { position: { $in: ["dealer", "mdd"] } });
+    const values = await User.distinct(field, {
+      position: { $in: ["dealer", "mdd"] },
+    });
 
     return res.status(200).json({ values: values.filter(Boolean).sort() }); // remove nulls/empties
   } catch (error) {
@@ -956,6 +995,13 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
 
 //     if (!dealerCode || distance === undefined) {
 //       return res.status(400).json({ message: "dealerCode and distance are required " });
+//     }
+
+//     // ✅ Distance check: should not be more than 0.2 km (200 meters)
+//     if (distance > 0.2) {
+//       return res
+//         .status(400)
+//         .json({ message: "You are more than 200 meters away from the dealer" });
 //     }
 
 //     const nowIST = moment().tz("Asia/Kolkata");
@@ -988,7 +1034,9 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
 
 //     await scheduleDoc.save();
 
-//     return res.status(200).json({ message: "Dealer marked as done successfully" });
+//     return res
+//       .status(200)
+//       .json({ message: "Dealer marked as done successfully" });
 //   } catch (error) {
 //     console.error("Error in markDealerDone:", error);
 //     return res.status(500).json({ message: "Internal Server Error" });
@@ -1003,12 +1051,16 @@ exports.markDealerDone = async (req, res) => {
     console.log("Distance: ", distance);
 
     if (!dealerCode || distance === undefined) {
-      return res.status(400).json({ message: "dealerCode and distance are required" });
+      return res
+        .status(400)
+        .json({ message: "dealerCode and distance are required" });
     }
 
     // ✅ Distance check: should not be more than 0.2 km (200 meters)
     if (distance > 0.2) {
-      return res.status(400).json({ message: "You are more than 200 meters away from the dealer" });
+      return res
+        .status(400)
+        .json({ message: "You are more than 200 meters away from the dealer" });
     }
 
     const nowIST = moment().tz("Asia/Kolkata");
@@ -1023,7 +1075,7 @@ exports.markDealerDone = async (req, res) => {
       return res.status(404).json({ message: "No active schedule found" });
     }
 
-    const dealer = scheduleDoc.schedule.find(d => d.code === dealerCode);
+    const dealer = scheduleDoc.schedule.find((d) => d.code === dealerCode);
 
     if (!dealer) {
       return res.status(404).json({ message: "Dealer not found in schedule" });
@@ -1041,7 +1093,9 @@ exports.markDealerDone = async (req, res) => {
 
     await scheduleDoc.save();
 
-    return res.status(200).json({ message: "Dealer marked as done successfully" });
+    return res
+      .status(200)
+      .json({ message: "Dealer marked as done successfully" });
   } catch (error) {
     console.error("Error in markDealerDone:", error);
     return res.status(500).json({ message: "Internal Server Error" });
@@ -1051,7 +1105,7 @@ exports.markDealerDone = async (req, res) => {
 //get Employee schedules by code
 exports.getEmployeeSchedulesByCode = async (req, res) => {
   const { code } = req.query || (req.user && req.user.code);
-  let { startDate, endDate, status, search } = req.query;  // Use query params for GET request
+  let { startDate, endDate, status, search } = req.query; // Use query params for GET request
 
   try {
     if (!code) {
@@ -1064,14 +1118,13 @@ exports.getEmployeeSchedulesByCode = async (req, res) => {
     if (startDate && endDate) {
       const start = new Date(new Date(startDate).setUTCHours(0, 0, 0, 0));
       const end = new Date(new Date(endDate).setUTCHours(23, 59, 59, 999));
-    
+
       scheduleFilters.$or = [
         {
           startDate: { $lte: end },
-          endDate: { $gte: start }
-        }
+          endDate: { $gte: start },
+        },
       ];
-      
     }
 
     const employeeData = await WeeklyBeatMappingSchedule.find(scheduleFilters)
@@ -1264,7 +1317,7 @@ exports.editEmployeeSchedulesByCode = async (req, res) => {
 
 exports.getFilteredBeatMapping = async (req, res) => {
   try {
-    console.log("Hereee")
+    console.log("Hereee");
     let {
       startDate,
       endDate,
@@ -1285,7 +1338,8 @@ exports.getFilteredBeatMapping = async (req, res) => {
     endDate = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
 
     const userCode = req.user.role === "admin" ? code : req.user.code;
-    if (!userCode) return res.status(400).json({ error: "User code is missing" });
+    if (!userCode)
+      return res.status(400).json({ error: "User code is missing" });
 
     // Fetch beat mappings
     const schedules = await WeeklyBeatMappingSchedule.find({
@@ -1302,9 +1356,13 @@ exports.getFilteredBeatMapping = async (req, res) => {
         startDate: { $lte: endDate },
         endDate: { $gte: startDate },
         $or: [
-          { _id: { $in: routes.filter(id => mongoose.Types.ObjectId.isValid(id)) } },
+          {
+            _id: {
+              $in: routes.filter((id) => mongoose.Types.ObjectId.isValid(id)),
+            },
+          },
           { name: { $in: routes } },
-        ]
+        ],
       };
 
       const routePlans = await RoutePlan.find(routeQuery);
@@ -1369,20 +1427,30 @@ exports.getFilteredBeatMapping = async (req, res) => {
     const filtered = result.filter((entry) => {
       const matchStatus = !status.length || status.includes(entry.status);
       const matchZone = !zone.length || zone.includes(entry.zone);
-      const matchDistrict = !district.length || district.includes(entry.district);
+      const matchDistrict =
+        !district.length || district.includes(entry.district);
       const matchTaluka = !taluka.length || taluka.includes(entry.taluka);
       const matchDealer = !dealers.length || dealers.includes(entry.code);
 
       let matchRoute = true;
       if (routeItineraryFilters.length > 0) {
-        matchRoute = routeItineraryFilters.some(f => {
-          return (!f.zone || f.zone.includes(entry.zone)) &&
-                 (!f.district || f.district.includes(entry.district)) &&
-                 (!f.taluka || f.taluka.includes(entry.taluka));
+        matchRoute = routeItineraryFilters.some((f) => {
+          return (
+            (!f.zone || f.zone.includes(entry.zone)) &&
+            (!f.district || f.district.includes(entry.district)) &&
+            (!f.taluka || f.taluka.includes(entry.taluka))
+          );
         });
       }
 
-      return matchStatus && matchZone && matchDistrict && matchTaluka && matchDealer && matchRoute;
+      return (
+        matchStatus &&
+        matchZone &&
+        matchDistrict &&
+        matchTaluka &&
+        matchDealer &&
+        matchRoute
+      );
     });
 
     const total = filtered.length;
@@ -1405,13 +1473,17 @@ exports.getFilteredBeatMapping = async (req, res) => {
 exports.deleteDealerFromSchedule = async (req, res) => {
   try {
     const securityKey = req.query.securityKey;
-    if(!securityKey){
-      return res.status(400).json({ success: false, message: "Security key is required" });
+    if (!securityKey) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Security key is required" });
     }
     //check the security key of admin and super admin
     const isMatch = await bcrypt.compare(securityKey, req.user.securityKey);
     if (!isMatch) {
-      return res.status(400).json({ success: false, message: "Security key is incorrect" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Security key is incorrect" });
     }
     const { scheduleId, dealerID } = req.params;
     const deletedBy = {
@@ -1450,12 +1522,11 @@ exports.deleteDealerFromSchedule = async (req, res) => {
       ...dealerDoc.toObject(),
       BeatMappingID: schedule._id,
     };
-    
 
     // ✅ ACTUAL DELETE
     schedule.schedule = schedule.schedule.filter(
-       (d) => d._id.toString() !== dealerID
-     );
+      (d) => d._id.toString() !== dealerID
+    );
 
     // Update counts
     schedule.total = schedule.schedule.length;
@@ -1492,4 +1563,3 @@ exports.deleteDealerFromSchedule = async (req, res) => {
     });
   }
 };
-
