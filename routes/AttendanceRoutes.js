@@ -1,5 +1,5 @@
 const express = require('express');
-const { punchIn, punchOut,  getAttendanceForEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getAttendanceByDate, getAttendanceByEmployeeForAdmin, getLatestAttendance, editAttendanceByID, downloadAllAttendance, deleteAttendanceByID} = require('../controllers/common/attendanceController');
+const { punchIn, punchOut,  getAttendanceForEmployee, getAttendance, requestLeave,getEmpLeave, getAllEmpLeaves, getAttendanceByDate, getAttendanceByEmployeeForAdmin, getLatestAttendance, editAttendanceByID, downloadAllAttendance, deleteAttendanceByID, getJaipurDealers} = require('../controllers/common/attendanceController');
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const { upload } = require("../services/fileUpload");
 const upload_img = require('../middlewares/upload');
@@ -26,4 +26,8 @@ router.put('/edit-attendance/:id', userAuth, editAttendanceByID)
 router.get('/download-all-attendance', adminOrSuperAdminAuth, downloadAllAttendance)
 router.delete('/delete-employee-attendance/:id', adminOrSuperAdminAuth, deleteAttendanceByID)
 
+
+// get jaipur dealers
+
+router.get('/get-jaipur-dealers', getJaipurDealers);
 module.exports = router;

@@ -20,20 +20,21 @@ const attendanceSchema = new mongoose.Schema(
     },
     punchInImage: { type: String, default: null },
     punchOutImage: { type: String, default: null },
+    hoursWorked: { type: Number, default: 0 },
+    punchOutCode: { type: String },
+    punchOutName: { type: String },
+    punchInCode: { type: String },
+    punchInName: { type: String },
+    punchInLatitude: { type: mongoose.Schema.Types.Decimal128 },
+    punchInLongitude: { type: mongoose.Schema.Types.Decimal128 },
+    punchOutLatitude: { type: mongoose.Schema.Types.Decimal128, default: null },
+    punchOutLongitude: { type: mongoose.Schema.Types.Decimal128, default: null },
     leaveType: {
       type: String,
       enum: ["Sick", "Casual", "Paid", "Unpaid", "Other"],
       required: false, // Changed to optional
     },
-    leaveDescription: { type: String, required: false }, // Changed to optional
-    hoursWorked: { type: Number, default: 0 }, // Ensures default value
-    punchOutCode: { type: String },
-    punchOutName: { type: String },
-    punchInCode: { type: String },
-    punchInName: { type: String },
-
-    latitude: Number,
-    longitude: Number,
+    leaveDescription: { type: String, required: false },
   },
   { strict: false, timestamps: true }
 );
