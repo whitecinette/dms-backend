@@ -10,7 +10,13 @@ const deletedDataSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       required: true,
     },
-    
+    deletedBy: {
+      type: {
+        code: { type: String, required: true },
+        name: { type: String, required: true },
+      },
+      required: true,
+    },
     deletedAt: {
       type: Date,
       default: Date.now,
@@ -18,6 +24,8 @@ const deletedDataSchema = new mongoose.Schema(
   },
   { timestamps: true, strict: false }
 );
+
+
 
 const DeletedData = mongoose.model("DeletedData", deletedDataSchema);
 

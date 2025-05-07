@@ -4,6 +4,7 @@ const RoutePlan = require('../../model/RoutePlan');
 const WeeklyBeatMappingSchedule = require('../../model/WeeklyBeatMappingSchedule');
 const HierarchyEntries = require('../../model/HierarchyEntries');
 const ActorTypesHierarchy = require('../../model/ActorTypesHierarchy');
+const DeletedData = require('../../model/DeletedData');
 
 exports.addRoutePlan = async (req, res) => {
   try {
@@ -230,6 +231,161 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+
+// exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
+//   try {
+//     const routeId = req.params.routeId;
+//     const route = await RoutePlan.findById(routeId);
+//     if (!route) {
+//       return res.status(404).json({ success: false, message: "Route not found" });
+//     }
+
+//     const { code, itinerary, startDate, endDate } = route;
+//     const deletedBy = {
+//       code: req.user.code,
+//       name: req.user.name,
+//     };
+
+//     // Prepare filters for relevant beat mapping schedules
+//     const dateFilter = {
+//       startDate: { $lte: new Date(endDate) },
+//       endDate: { $gte: new Date(startDate) },
+//       code,
+//     };
+
+//     const matchingSchedules = await WeeklyBeatMappingSchedule.find(dateFilter);
+//     const removedFromBeatMapping = [];
+
+//     for (let schedule of matchingSchedules) {
+//       const originalSchedule = [...schedule.schedule];
+//       const talukas = itinerary?.taluka ?? [];
+//       const zones = itinerary?.zone ?? [];
+//       const districts = itinerary?.district ?? [];
+
+//       const updatedSchedule = schedule.schedule.filter(d => {
+//         return !(
+//           talukas.includes(d.taluka) ||
+//           zones.includes(d.zone) ||
+//           districts.includes(d.district)
+//         );
+//       });
+
+//       if (updatedSchedule.length < schedule.schedule.length) {
+//         const removedDealers = originalSchedule.filter(d => !updatedSchedule.some(u => u.code === d.code));
+//         removedFromBeatMapping.push({
+//           beatMappingId: schedule._id,
+//           startDate: schedule.startDate,
+//           endDate: schedule.endDate,
+//           removedDealers,
+//         });
+
+//         schedule.schedule = updatedSchedule;
+//         schedule.total = updatedSchedule.length;
+//         schedule.done = updatedSchedule.filter(d => d.status === "done").length;
+//         schedule.pending = updatedSchedule.filter(d => d.status !== "done").length;
+//         await schedule.save();
+//       }
+//     }
+
+//     // Archive everything in one DeletedData document
+//     await DeletedData.create({
+//       collectionName: "RoutePlan+BeatMapping",
+//       data: {
+//         routeId,
+//         routeInfo: route.toObject(),
+//         removedFromBeatMapping,
+//       },
+//       deletedBy,
+//     });
+
+//     await route.deleteOne();
+
+//     return res.status(200).json({ success: true, message: "Route and related beat mapping dealers deleted and archived." });
+
+//   } catch (error) {
+//     console.error("Error in deleteRoutePlanAndUpdateBeatMapping:", error);
+//     return res.status(500).json({ success: false, message: "Server error" });
+//   }
+// };
+
+exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
+  try {
+    const routeId = req.params.routeId;
+    const route = await RoutePlan.findById(routeId);
+    if (!route) {
+      return res.status(404).json({ success: false, message: "Route not found" });
+    }
+
+    const { code, itinerary, startDate, endDate } = route;
+    const deletedBy = {
+      code: req.user.code,
+      name: req.user.name,
+    };
+
+    // Prepare filters for relevant beat mapping schedules
+    const dateFilter = {
+      startDate: { $lte: new Date(endDate) },
+      endDate: { $gte: new Date(startDate) },
+      code,
+    };
+
+    const matchingSchedules = await WeeklyBeatMappingSchedule.find(dateFilter);
+    const removedFromBeatMapping = [];
+
+    for (let schedule of matchingSchedules) {
+  const originalSchedule = [...schedule.schedule];
+  const talukas = itinerary?.taluka ?? [];
+  const zones = itinerary?.zone ?? [];
+  const districts = itinerary?.district ?? [];
+
+  const updatedSchedule = schedule.schedule.filter(d => {
+    const talukaMatch = d.taluka && talukas.includes(d.taluka.trim());
+    const zoneMatch = d.zone && zones.includes(d.zone.trim());
+    const districtMatch = d.district && districts.includes(d.district.trim());
+    return !(talukaMatch || zoneMatch || districtMatch);
+  });
+
+  if (updatedSchedule.length < schedule.schedule.length) {
+    const updatedCodes = new Set(updatedSchedule.map(u => u.code));
+    const removedDealers = originalSchedule.filter(d => !updatedCodes.has(d.code));
+
+    removedFromBeatMapping.push({
+      beatMappingId: schedule._id,
+      startDate: schedule.startDate,
+      endDate: schedule.endDate,
+      removedDealers,
+    });
+
+    schedule.schedule = updatedSchedule;
+    schedule.total = updatedSchedule.length;
+    schedule.done = updatedSchedule.filter(d => d.status === "done").length;
+    schedule.pending = updatedSchedule.filter(d => d.status !== "done").length;
+    await schedule.save();
+  }
+}
+
+    // Archive everything in one DeletedData document
+    await DeletedData.create({
+      collectionName: "RoutePlan+BeatMapping",
+      data: {
+        routeId,
+        routeInfo: route.toObject(),
+        removedFromBeatMapping,
+      },
+      deletedBy,
+    });
+
+    await route.deleteOne();
+
+    return res.status(200).json({ success: true, message: "Route and related beat mapping dealers deleted and archived." });
+
+  } catch (error) {
+    console.error("Error in deleteRoutePlanAndUpdateBeatMapping:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 
 
 
