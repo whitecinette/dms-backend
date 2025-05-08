@@ -182,72 +182,81 @@ exports.updateGeotagLatLong = async (req, res) => {
 
 exports.getGeotaggedDealers = async (req, res) => {
  try {
-  const dealers = await User.find({
-    latitude: { $ne: null },
-    longitude: { $ne: null },
-    geotag_picture: {
-      $exists: true,
-      $nin: [null, ""],
-      $not: { $regex: /^not available$/i }
-    }
-  }).select('name code geotag_picture latitude longitude');
+   const { hierarchy_name } = req.query;
 
-  if (dealers.length === 0) {
-    return res.status(404).json({ message: "No geotagged dealers found." });
-  }
+   if (!hierarchy_name) {
+     return res.status(400).json({ message: "Hierarchy name is required." });
+   }
 
-  const dealerData = [];
-  const dynamicFieldsSet = new Set();
+   // Step 1: Find matching HierarchyEntries
+   const matchingEntries = await HierarchyEntries.find({ hierarchy_name }).lean();
 
-  for (const dealer of dealers) {
-    // Fetch hierarchy based on the "dealer" field in the HierarchyEntries collection
-    const hierarchy = await HierarchyEntries.findOne({
-      dealer: dealer.code  // Use "dealer" field here instead of "dealers"
-    }).lean();
+   if (matchingEntries.length === 0) {
+     return res.status(404).json({ message: "No hierarchy entries found for the given name." });
+   }
 
-    // Collect hierarchy fields dynamically (excluding `_id`, `dealer`, `createdAt`, and `updatedAt`)
-    const hierarchyFields = {};
-    if (hierarchy) {
-      Object.entries(hierarchy).forEach(([key, value]) => {
-        if (!['_id', 'dealer', 'createdAt', 'updatedAt', '__v'].includes(key)) {  // Excluding 'createdAt' and 'updatedAt'
-          hierarchyFields[key] = value || "N/A";
-          dynamicFieldsSet.add(key);
-        }
-      });
-    }
+   // Step 2: Extract dealer codes from matching entries
+   const dealerCodes = matchingEntries.map(entry => entry.dealer);
 
-    dealerData.push({
-      name: dealer.name || "N/A",
-      code: dealer.code || "N/A",
-      latitude: dealer.latitude || "N/A",
-      longitude: dealer.longitude || "N/A",
-      geotag_picture: dealer.geotag_picture || "N/A",
-      geotagging_status: dealer.geotag_picture ? "DONE" : "PENDING",
-      ...hierarchyFields
-    });
-  }
+   // Step 3: Find users (dealers) with latitude, longitude, and optionally geotag_picture
+   const dealers = await User.find({
+     code: { $in: dealerCodes },
+     latitude: { $ne: null },
+     longitude: { $ne: null },
+   }).select('name code geotag_picture latitude longitude');
 
-  // Static columns
-  const baseColumns = ["name", "code", "latitude", "longitude", "geotag_picture", "geotagging_status"];
-  // Dynamic hierarchy columns
-  const dynamicColumns = Array.from(dynamicFieldsSet);
-  const columns = [...baseColumns, ...dynamicColumns];
+   if (dealers.length === 0) {
+     return res.status(404).json({ message: "No geotagged dealers found." });
+   }
 
-  // Build CSV string
-  let csvContent = columns.join(",") + "\n";
-  dealerData.forEach(dealer => {
-    const row = columns.map(col => {
-      const val = dealer[col];
-      return typeof val === "string" ? val.replace(/,/g, "") : val;
-    });
-    csvContent += row.join(",") + "\n";
-  });
+   const dealerData = [];
+   const dynamicFieldsSet = new Set();
 
-  res.header("Content-Type", "text/csv");
-  res.header("Content-Disposition", "attachment; filename=geotagged_dealers_with_hierarchy.csv");
-  return res.status(200).send(csvContent);
-} catch (error) {
-  console.error("Error exporting geotagged dealers to CSV:", error);
-  return res.status(500).json({ error: "Internal Server Error" });
-}
+   for (const dealer of dealers) {
+     const hierarchy = matchingEntries.find(entry => entry.dealer === dealer.code);
+
+     const hierarchyFields = {};
+     if (hierarchy) {
+       Object.entries(hierarchy).forEach(([key, value]) => {
+         if (!['_id', 'dealer', 'createdAt', 'updatedAt', '__v'].includes(key)) {
+           hierarchyFields[key] = value || "N/A";
+           dynamicFieldsSet.add(key);
+         }
+       });
+     }
+
+     const geotagged = dealer.geotag_picture && dealer.geotag_picture.trim().toLowerCase() !== 'not available';
+
+     dealerData.push({
+       name: dealer.name || "N/A",
+       code: dealer.code || "N/A",
+       latitude: dealer.latitude || "N/A",
+       longitude: dealer.longitude || "N/A",
+       geotag_picture: dealer.geotag_picture || "N/A",
+       geotagging_status: geotagged ? "DONE" : "PENDING",
+       ...hierarchyFields
+     });
+   }
+
+   const baseColumns = ["name", "code", "latitude", "longitude", "geotag_picture", "geotagging_status"];
+   const dynamicColumns = Array.from(dynamicFieldsSet);
+   const columns = [...baseColumns, ...dynamicColumns];
+
+   let csvContent = columns.join(",") + "\n";
+   dealerData.forEach(dealer => {
+     const row = columns.map(col => {
+       const val = dealer[col];
+       return typeof val === "string" ? val.replace(/,/g, "") : val;
+     });
+     csvContent += row.join(",") + "\n";
+   });
+
+   res.header("Content-Type", "text/csv");
+   res.header("Content-Disposition", "attachment; filename=geotagged_dealers_with_hierarchy.csv");
+   return res.status(200).send(csvContent);
+ } catch (error) {
+   console.error("Error exporting geotagged dealers to CSV:", error);
+   return res.status(500).json({ error: "Internal Server Error" });
+ }
 };
+
