@@ -3,7 +3,7 @@ const ActorCode = require("../../model/ActorCode");
 const moment = require("moment");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
-const attendanceHelpers = require("../../helpers/attendanceHelper")
+const attendanceHelpers = require("../../helpers/attendanceHelper");
 const { Parser } = require("json2csv");
 const fs = require("fs");
 const fsPromises = require("fs/promises");
@@ -38,27 +38,27 @@ exports.punchIn = async (req, res) => {
     // // Dynamic hierarchy handling logic
     // const userHierarchies = await HierarchyEntries.find({});
     const userHierarchies = await HierarchyEntries.find({
-     $or: Object.keys(HierarchyEntries.schema.obj)
-       .filter(key => !["_id", "__v", "hierarchy_name"].includes(key))
-       .map(key => ({ [key]: code }))
-   });
-   
-   const allCodesSet = new Set();
+      $or: Object.keys(HierarchyEntries.schema.obj)
+        .filter((key) => !["_id", "__v", "hierarchy_name"].includes(key))
+        .map((key) => ({ [key]: code })),
+    });
 
-   userHierarchies.forEach((hierarchy) => {
-     Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
-       if (!["_id", "__v", "hierarchy_name"].includes(key)) {
-         if (Array.isArray(value)) {
-           value.forEach(v => v && allCodesSet.add(v));
-         } else if (value) {
-           allCodesSet.add(value);
-         }
-       }
-     });
-   });
+    const allCodesSet = new Set();
 
-   const allCodes = Array.from(allCodesSet);
-    
+    userHierarchies.forEach((hierarchy) => {
+      Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
+        if (!["_id", "__v", "hierarchy_name"].includes(key)) {
+          if (Array.isArray(value)) {
+            value.forEach((v) => v && allCodesSet.add(v));
+          } else if (value) {
+            allCodesSet.add(value);
+          }
+        }
+      });
+    });
+
+    const allCodes = Array.from(allCodesSet);
+
     if (!allCodes.length) {
       return res
         .status(404)
@@ -66,16 +66,15 @@ exports.punchIn = async (req, res) => {
     }
 
     const relatedUsers = await User.aggregate([
-     {
-       $match: {
-         code: { $in: allCodes },
-         latitude: { $type: "decimal" },
-         longitude: { $type: "decimal" },
-       },
-     },
-     { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
-   ]);
-   
+      {
+        $match: {
+          code: { $in: allCodes },
+          latitude: { $type: "decimal" },
+          longitude: { $type: "decimal" },
+        },
+      },
+      { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
+    ]);
 
     if (!relatedUsers.length) {
       return res
@@ -95,7 +94,12 @@ exports.punchIn = async (req, res) => {
 
       if (isNaN(relLat) || isNaN(relLon)) return;
 
-      const distance = attendanceHelpers.getDistance(userLat, userLon, relLat, relLon);
+      const distance = attendanceHelpers.getDistance(
+        userLat,
+        userLon,
+        relLat,
+        relLon
+      );
       if (distance < minDistance) {
         minDistance = distance;
         nearestUser = relUser;
@@ -103,37 +107,41 @@ exports.punchIn = async (req, res) => {
     });
 
     if (!nearestUser || minDistance > 100) {
-     return res.status(200).json({
-       warning: true,
-       message: `You are too far  — approx ${minDistance.toFixed(
-         2
-       )} meters away. Please move closer to a hierarchy member and try again.`,
-     });
-   }
-   
+      return res.status(200).json({
+        warning: true,
+        message: `You are too far  — approx ${minDistance.toFixed(
+          2
+        )} meters away. Please move closer to a hierarchy member and try again.`,
+      });
+    }
 
-   if (!req.file) {
-    return res.status(200).json({
-      warning: true,
-      message: "Please capture an image.",
-    });
-  }
-  
+    if (!req.file) {
+      return res.status(200).json({
+        warning: true,
+        message: "Please capture an image.",
+      });
+    }
+
     // Upload to Cloudinary
     const result = await cloudinary.uploader.upload(req.file.path, {
-     folder: "gpunchInImage",
-     resource_type: "image",
-   });
-  
+      folder: "gpunchInImage",
+      resource_type: "image",
+      transformation: [
+        { width: 800, height: 800, crop: "limit" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
+    });
+
     // delete temp file
-    if (req.file?.path) {
-     try {
-       await fsPromises.unlink(req.file.path);
-       console.log("Temp file deleted:", req.file.path);
-     } catch (err) {
-       console.error("Failed to delete temp file:", err);
-     }
-   }
+    try {
+      if (req.file?.path) {
+        await fsPromises.unlink(req.file.path);
+        console.log("Temp file deleted:", req.file.path);
+      }
+    } catch (err) {
+      console.error("Failed to delete temp file:", err);
+    }
 
     const attendance = new Attendance({
       code,
@@ -162,247 +170,286 @@ exports.punchIn = async (req, res) => {
 
 // punch out
 exports.punchOut = async (req, res) => {
- try {
-   const { latitude, longitude, dealerCode } = req.body;
-   const { code } = req.user;
+  try {
+    const { latitude, longitude, dealerCode } = req.body;
+    const { code } = req.user;
 
-   if (!code) {
-     return res.status(400).json({ message: "User code is missing in token." });
-   }
+    if (!code) {
+      return res
+        .status(400)
+        .json({ message: "User code is missing in token." });
+    }
 
-   if (!req.file) {
-     // ✅ Moved image check earlier to avoid unnecessary processing
-     return res.status(400).json({ success: false, message: "Please capture an image." });
-   }
+    if (!req.file) {
+      // ✅ Moved image check earlier to avoid unnecessary processing
+      return res
+        .status(400)
+        .json({ success: false, message: "Please capture an image." });
+    }
 
-   const formattedDate = moment().format("YYYY-MM-DD");
-   const punchOutTime = moment().format("YYYY-MM-DD HH:mm:ss");
+    const formattedDate = moment().format("YYYY-MM-DD");
+    const punchOutTime = moment().format("YYYY-MM-DD HH:mm:ss");
 
-   const attendance = await Attendance.findOne({ code, date: formattedDate });
-   if (!attendance) {
-     return res.status(200).json({ warning: true, message: "You have not punched in yet for today." });
-   }
+    const attendance = await Attendance.findOne({ code, date: formattedDate });
+    if (!attendance) {
+      return res.status(200).json({
+        warning: true,
+        message: "You have not punched in yet for today.",
+      });
+    }
 
-   if (attendance.punchOut) {
-     return res.status(200).json({ warning: true, message: "You have already punched out today." });
-   }
+    if (attendance.punchOut) {
+      return res.status(200).json({
+        warning: true,
+        message: "You have already punched out today.",
+      });
+    }
 
-   let userLat = parseFloat(latitude);
-   let userLon = parseFloat(longitude);
-   let nearestUser = null;
-   let minDistance = Infinity;
-   let punchOutFrom = null;
+    let userLat = parseFloat(latitude);
+    let userLon = parseFloat(longitude);
+    let nearestUser = null;
+    let minDistance = Infinity;
+    let punchOutFrom = null;
 
-   // ✅ Check if this user has a dealer entry
-   const dealerAssigned = await HierarchyEntries.findOne({ dealer: code });
+    // ✅ Check if this user has a dealer entry
+    const dealerAssigned = await HierarchyEntries.findOne({ dealer: code });
 
-   if (!dealerAssigned) {
-     // If no dealer is assigned, check related hierarchy members' locations
-     const allHierarchies = await HierarchyEntries.find({});
+    if (!dealerAssigned) {
+      // If no dealer is assigned, check related hierarchy members' locations
+      const allHierarchies = await HierarchyEntries.find({});
 
-     const matchedHierarchies = allHierarchies.filter((hierarchy) => {
-       const keys = Object.keys(hierarchy.toObject()).filter(
-         (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-       );
-       return keys.some((key) => hierarchy[key] === code);
-     });
+      const matchedHierarchies = allHierarchies.filter((hierarchy) => {
+        const keys = Object.keys(hierarchy.toObject()).filter(
+          (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
+        );
+        return keys.some((key) => hierarchy[key] === code);
+      });
 
-     let allCodes = [];
-     matchedHierarchies.forEach((hierarchy) => {
-       const keys = Object.keys(hierarchy.toObject()).filter(
-         (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-       );
-       const relatedCodes = keys
-         .flatMap((key) => hierarchy[key])
-         .filter(Boolean);
-       allCodes.push(...relatedCodes);
-     });
+      let allCodes = [];
+      matchedHierarchies.forEach((hierarchy) => {
+        const keys = Object.keys(hierarchy.toObject()).filter(
+          (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
+        );
+        const relatedCodes = keys
+          .flatMap((key) => hierarchy[key])
+          .filter(Boolean);
+        allCodes.push(...relatedCodes);
+      });
 
-     allCodes = [...new Set(allCodes)];
+      allCodes = [...new Set(allCodes)];
 
-     const relatedUsers = await User.aggregate([
-       {
-         $match: {
-           code: { $in: allCodes },
-           latitude: { $type: "decimal" },
-           longitude: { $type: "decimal" },
-         },
-       },
-       {
-         $project: {
-           code: 1,
-           name: 1,
-           latitude: 1,
-           longitude: 1,
-         },
-       },
-     ]);
+      const relatedUsers = await User.aggregate([
+        {
+          $match: {
+            code: { $in: allCodes },
+            latitude: { $type: "decimal" },
+            longitude: { $type: "decimal" },
+          },
+        },
+        {
+          $project: {
+            code: 1,
+            name: 1,
+            latitude: 1,
+            longitude: 1,
+          },
+        },
+      ]);
 
-     relatedUsers.forEach((relUser) => {
-       const relLat = parseFloat(relUser.latitude);
-       const relLon = parseFloat(relUser.longitude);
-       if (isNaN(relLat) || isNaN(relLon)) return;
+      relatedUsers.forEach((relUser) => {
+        const relLat = parseFloat(relUser.latitude);
+        const relLon = parseFloat(relUser.longitude);
+        if (isNaN(relLat) || isNaN(relLon)) return;
 
-       const distance = attendanceHelpers.getDistance(userLat, userLon, relLat, relLon);
-       if (distance < minDistance) {
-         minDistance = distance;
-         nearestUser = relUser;
-       }
-     });
+        const distance = attendanceHelpers.getDistance(
+          userLat,
+          userLon,
+          relLat,
+          relLon
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestUser = relUser;
+        }
+      });
 
-     if (!nearestUser || minDistance > 100) {
-       return res.status(400).json({
-         warning: true,
-         message: `You are too far from any related hierarchy member — approx ${minDistance.toFixed(
-           2
-         )} meters away.`,
-       });
-     }
+      if (!nearestUser || minDistance > 100) {
+        return res.status(400).json({
+          warning: true,
+          message: `You are too far from any related hierarchy member — approx ${minDistance.toFixed(
+            2
+          )} meters away.`,
+        });
+      }
 
-     punchOutFrom = nearestUser.code || "UNKNOWN";
+      punchOutFrom = nearestUser.code || "UNKNOWN";
+    } else {
+      // If dealer is assigned, proceed with the dealer code logic
+      if (dealerCode) {
+        const selectedDealer = await User.findOne({ code: dealerCode });
 
-   } else {
-     // If dealer is assigned, proceed with the dealer code logic
-     if (dealerCode) {
-       const selectedDealer = await User.findOne({ code: dealerCode });
+        if (
+          !selectedDealer ||
+          !selectedDealer.latitude ||
+          !selectedDealer.longitude
+        ) {
+          return res.status(404).json({
+            warning: true,
+            message: "Dealer location not found or invalid dealer code.",
+          });
+        }
 
-       if (!selectedDealer || !selectedDealer.latitude || !selectedDealer.longitude) {
-         return res.status(404).json({
-           warning: true,
-           message: "Dealer location not found or invalid dealer code.",
-         });
-       }
+        const dealerLat = parseFloat(selectedDealer.latitude);
+        const dealerLon = parseFloat(selectedDealer.longitude);
 
-       const dealerLat = parseFloat(selectedDealer.latitude);
-       const dealerLon = parseFloat(selectedDealer.longitude);
+        const distance = attendanceHelpers.getDistance(
+          userLat,
+          userLon,
+          dealerLat,
+          dealerLon
+        );
 
-       const distance = attendanceHelpers.getDistance(userLat, userLon, dealerLat, dealerLon);
+        if (distance > 100) {
+          return res.status(200).json({
+            warning: true,
+            message: `You are too far from the selected dealer — approx ${distance.toFixed(
+              2
+            )} meters away.`,
+          });
+        }
 
-       if (distance > 100) {
-         return res.status(200).json({
-           warning: true,
-           message: `You are too far from the selected dealer — approx ${distance.toFixed(2)} meters away.`,
-         });
-       }
+        nearestUser = selectedDealer;
+        // Check hierarchy to assign punch-out location
+        const allHierarchies = await HierarchyEntries.find({});
+        for (const entry of allHierarchies) {
+          const hierarchyData = entry.toObject();
+          const keys = Object.keys(hierarchyData).filter(
+            (key) => !["_id", "hierarchy_name", "__v"].includes(key)
+          );
 
-       nearestUser = selectedDealer;
-       // Check hierarchy to assign punch-out location
-       const allHierarchies = await HierarchyEntries.find({});
-       for (const entry of allHierarchies) {
-         const hierarchyData = entry.toObject();
-         const keys = Object.keys(hierarchyData).filter(key => !["_id", "hierarchy_name", "__v"].includes(key));
+          for (const key of keys) {
+            const dealersList = hierarchyData[key];
+            if (
+              Array.isArray(dealersList) &&
+              dealersList.includes(dealerCode)
+            ) {
+              punchOutFrom = key;
+              break;
+            }
+          }
 
-         for (const key of keys) {
-           const dealersList = hierarchyData[key];
-           if (Array.isArray(dealersList) && dealersList.includes(dealerCode)) {
-             punchOutFrom = key;
-             break;
-           }
-         }
+          if (punchOutFrom) break;
+        }
 
-         if (punchOutFrom) break;
-       }
+        if (!punchOutFrom) {
+          punchOutFrom = "UNKNOWN";
+        }
+      }
+    }
 
-       if (!punchOutFrom) {
-         punchOutFrom = "UNKNOWN";
-       }
-     }
-   }
+    // ✅ Upload image
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "gpunchOutImage",
+      resource_type: "image",
+      transformation: [
+        { width: 800, height: 800, crop: "limit" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
+    });
 
-   // ✅ Upload image
-   const result = await cloudinary.uploader.upload(req.file.path, {
-     folder: "gpunchOutImage",
-     resource_type: "image",
-   });
+   // delete temp file
+   try {
+    if (req.file?.path) {
+      await fsPromises.unlink(req.file.path);
+      console.log("Temp file deleted:", req.file.path);
+    }
+  } catch (err) {
+    console.error("Failed to delete temp file:", err);
+  }
 
-   // ✅ Delete temp image
-   fs.unlink(req.file.path, (err) => {
-     if (err) console.error("Failed to delete temp file:", err);
-   });
+    const punchOutImage = result.secure_url;
 
-   const punchOutImage = result.secure_url;
+    const durationMinutes = moment(punchOutTime).diff(
+      moment(attendance.punchIn),
+      "minutes"
+    );
+    const hoursWorked = (durationMinutes / 60).toFixed(2);
 
-   const durationMinutes = moment(punchOutTime).diff(moment(attendance.punchIn), "minutes");
-   const hoursWorked = (durationMinutes / 60).toFixed(2);
+    let status = "Present";
+    if (hoursWorked <= 4) status = "Absent";
+    else if (hoursWorked < 8) status = "Half Day";
 
-   let status = "Present";
-   if (hoursWorked <= 4) status = "Absent";
-   else if (hoursWorked < 8) status = "Half Day";
+    attendance.punchOut = punchOutTime;
+    attendance.punchOutImage = punchOutImage;
+    attendance.status = status;
+    attendance.punchOutLatitude = latitude;
+    attendance.punchOutLongitude = longitude;
+    attendance.hoursWorked = parseFloat(hoursWorked);
+    attendance.punchOutCode = nearestUser.code;
+    attendance.punchOutName = nearestUser.name;
+    attendance.punchOutFrom = punchOutFrom;
 
-   attendance.punchOut = punchOutTime;
-   attendance.punchOutImage = punchOutImage;
-   attendance.status = status;
-   attendance.punchOutLatitude = latitude;
-   attendance.punchOutLongitude = longitude;
-   attendance.hoursWorked = parseFloat(hoursWorked);
-   attendance.punchOutCode = nearestUser.code;
-   attendance.punchOutName = nearestUser.name;
-   attendance.punchOutFrom = punchOutFrom;
+    await attendance.save();
 
-   await attendance.save();
-
-   res.status(201).json({
-     message: "Punch-out recorded successfully",
-     attendance: {
-       ...attendance.toObject(),
-       punchOutCode: nearestUser.code,
-       punchOutName: nearestUser.name,
-       punchOutFrom: punchOutFrom,
-       punchOutLatitude: latitude,
-       punchOutLongitude: longitude,
-     },
-   });
- } catch (error) {
-   res.status(500).json({
-     message: "Error recording punch-out",
-     error: error.message,
-   });
-   console.error("Error:", error);
- }
+    res.status(201).json({
+      message: "Punch-out recorded successfully",
+      attendance: {
+        ...attendance.toObject(),
+        punchOutCode: nearestUser.code,
+        punchOutName: nearestUser.name,
+        punchOutFrom: punchOutFrom,
+        punchOutLatitude: latitude,
+        punchOutLongitude: longitude,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error recording punch-out",
+      error: error.message,
+    });
+    console.error("Error:", error);
+  }
 };
 
-
-
-
-
 exports.getAttendance = async (req, res) => {
- try {
-   // Fetch all attendance records
-   const attendanceRecords = await Attendance.find();
+  try {
+    // Fetch all attendance records
+    const attendanceRecords = await Attendance.find();
 
-   if (!attendanceRecords.length) {
-     return res.status(404).json({ message: "No attendance records found." });
-   }
+    if (!attendanceRecords.length) {
+      return res.status(404).json({ message: "No attendance records found." });
+    }
 
-   // Count total punches per code
-   const punchCounts = {};
-   attendanceRecords.forEach((record) => {
-     punchCounts[record.code] = (punchCounts[record.code] || 0) + 1;
-   });
+    // Count total punches per code
+    const punchCounts = {};
+    attendanceRecords.forEach((record) => {
+      punchCounts[record.code] = (punchCounts[record.code] || 0) + 1;
+    });
 
-   // For each attendance record, add user name and total punches
-   const attendanceWithDetails = await Promise.all(
-     attendanceRecords.map(async (record) => {
-       const user = await User.findOne({ code: record.code });
+    // For each attendance record, add user name and total punches
+    const attendanceWithDetails = await Promise.all(
+      attendanceRecords.map(async (record) => {
+        const user = await User.findOne({ code: record.code });
 
-       return {
-         ...record._doc,
-         name: user ? user.name : "Unknown",
-         totalPunches: punchCounts[record.code],
-       };
-     })
-   );
+        return {
+          ...record._doc,
+          name: user ? user.name : "Unknown",
+          totalPunches: punchCounts[record.code],
+        };
+      })
+    );
 
-   res.status(200).json({
-     message: "Attendance records fetched successfully",
-     attendance: attendanceWithDetails,
-   });
- } catch (error) {
-   res.status(500).json({
-     message: "Error fetching attendance",
-     error: error.message,
-   });
- }
+    res.status(200).json({
+      message: "Attendance records fetched successfully",
+      attendance: attendanceWithDetails,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching attendance",
+      error: error.message,
+    });
+  }
 };
 exports.getAttendanceForEmployee = async (req, res) => {
   const { code } = req.user;
@@ -1196,40 +1243,38 @@ exports.deleteAttendanceByID = async (req, res) => {
 };
 
 exports.getJaipurDealers = async (req, res) => {
- try {
+  try {
+    const { search } = req.query;
 
-   const { search } = req.query;
+    // Build the search query object
+    let searchQuery = { district: "Jaipur" };
 
-   // Build the search query object
-   let searchQuery = { district: 'Jaipur' };
+    // If a search term is provided, add it to the query for name and code fields
+    if (search) {
+      searchQuery = {
+        $or: [
+          { name: { $regex: search, $options: "i" } }, // Case-insensitive search for name
+          { code: { $regex: search, $options: "i" } }, // Case-insensitive search for code
+          { district: { $regex: search, $options: "i" } }, // Case-insensitive search for district
+          { taluka: { $regex: search, $options: "i" } }, // Case-insensitive search for taluka
+          { zone: { $regex: search, $options: "i" } }, // Case-insensitive search for zone
+        ],
+      };
+    }
 
-   // If a search term is provided, add it to the query for name and code fields
-   if (search) {
-     searchQuery = {
-       $or: [
-         { name: { $regex: search, $options: 'i' } }, // Case-insensitive search for name
-         { code: { $regex: search, $options: 'i' } }, // Case-insensitive search for code
-         { district: { $regex: search, $options: 'i' } }, // Case-insensitive search for district
-         { taluka: { $regex: search, $options: 'i' } }, // Case-insensitive search for taluka
-         { zone: { $regex: search, $options: 'i' } }, // Case-insensitive search for zone
-       ]
-     };
-   }
+    // Fetch the dealers based on the search query
+    const jaipurDealers = await User.find(searchQuery);
 
-   // Fetch the dealers based on the search query
-   const jaipurDealers = await User.find(searchQuery);
+    if (jaipurDealers.length === 0) {
+      return res.status(404).json({ message: "No dealers found" });
+    }
 
-   if (jaipurDealers.length === 0) {
-     return res.status(404).json({ message: 'No dealers found' });
-   }
-
-   res.status(200).json({
-     message: 'Dealers fetched successfully',
-     data: jaipurDealers,
-   });
- } catch (error) {
-   console.error('Error in getting dealers:', error);
-   res.status(500).json({ message: 'Internal Server Error' });
- }
+    res.status(200).json({
+      message: "Dealers fetched successfully",
+      data: jaipurDealers,
+    });
+  } catch (error) {
+    console.error("Error in getting dealers:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
 };
-
