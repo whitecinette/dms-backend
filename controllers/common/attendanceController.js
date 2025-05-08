@@ -123,14 +123,36 @@ exports.punchIn = async (req, res) => {
     }
 
     // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "gpunchInImage",
-      resource_type: "image",
-      transformation: [
-        { width: 800, height: 800, crop: "limit" },
-        { quality: "auto" },
-        { fetch_format: "auto" },
-      ],
+    // const result = await cloudinary.uploader.upload(req.file.path, {
+    //   folder: "gpunchInImage",
+    //   resource_type: "image",
+    //   transformation: [
+    //     { width: 800, height: 800, crop: "limit" },
+    //     { quality: "auto" },
+    //     { fetch_format: "auto" },
+    //   ],
+    // });
+    // compressed image file
+    const compressedBuffer = req.compressedImageBuffer;
+    // store image as name and time
+    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+    const publicId = `${code}_${timestamp}`;
+  
+
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader
+        .upload_stream(
+          {
+            folder: "gpunchInImage",
+            public_id: publicId, // <- set custom name here
+            resource_type: "image",
+          },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        )
+        .end(compressedBuffer);
     });
 
     // delete temp file
@@ -347,26 +369,37 @@ exports.punchOut = async (req, res) => {
       }
     }
 
-    // ✅ Upload image
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "gpunchOutImage",
-      resource_type: "image",
-      transformation: [
-        { width: 800, height: 800, crop: "limit" },
-        { quality: "auto" },
-        { fetch_format: "auto" },
-      ],
+    const compressedBuffer = req.compressedImageBuffer;
+    // store image as name and time
+    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+    const publicId = `${code}_${timestamp}`;
+  
+
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader
+        .upload_stream(
+          {
+            folder: "gpunchInImage",
+            public_id: publicId, // <- set custom name here
+            resource_type: "image",
+          },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        )
+        .end(compressedBuffer);
     });
 
-   // delete temp file
-   try {
-    if (req.file?.path) {
-      await fsPromises.unlink(req.file.path);
-      console.log("Temp file deleted:", req.file.path);
+    // delete temp file
+    try {
+      if (req.file?.path) {
+        await fsPromises.unlink(req.file.path);
+        console.log("Temp file deleted:", req.file.path);
+      }
+    } catch (err) {
+      console.error("Failed to delete temp file:", err);
     }
-  } catch (err) {
-    console.error("Failed to delete temp file:", err);
-  }
 
     const punchOutImage = result.secure_url;
 

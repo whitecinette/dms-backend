@@ -3,10 +3,11 @@ const { punchIn, punchOut,  getAttendanceForEmployee, getAttendance, requestLeav
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const { upload } = require("../services/fileUpload");
 const upload_img = require('../middlewares/upload');
+const imageCompressor = require('../middlewares/imageCompressor');
 const router = express.Router();
 
-router.post('/punch-in', upload_img.single('punchInImage'), userAuth, punchIn);
-router.post('/punch-out', upload_img.single('punchOutImage'), userAuth, punchOut);
+router.post('/punch-in', upload_img.single('punchInImage'), imageCompressor, userAuth, punchIn);
+router.post('/punch-out', upload_img.single('punchOutImage'), userAuth, imageCompressor, punchOut);
 
 
 router.get('/get-attandance', userAuth, getAttendanceForEmployee);
