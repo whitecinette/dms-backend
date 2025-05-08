@@ -323,7 +323,13 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
       name: req.user.name,
     };
 
-    // Prepare filters for relevant beat mapping schedules
+    // Merge itinerary values into a single normalized list
+    const itineraryValues = [
+      ...(itinerary?.district || []),
+      ...(itinerary?.zone || []),
+      ...(itinerary?.taluka || [])
+    ].map(str => str.toLowerCase().trim());
+
     const dateFilter = {
       startDate: { $lte: new Date(endDate) },
       endDate: { $gte: new Date(startDate) },
@@ -334,36 +340,37 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
     const removedFromBeatMapping = [];
 
     for (let schedule of matchingSchedules) {
-  const originalSchedule = [...schedule.schedule];
-  const talukas = itinerary?.taluka ?? [];
-  const zones = itinerary?.zone ?? [];
-  const districts = itinerary?.district ?? [];
+      const originalSchedule = [...schedule.schedule];
 
-  const updatedSchedule = schedule.schedule.filter(d => {
-    const talukaMatch = d.taluka && talukas.includes(d.taluka.trim());
-    const zoneMatch = d.zone && zones.includes(d.zone.trim());
-    const districtMatch = d.district && districts.includes(d.district.trim());
-    return !(talukaMatch || zoneMatch || districtMatch);
-  });
+      const updatedSchedule = schedule.schedule.filter(dealer => {
+        const dealerFields = [
+          dealer.district,
+          dealer.zone,
+          dealer.taluka
+        ].filter(Boolean).map(str => str.toLowerCase().trim());
 
-  if (updatedSchedule.length < schedule.schedule.length) {
-    const updatedCodes = new Set(updatedSchedule.map(u => u.code));
-    const removedDealers = originalSchedule.filter(d => !updatedCodes.has(d.code));
+        const hasMatch = dealerFields.some(val => itineraryValues.includes(val));
+        return !hasMatch;
+      });
 
-    removedFromBeatMapping.push({
-      beatMappingId: schedule._id,
-      startDate: schedule.startDate,
-      endDate: schedule.endDate,
-      removedDealers,
-    });
+      if (updatedSchedule.length < schedule.schedule.length) {
+        const updatedCodes = new Set(updatedSchedule.map(u => u.code));
+        const removedDealers = originalSchedule.filter(d => !updatedCodes.has(d.code));
 
-    schedule.schedule = updatedSchedule;
-    schedule.total = updatedSchedule.length;
-    schedule.done = updatedSchedule.filter(d => d.status === "done").length;
-    schedule.pending = updatedSchedule.filter(d => d.status !== "done").length;
-    await schedule.save();
-  }
-}
+        removedFromBeatMapping.push({
+          beatMappingId: schedule._id,
+          startDate: schedule.startDate,
+          endDate: schedule.endDate,
+          removedDealers,
+        });
+
+        schedule.schedule = updatedSchedule;
+        schedule.total = updatedSchedule.length;
+        schedule.done = updatedSchedule.filter(d => d.status === "done").length;
+        schedule.pending = updatedSchedule.filter(d => d.status !== "done").length;
+        await schedule.save();
+      }
+    }
 
     // Archive everything in one DeletedData document
     await DeletedData.create({
