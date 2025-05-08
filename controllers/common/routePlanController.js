@@ -317,18 +317,33 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
       return res.status(404).json({ success: false, message: "Route not found" });
     }
 
-    const { code, itinerary, startDate, endDate } = route;
+    const { code, startDate, endDate } = route;
+
+    // ✅ Ensure itinerary is a plain object
+    const itineraryRaw = route.itinerary || {};
+    const itinerary =
+      itineraryRaw instanceof Map
+        ? Object.fromEntries(itineraryRaw)
+        : typeof itineraryRaw.toObject === 'function'
+        ? itineraryRaw.toObject()
+        : itineraryRaw;
+
+    console.log("📦 Raw itinerary from DB:", itinerary);
+
     const deletedBy = {
       code: req.user.code,
       name: req.user.name,
     };
 
-    // Merge itinerary values into a single normalized list
-    const itineraryValues = [
-      ...(itinerary?.district || []),
-      ...(itinerary?.zone || []),
-      ...(itinerary?.taluka || [])
-    ].map(str => str.toLowerCase().trim());
+    const itineraryDistricts = new Set((itinerary.district || []).map(v => v.toLowerCase().trim()));
+    const itineraryZones = new Set((itinerary.zone || []).map(v => v.toLowerCase().trim()));
+    const itineraryTalukas = new Set((itinerary.taluka || []).map(v => v.toLowerCase().trim()));
+
+    console.log("🧭 Itinerary to match:", {
+      districts: [...itineraryDistricts],
+      zones: [...itineraryZones],
+      talukas: [...itineraryTalukas],
+    });
 
     const dateFilter = {
       startDate: { $lte: new Date(endDate) },
@@ -339,24 +354,29 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
     const matchingSchedules = await WeeklyBeatMappingSchedule.find(dateFilter);
     const removedFromBeatMapping = [];
 
-    for (let schedule of matchingSchedules) {
+    for (const schedule of matchingSchedules) {
       const originalSchedule = [...schedule.schedule];
 
       const updatedSchedule = schedule.schedule.filter(dealer => {
-        const dealerFields = [
-          dealer.district,
-          dealer.zone,
-          dealer.taluka
-        ].filter(Boolean).map(str => str.toLowerCase().trim());
+        const district = (dealer.district || "").toLowerCase().trim();
+        const zone = (dealer.zone || "").toLowerCase().trim();
+        const taluka = (dealer.taluka || "").toLowerCase().trim();
 
-        const hasMatch = dealerFields.some(val => itineraryValues.includes(val));
-        return !hasMatch;
+        const match =
+          itineraryDistricts.has(district) ||
+          itineraryZones.has(zone) ||
+          itineraryTalukas.has(taluka);
+
+        if (match) {
+          console.log(`🗑️ Deleting: ${dealer.name} (${dealer.code}) | D: ${district}, Z: ${zone}, T: ${taluka}`);
+        }
+
+        return !match; // ✅ Keep only non-matching
       });
 
-      if (updatedSchedule.length < schedule.schedule.length) {
-        const updatedCodes = new Set(updatedSchedule.map(u => u.code));
-        const removedDealers = originalSchedule.filter(d => !updatedCodes.has(d.code));
+      const removedDealers = schedule.schedule.filter(d => !updatedSchedule.some(u => u.code === d.code));
 
+      if (removedDealers.length > 0) {
         removedFromBeatMapping.push({
           beatMappingId: schedule._id,
           startDate: schedule.startDate,
@@ -372,7 +392,6 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
       }
     }
 
-    // Archive everything in one DeletedData document
     await DeletedData.create({
       collectionName: "RoutePlan+BeatMapping",
       data: {
@@ -385,13 +404,20 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
 
     await route.deleteOne();
 
-    return res.status(200).json({ success: true, message: "Route and related beat mapping dealers deleted and archived." });
+    return res.status(200).json({
+      success: true,
+      message: "Route and matching beat mapping dealers deleted.",
+      deletedDealers: removedFromBeatMapping.flatMap(d => d.removedDealers.map(x => x.code)),
+    });
 
   } catch (error) {
-    console.error("Error in deleteRoutePlanAndUpdateBeatMapping:", error);
+    console.error("❌ Error in deleteRoutePlanAndUpdateBeatMapping:", error);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+
+
 
 
 
