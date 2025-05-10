@@ -20,6 +20,12 @@ exports.punchIn = async (req, res) => {
       return res
         .status(400)
         .json({ message: "User code is missing in token." });
+        if (!req.file) {
+         return res.status(200).json({
+           warning: true,
+           message: "Please capture an image.",
+         });
+       }
 
     const formattedDate = moment().format("YYYY-MM-DD");
     const punchInTime = moment().format("YYYY-MM-DD HH:mm:ss");
@@ -35,8 +41,7 @@ exports.punchIn = async (req, res) => {
       });
     }
 
-    // // Dynamic hierarchy handling logic
-    // const userHierarchies = await HierarchyEntries.find({});
+// Dynamic hierarchy handling 
     const userHierarchies = await HierarchyEntries.find({
       $or: Object.keys(HierarchyEntries.schema.obj)
         .filter((key) => !["_id", "__v", "hierarchy_name"].includes(key))
@@ -114,13 +119,6 @@ exports.punchIn = async (req, res) => {
         )} meters away. Please move closer to a hierarchy member and try again.`,
       });
     }
-
-    if (!req.file) {
-      return res.status(200).json({
-        warning: true,
-        message: "Please capture an image.",
-      });
-    }
   // store image as name and time
   const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
   const publicId = `${code}_${timestamp}`;
@@ -159,15 +157,12 @@ exports.punchIn = async (req, res) => {
     });
 
     await attendance.save();
-
     res
       .status(201)
       .json({ message: "Punch-in recorded successfully", attendance });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error recording punch-in", error: error.message });
-    console.log("errorrr:", error);
+   console.error("Error during punch-in:", error);
+   res.status(500).json({ message: "Error recording punch in. please try again later" });
   }
 };
 
@@ -184,7 +179,6 @@ exports.punchOut = async (req, res) => {
     }
 
     if (!req.file) {
-      // ✅ Moved image check earlier to avoid unnecessary processing
       return res
         .status(400)
         .json({ success: false, message: "Please capture an image." });
@@ -409,11 +403,8 @@ exports.punchOut = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      message: "Error recording punch-out",
-      error: error.message,
-    });
-    console.error("Error:", error);
+   console.error("Error during punch-out:", error);
+    res.status(500).json({ message: "Error recording punch out. please try again later" });
   }
 };
 
