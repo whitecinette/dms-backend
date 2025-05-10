@@ -20,12 +20,12 @@ exports.punchIn = async (req, res) => {
       return res
         .status(400)
         .json({ message: "User code is missing in token." });
-        if (!req.file) {
-         return res.status(200).json({
-           warning: true,
-           message: "Please capture an image.",
-         });
-       }
+    if (!req.file) {
+      return res.status(200).json({
+        warning: true,
+        message: "Please capture an image.",
+      });
+    }
 
     const formattedDate = moment().format("YYYY-MM-DD");
     const punchInTime = moment().format("YYYY-MM-DD HH:mm:ss");
@@ -41,7 +41,7 @@ exports.punchIn = async (req, res) => {
       });
     }
 
-// Dynamic hierarchy handling 
+    // Dynamic hierarchy handling
     const userHierarchies = await HierarchyEntries.find({
       $or: Object.keys(HierarchyEntries.schema.obj)
         .filter((key) => !["_id", "__v", "hierarchy_name"].includes(key))
@@ -119,9 +119,9 @@ exports.punchIn = async (req, res) => {
         )} meters away. Please move closer to a hierarchy member and try again.`,
       });
     }
-  // store image as name and time
-  const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
-  const publicId = `${code}_${timestamp}`;
+    // store image as name and time
+    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+    const publicId = `${code}_${timestamp}`;
 
     // Upload to Cloudinary
     const result = await cloudinary.uploader.upload(req.file.path, {
@@ -161,15 +161,17 @@ exports.punchIn = async (req, res) => {
       .status(201)
       .json({ message: "Punch-in recorded successfully", attendance });
   } catch (error) {
-   console.error("Error during punch-in:", error);
-   res.status(500).json({ message: "Error recording punch in. please try again later" });
+    console.error("Error during punch-in:", error);
+    res
+      .status(500)
+      .json({ message: "Error recording punch in. please try again later" });
   }
 };
 
 // punch out
 exports.punchOut = async (req, res) => {
   try {
-    const { latitude, longitude, dealerCode } = req.body;
+    const { latitude, longitude } = req.body;
     const { code } = req.user;
 
     if (!code) {
@@ -177,17 +179,18 @@ exports.punchOut = async (req, res) => {
         .status(400)
         .json({ message: "User code is missing in token." });
     }
-
     if (!req.file) {
       return res
         .status(400)
         .json({ success: false, message: "Please capture an image." });
     }
-
     const formattedDate = moment().format("YYYY-MM-DD");
     const punchOutTime = moment().format("YYYY-MM-DD HH:mm:ss");
 
-    const attendance = await Attendance.findOne({ code, date: formattedDate });
+    const attendance = await Attendance.findOne({
+      code,
+      date: formattedDate,
+    });
     if (!attendance) {
       return res.status(200).json({
         warning: true,
@@ -201,151 +204,102 @@ exports.punchOut = async (req, res) => {
         message: "You have already punched out today.",
       });
     }
+    const allHierarchies = await HierarchyEntries.find({});
+    const matchedHierarchies = allHierarchies.filter((hierarchy) => {
+      const fields = Object.keys(hierarchy.toObject()).filter(
+        (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
+      );
+      return fields.some((key) => hierarchy[key] === code);
+    });
+    const hasDealerField = matchedHierarchies.some((hierarchy) =>
+      Object.prototype.hasOwnProperty.call(hierarchy.toObject(), "dealer")
+    );
+    const isDealerAssigned = matchedHierarchies.some(
+      (hierarchy) => hierarchy.dealer === code
+    );
 
-    let userLat = parseFloat(latitude);
-    let userLon = parseFloat(longitude);
+    if (hasDealerField && !isDealerAssigned) {
+      return await attendanceHelpers.handlePunchOutWithoutDealer({
+        attendance,
+        req,
+        res,
+        punchOutTime,
+        latitude,
+        longitude,
+      });
+    }
+
+    // ✅ Proceed with hierarchy + distance check
+    const allCodesSet = new Set();
+    matchedHierarchies.forEach((hierarchy) => {
+      Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
+        if (!["_id", "__v", "hierarchy_name"].includes(key)) {
+          if (Array.isArray(value)) {
+            value.forEach((v) => v && allCodesSet.add(v));
+          } else if (value) {
+            allCodesSet.add(value);
+          }
+        }
+      });
+    });
+
+    const allCodes = Array.from(allCodesSet);
+
+    const relatedUsers = await User.aggregate([
+      {
+        $match: {
+          code: { $in: allCodes },
+          latitude: { $type: "decimal" },
+          longitude: { $type: "decimal" },
+        },
+      },
+      { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
+    ]);
+
+    if (!relatedUsers.length) {
+      return res
+        .status(404)
+        .json({ message: "No related users with location data found." });
+    }
+
+    const userLat = parseFloat(latitude);
+    const userLon = parseFloat(longitude);
+
     let nearestUser = null;
     let minDistance = Infinity;
-    let punchOutFrom = null;
 
-    // ✅ Check if this user has a dealer entry
-    const dealerAssigned = await HierarchyEntries.findOne({ dealer: code });
-
-    if (!dealerAssigned) {
-      // If no dealer is assigned, check related hierarchy members' locations
-      const allHierarchies = await HierarchyEntries.find({});
-
-      const matchedHierarchies = allHierarchies.filter((hierarchy) => {
-        const keys = Object.keys(hierarchy.toObject()).filter(
-          (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-        );
-        return keys.some((key) => hierarchy[key] === code);
-      });
-
-      let allCodes = [];
-      matchedHierarchies.forEach((hierarchy) => {
-        const keys = Object.keys(hierarchy.toObject()).filter(
-          (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-        );
-        const relatedCodes = keys
-          .flatMap((key) => hierarchy[key])
-          .filter(Boolean);
-        allCodes.push(...relatedCodes);
-      });
-
-      allCodes = [...new Set(allCodes)];
-
-      const relatedUsers = await User.aggregate([
-        {
-          $match: {
-            code: { $in: allCodes },
-            latitude: { $type: "decimal" },
-            longitude: { $type: "decimal" },
-          },
-        },
-        {
-          $project: {
-            code: 1,
-            name: 1,
-            latitude: 1,
-            longitude: 1,
-          },
-        },
-      ]);
-
-      relatedUsers.forEach((relUser) => {
-        const relLat = parseFloat(relUser.latitude);
-        const relLon = parseFloat(relUser.longitude);
-        if (isNaN(relLat) || isNaN(relLon)) return;
-
-        const distance = attendanceHelpers.getDistance(
-          userLat,
-          userLon,
-          relLat,
-          relLon
-        );
-        if (distance < minDistance) {
-          minDistance = distance;
-          nearestUser = relUser;
-        }
-      });
-
-      if (!nearestUser || minDistance > 100) {
-        return res.status(400).json({
-          warning: true,
-          message: `You are too far from any related hierarchy member — approx ${minDistance.toFixed(
-            2
-          )} meters away.`,
-        });
+    relatedUsers.forEach((relUser) => {
+      const relLat = parseFloat(relUser.latitude);
+      const relLon = parseFloat(relUser.longitude);
+      const distance = attendanceHelpers.getDistance(
+        userLat,
+        userLon,
+        relLat,
+        relLon
+      );
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestUser = relUser;
       }
+    });
 
-      punchOutFrom = nearestUser.code || "UNKNOWN";
-    } else {
-      // If dealer is assigned, proceed with the dealer code logic
-      if (dealerCode) {
-        const selectedDealer = await User.findOne({ code: dealerCode });
-
-        if (
-          !selectedDealer ||
-          !selectedDealer.latitude ||
-          !selectedDealer.longitude
-        ) {
-          return res.status(404).json({
-            warning: true,
-            message: "Dealer location not found or invalid dealer code.",
-          });
-        }
-
-        const dealerLat = parseFloat(selectedDealer.latitude);
-        const dealerLon = parseFloat(selectedDealer.longitude);
-
-        const distance = attendanceHelpers.getDistance(
-          userLat,
-          userLon,
-          dealerLat,
-          dealerLon
-        );
-
-        if (distance > 100) {
-          return res.status(200).json({
-            warning: true,
-            message: `You are too far from the selected dealer — approx ${distance.toFixed(
-              2
-            )} meters away.`,
-          });
-        }
-
-        nearestUser = selectedDealer;
-        // Check hierarchy to assign punch-out location
-        const allHierarchies = await HierarchyEntries.find({});
-        for (const entry of allHierarchies) {
-          const hierarchyData = entry.toObject();
-          const keys = Object.keys(hierarchyData).filter(
-            (key) => !["_id", "hierarchy_name", "__v"].includes(key)
-          );
-
-          for (const key of keys) {
-            const dealersList = hierarchyData[key];
-            if (
-              Array.isArray(dealersList) &&
-              dealersList.includes(dealerCode)
-            ) {
-              punchOutFrom = key;
-              break;
-            }
-          }
-
-          if (punchOutFrom) break;
-        }
-
-        if (!punchOutFrom) {
-          punchOutFrom = "UNKNOWN";
-        }
-      }
+    if (!nearestUser || minDistance > 100) {
+      return res.status(200).json({
+        warning: true,
+        message: `You are too far — approx ${minDistance.toFixed(
+          2
+        )} meters away. Please move closer to a hierarchy member and try again.`,
+      });
     }
-     // store image as name and time
-  const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
-  const publicId = `${code}_${timestamp}`;
+
+    // ✅ Upload punch-out image
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please capture an image." });
+    } // store image as name and time
+    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+    const publicId = `${code}_${timestamp}`;
 
     // Upload to Cloudinary
     const result = await cloudinary.uploader.upload(req.file.path, {
@@ -387,7 +341,6 @@ exports.punchOut = async (req, res) => {
     attendance.hoursWorked = parseFloat(hoursWorked);
     attendance.punchOutCode = nearestUser.code;
     attendance.punchOutName = nearestUser.name;
-    attendance.punchOutFrom = punchOutFrom;
 
     await attendance.save();
 
@@ -397,14 +350,15 @@ exports.punchOut = async (req, res) => {
         ...attendance.toObject(),
         punchOutCode: nearestUser.code,
         punchOutName: nearestUser.name,
-        punchOutFrom: punchOutFrom,
         punchOutLatitude: latitude,
         punchOutLongitude: longitude,
       },
     });
   } catch (error) {
-   console.error("Error during punch-out:", error);
-    res.status(500).json({ message: "Error recording punch out. please try again later" });
+    console.error("Error during punch-out:", error);
+    res
+      .status(500)
+      .json({ message: "Error recording punch out. please try again later" });
   }
 };
 
