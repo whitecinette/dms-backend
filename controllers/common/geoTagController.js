@@ -171,7 +171,7 @@ exports.updateGeotagLatLong = async (req, res) => {
 
       // Create update record only if there are location changes
       await UpdatedData.create({
-        modelName: "GeoTag",
+        modelName: "User",
         modelId: updatedDealer._id,
         previousData: {
           latitude: previousDealer.latitude,
