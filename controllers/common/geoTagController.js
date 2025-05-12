@@ -195,11 +195,11 @@ exports.updateGeotagLatLong = async (req, res) => {
       dealer: updatedDealer,
     });
   } catch (error) {
-    console.error("Error updating dealer geotag:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-    });
+    console.error("Error during geo tagging:", error);
+    res
+      .status(500)
+      .json({ message: "Error recording geo tagging.network error please try again later" 
+     });
   }
 };
 
