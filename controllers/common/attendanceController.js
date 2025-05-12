@@ -10,7 +10,7 @@ const fsPromises = require("fs/promises");
 const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 
-// punch in
+// punch in api
 exports.punchIn = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
