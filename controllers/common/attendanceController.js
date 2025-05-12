@@ -723,12 +723,15 @@ exports.getAttendanceByDate = async (req, res) => {
       }, []);
     }
     let employeeFilter;
-    if (role === "admin") {
+    if (role === "super_admin") {
       // Step 2: Fetch Employees Based on Firm Filter (If Applied)
-      employeeFilter = { role: { $in: ["admin", "employee"] } };
+      employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
+    } else if (role === "admin") {
+      employeeFilter = { role: { $in: ["employee", "hr"] } };
     } else {
       employeeFilter = { role: { $in: ["employee"] } };
     }
+
     if (firmPositions.length > 0) {
       employeeFilter.position = { $in: firmPositions };
     }
@@ -823,8 +826,10 @@ exports.getLatestAttendance = async (req, res) => {
     }
 
     let employeeFilter;
-    if (role === "admin") {
-      employeeFilter = { role: { $in: ["admin", "employee"] } };
+    if (role === "super_admin") {
+      employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
+    } else if (role === "admin") {
+      employeeFilter = { role: { $in: ["employee", "hr"] } };
     } else {
       employeeFilter = { role: { $in: ["employee"] } };
     }
@@ -1017,7 +1022,7 @@ exports.downloadAllAttendance = async (req, res) => {
     }
 
     // Step 1: Fetch all employees first
-    let employeeFilter = { role: { $in: ["admin", "employee"] } };
+    let employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
     if (firmPositions.length) {
       employeeFilter.position = { $in: firmPositions };
     }
