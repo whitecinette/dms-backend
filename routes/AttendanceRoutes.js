@@ -14,6 +14,7 @@ const {
   downloadAllAttendance,
   deleteAttendanceByID,
   getJaipurDealers,
+  addAttendanceByAdmin,
 } = require("../controllers/common/attendanceController");
 const {
   userAuth,
@@ -59,4 +60,7 @@ router.delete(
 // get jaipur dealers
 
 router.get("/get-jaipur-dealers", getJaipurDealers);
+
+// add attendance by admin
+router.post("/add-attendance-by-admin", adminOrSuperAdminAuth, addAttendanceByAdmin);
 module.exports = router;

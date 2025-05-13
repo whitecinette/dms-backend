@@ -10,7 +10,7 @@ const fsPromises = require("fs/promises");
 const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 
-// punch in api
+// punch in
 exports.punchIn = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
@@ -961,7 +961,7 @@ exports.editAttendanceByID = async (req, res) => {
   try {
     const { role } = req.user;
     // Check if role is one of the allowed roles
-    if (!["admin", "superAdmin", "hr"].includes(role)) {
+    if (!["admin", "super_admin", "hr"].includes(role)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
     const { id } = req.params;
@@ -1231,5 +1231,136 @@ exports.getJaipurDealers = async (req, res) => {
   } catch (error) {
     console.error("Error in getting dealers:", error);
     res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+//add attendance by admin
+exports.addAttendanceByAdmin = async (req, res) => {
+  try {
+    const name = req.user.name;
+    const role = req.user.role;
+    const {
+      code,
+      date,
+      punchIn,
+      punchOut,
+      status = "Present",
+      latitude,
+      longitude,
+      remark,
+      punchOutLatitude,
+      punchOutLongitude,
+    } = req.body;
+
+    const user = await User.findOne({ code });
+
+    if (!user) {
+      return res.status(400).json({ message: "User not found" });
+    }
+
+    if (role === "admin" && user.role === "admin") {
+      return res
+        .status(400)
+        .json({ message: "You are not authorized to add attendance" });
+    }
+
+    // Validate required fields
+    if (!code || !date || !latitude || !longitude || !remark) {
+      return res.status(400).json({
+        message: "All fields are required",
+        received: { code, date, punchIn, latitude, longitude, remark },
+      });
+    }
+
+    let punchInDate = null;
+    let punchOutDate = null;
+    let hoursWorked = 0;
+    let existingAttendance = null;
+
+    // Handle punch-in
+    if (punchIn) {
+      existingAttendance = await Attendance.findOne({
+        code,
+        date: new Date(date),
+        punchIn: { $ne: null },
+      });
+
+      if (existingAttendance) {
+        return res.status(400).json({ message: "Attendance already exists" });
+      }
+      punchInDate = new Date(`${date}T${punchIn}`);
+    }
+
+    // Handle punch-out
+    if (punchOut) {
+      if (!punchOutLatitude || !punchOutLongitude) {
+        return res
+          .status(400)
+          .json({ message: "Punch out latitude and longitude are required" });
+      }
+
+      // If no punch-in provided, check for existing punch-in record
+      if (!punchIn) {
+        existingAttendance = await Attendance.findOne({
+          code,
+          date: new Date(date),
+          punchIn: { $ne: null },
+          punchOut: null, // Make sure we only get records that haven't been punched out
+        });
+
+        if (!existingAttendance) {
+          return res
+            .status(400)
+            .json({ message: "No punch-in record found for this date" });
+        }
+
+        punchInDate = existingAttendance.punchIn;
+      }
+
+      punchOutDate = new Date(`${date}T${punchOut}`);
+      hoursWorked = (punchOutDate - punchInDate) / (1000 * 60 * 60);
+    }
+
+    if (!punchInDate && !punchOutDate) {
+      return res
+        .status(400)
+        .json({ message: "Punch in and punch out are required" });
+    }
+
+    let attendance;
+    if (existingAttendance) {
+      // Update existing attendance record
+      existingAttendance.punchOut = punchOutDate;
+      existingAttendance.punchOutName = name;
+      existingAttendance.punchOutLatitude = punchOutLatitude;
+      existingAttendance.punchOutLongitude = punchOutLongitude;
+      existingAttendance.hoursWorked = hoursWorked.toFixed(2);
+      attendance = await existingAttendance.save();
+    } else {
+      // Create new attendance record
+      attendance = await Attendance.create({
+        code,
+        date: new Date(date),
+        status,
+        punchIn: punchInDate,
+        punchInName: name,
+        punchOut: punchOutDate,
+        punchOutName: punchOut ? name : null,
+        punchInLatitude: latitude,
+        punchInLongitude: longitude,
+        remark: remark,
+        punchOutLatitude: punchOutLatitude || null,
+        punchOutLongitude: punchOutLongitude || null,
+        hoursWorked: hoursWorked.toFixed(2),
+      });
+    }
+
+    return res.status(200).json({
+      message: "Attendance added successfully",
+      data: attendance,
+    });
+  } catch (error) {
+    console.error("Error adding attendance:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
