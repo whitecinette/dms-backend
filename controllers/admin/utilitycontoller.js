@@ -18,7 +18,7 @@ function formatSP10(
   spRequiredAds,
   currentMonth
 ) {
-  return `Target ${currentMonth} : ${spTarget} | Achievement: ${spAch} | Achievement %: ${spAchPercent}% | Required ADS: ${spRequiredAds}`;
+  return `Target ${currentMonth}: ${spTarget} | Achievement: ${spAch} | Achievement %: ${spAchPercent}% | Required ADS: ${spRequiredAds}`;
 }
 
 function formatBlackBox(
@@ -28,27 +28,73 @@ function formatBlackBox(
   bbRequiredAds,
   currentMonth
 ) {
-  return `Target ${currentMonth} : ${bbTarget} | Achievement: ${bbAch} | Achievement %: ${bbAchPercent}% | Required ADS: ${bbRequiredAds}`;
+  return `Target ${currentMonth}: ${bbTarget} | Achievement: ${bbAch} | Achievement %: ${bbAchPercent}% | Required ADS: ${bbRequiredAds}`;
+}
+function formatSP10Q(
+  spTarget,
+  spAch,
+  spAchPercent,
+  spRequiredAds,
+  currentMonth
+) {
+  return `Target Q2'25: ${spTarget} | Achievement: ${spAch} | Achievement %: ${spAchPercent}% | Required ADS: ${spRequiredAds}`;
 }
 
-function generateRow(original, daysLeft, currentMonth, currentDate) {
-  const spTarget = Number(original["10k SP Target"] || 0);
-  const spAch = Number(original["10k SP Ach"] || 0);
-  const bbTarget = Number(original["Black Box Target"] || 0);
-  const bbAch = Number(original["Black Box Ach"] || 0);
+function formatBlackBoxQ(
+  bbTarget,
+  bbAch,
+  bbAchPercent,
+  bbRequiredAds,
+  currentMonth
+) {
+  return `Target Q2'25: ${bbTarget} | Achievement: ${bbAch} | Achievement %: ${bbAchPercent}% | Required ADS: ${bbRequiredAds}`;
+}
 
+function CalculateSP10(spTarget, spAch, daysLeft) {
   const spAchPercent = spTarget
     ? ((spAch / spTarget) * 100).toFixed(2)
     : "0.00";
   const spRequiredAds =
     spTarget - spAch > 0 ? ((spTarget - spAch) / daysLeft).toFixed(1) : "0.0";
+  return {
+    spAchPercent,
+    spRequiredAds,
+  };
+}
 
+function CalculateBlackBox(bbTarget, bbAch, daysLeft) {
   const bbAchPercent = bbTarget ? ((bbAch / bbTarget) * 100).toFixed(1) : "0.0";
   const bbRequiredAds =
     bbTarget - bbAch > 0 ? ((bbTarget - bbAch) / daysLeft).toFixed(1) : "0.0";
+  return {
+    bbAchPercent,
+    bbRequiredAds,
+  };
+}
+
+function generateRow(original, daysLeft, currentMonth, currentDate) {
+  const spTargetMay = Number(original["10k SP Tgt May 25"] || 0);
+  const spAchMay = Number(original["10k SP Ach May 25"] || 0);
+  const bbTargetMay = Number(original["Black Box Tgt May 25"] || 0);
+  const bbAchMay = Number(original["Black Box Ach May 25"] || 0);
+  const spTargetQ2 = Number(original["10k SP Tgt Q2 25"] || 0);
+  const spAchQ2 = Number(original["10k SP Ach Q2 25"] || 0);
+  const bbTargetQ2 = Number(original["Black Box Tgt Q2 25"] || 0);
+  const bbAchQ2 = Number(original["Black Box Ach Q2 25"] || 0);
+
+  // Calculate percentages and required ADS for May
+  const { spAchPercent: spAchPercentMay, spRequiredAds: spRequiredAdsMay } =
+    CalculateSP10(spTargetMay, spAchMay, daysLeft);
+  const { bbAchPercent: bbAchPercentMay, bbRequiredAds: bbRequiredAdsMay } =
+    CalculateBlackBox(bbTargetMay, bbAchMay, daysLeft);
+
+  const { spAchPercent: spAchPercentQ2, spRequiredAds: spRequiredAdsQ2 } =
+    CalculateSP10(spTargetQ2, spAchQ2, daysLeft);
+  const { bbAchPercent: bbAchPercentQ2, bbRequiredAds: bbRequiredAdsQ2 } =
+    CalculateBlackBox(bbTargetQ2, bbAchQ2, daysLeft);
 
   return {
-    Name: original["DEALER Name"] || original["Dealer Name"],
+    Name: original["DEALER Name"] || original["Dealer Name"] || "",
     "Phone Number": original["Phone Number"] || "",
     "Country Code": original["Country Code"] || "91",
     Email: original["Email"] || "",
@@ -56,18 +102,32 @@ function generateRow(original, daysLeft, currentMonth, currentDate) {
     "User Id": original["User Id"] || "",
     City: original["City"] || "",
     Area: original["Area"] || "",
-    SP10: formatSP10(
-      spTarget,
-      spAch,
-      spAchPercent,
-      spRequiredAds,
+    "SP10 May 25": formatSP10(
+      spTargetMay,
+      spAchMay,
+      spAchPercentMay,
+      spRequiredAdsMay,
       currentMonth
     ),
-    Blackbox: formatBlackBox(
-      bbTarget,
-      bbAch,
-      bbAchPercent,
-      bbRequiredAds,
+    "Blackbox May 25": formatBlackBox(
+      bbTargetMay,
+      bbAchMay,
+      bbAchPercentMay,
+      bbRequiredAdsMay,
+      currentMonth
+    ),
+    "SP10 Q2 25": formatSP10Q(
+      spTargetQ2,
+      spAchQ2,
+      spAchPercentQ2,
+      spRequiredAdsQ2,
+      currentMonth
+    ),
+    "Blackbox Q2 25": formatBlackBoxQ(
+      bbTargetQ2,
+      bbAchQ2,
+      bbAchPercentQ2,
+      bbRequiredAdsQ2,
       currentMonth
     ),
   };
@@ -79,7 +139,7 @@ exports.AlphaMessages = async (req, res) => {
   const daysLeft = getDaysLeftInMonth();
   const formattedRows = [];
 
-  const currentMonth = dayjs().format("MMM'YY"); // Example: Apr'25
+  const currentMonth = dayjs().format("MMM'YY"); // Example: May'25
   const currentDate = dayjs().format("DD-MM-YYYY");
 
   let headersValidated = false;
@@ -88,11 +148,15 @@ exports.AlphaMessages = async (req, res) => {
   const requiredHeaders = [
     "Dealer Code",
     "Dealer Name",
-    "10k SP Target",
-    "10k SP Ach",
-    "Black Box Target",
-    "Black Box Ach",
     "Phone Number",
+    "10k SP Tgt May 25",
+    "10k SP Ach May 25",
+    "Black Box Tgt May 25",
+    "Black Box Ach May 25",
+    "10k SP Tgt Q2 25",
+    "10k SP Ach Q2 25",
+    "Black Box Tgt Q2 25",
+    "Black Box Ach Q2 25",
   ];
 
   fs.createReadStream(filePath)
@@ -142,9 +206,11 @@ exports.AlphaMessages = async (req, res) => {
         "WhatsApp Opted",
         "User Id",
         "City",
-        "Area",
-        "SP10",
-        "Blackbox",
+        "Area", // Added to fields
+        "SP10 May 25",
+        "Blackbox May 25",
+        "SP10 Q2 25",
+        "Blackbox Q2 25",
       ];
       const json2csvParser = new Parser({ fields });
       const csv = json2csvParser.parse(formattedRows);
@@ -164,5 +230,9 @@ exports.AlphaMessages = async (req, res) => {
           res.status(500).send("Failed to download file.");
         }
       });
+    })
+    .on("error", (err) => {
+      console.error("CSV parsing error:", err);
+      res.status(500).send("Failed to process CSV file.");
     });
 };
