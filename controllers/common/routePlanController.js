@@ -6,32 +6,149 @@ const HierarchyEntries = require('../../model/HierarchyEntries');
 const ActorTypesHierarchy = require('../../model/ActorTypesHierarchy');
 const DeletedData = require('../../model/DeletedData');
 
+// exports.addRoutePlan = async (req, res) => {
+//   try {
+//     const { startDate, endDate, itinerary, status = 'inactive', approved = false } = req.body;
+//     const code = req.user.code;
+
+//     const locationFields = ['district', 'taluka', 'zone', 'state', 'province'];
+
+//     const nameParts = locationFields
+//     .filter(field => Array.isArray(itinerary[field]) && itinerary[field].length > 0)
+//     .flatMap(field => itinerary[field]);
+
+//     const name = nameParts.join('-').toLowerCase() || 'unnamed-route';
+
+
+//     const newRoute = new RoutePlan({
+//       startDate,
+//       endDate,
+//       code,
+//       name,
+//       itinerary,
+//       status,
+//       approved,
+//     });
+
+//     await newRoute.save();
+
+//     const start = moment(startDate).tz('Asia/Kolkata').startOf('day');
+//     const end = moment(endDate).tz('Asia/Kolkata').endOf('day');
+//     const days = [];
+//     for (let m = moment(start); m.isSameOrBefore(end); m.add(1, 'days')) {
+//       days.push({
+//         start: m.clone().startOf('day').toDate(),
+//         end: m.clone().endOf('day').toDate(),
+//       });
+//     }
+
+//     const hierarchy = await HierarchyEntries.find({ hierarchy_name: 'default_sales_flow' });
+
+//     for (const { start, end } of days) {
+//     const existingSchedules = await WeeklyBeatMappingSchedule.findOne({
+//         code,
+//         startDate: { $lte: start },
+//         endDate: { $gte: start }, // if any entry overlaps this day
+//         });
+          
+
+//         if (existingSchedules) {
+//             const existingCodes = new Set(existingSchedules.schedule.map(d => d.code));
+          
+//             const newDealers = await User.find({
+//               position: { $in: ['dealer', 'mdd'] },
+//               ...(itinerary.district.length && { district: { $in: itinerary.district } }),
+//               ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
+//               ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
+//               code: { $nin: Array.from(existingCodes) }, // avoid duplicates
+//             });
+          
+//             const newScheduleEntries = newDealers.map(user => ({
+//               code: user.code,
+//               name: user.name,
+//               latitude: user.latitude || 0,
+//               longitude: user.longitude || 0,
+//               status: 'pending',
+//               distance: null,
+//               district: user.district || '',
+//               taluka: user.taluka || '',
+//               zone: user.zone || '',
+//               position: user.position || '',
+//             }));
+          
+//             existingSchedules.schedule.push(...newScheduleEntries);
+//             existingSchedules.total += newScheduleEntries.length;
+//             existingSchedules.pending += newScheduleEntries.length;
+          
+//             await existingSchedules.save();
+//             continue;
+//           }
+          
+
+
+//       const filteredDealers = await User.find({
+//         position: { $in: ['dealer', 'mdd'] },
+//         ...(itinerary.district.length && { district: { $in: itinerary.district } }),
+//         ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
+//         ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
+//       });
+
+//       const schedule = filteredDealers.map(user => ({
+//         code: user.code,
+//         name: user.name,
+//         latitude: user.latitude || 0,
+//         longitude: user.longitude || 0,
+//         status: 'pending',
+//         distance: null,
+//         district: user.district || '',
+//         taluka: user.taluka || '',
+//         zone: user.zone || '',
+//         position: user.position || '',
+//       }));
+
+//       await WeeklyBeatMappingSchedule.create({
+//         startDate: start,
+//         endDate: end,
+//         code,
+//         schedule,
+//         total: schedule.length,
+//         done: 0,
+//         pending: schedule.length,
+//       });
+//     }
+
+//     res.status(201).json({ message: 'Route Plan added and beat mappings created successfully.', route: newRoute });
+//   } catch (error) {
+//     console.error('Error in addRoutePlan:', error);
+//     res.status(500).json({ message: 'Internal Server Error' });
+//   }
+// };
+
 exports.addRoutePlan = async (req, res) => {
   try {
     const { startDate, endDate, itinerary, status = 'inactive', approved = false } = req.body;
-    const code = req.user.code;
+    const { code: userCode, position } = req.user;
 
     const locationFields = ['district', 'taluka', 'zone', 'state', 'province'];
-
     const nameParts = locationFields
-    .filter(field => Array.isArray(itinerary[field]) && itinerary[field].length > 0)
-    .flatMap(field => itinerary[field]);
+      .filter(field => Array.isArray(itinerary[field]) && itinerary[field].length > 0)
+      .flatMap(field => itinerary[field]);
 
     const name = nameParts.join('-').toLowerCase() || 'unnamed-route';
 
-
+    // 🔸 Save route first
     const newRoute = new RoutePlan({
       startDate,
       endDate,
-      code,
+      code: userCode,
       name,
       itinerary,
       status,
       approved,
     });
-
     await newRoute.save();
 
+    // 🔸 Date range breakdown (per day)
     const start = moment(startDate).tz('Asia/Kolkata').startOf('day');
     const end = moment(endDate).tz('Asia/Kolkata').endOf('day');
     const days = [];
@@ -42,58 +159,33 @@ exports.addRoutePlan = async (req, res) => {
       });
     }
 
-    const hierarchy = await HierarchyEntries.find({ hierarchy_name: 'default_sales_flow' });
+    // 🔸 Get all related hierarchy entries
+    const hierarchy = await HierarchyEntries.find({
+      hierarchy_name: 'default_sales_flow',
+      [position]: userCode,
+    });
+
+    // 🔸 Extract all dealer and mdd codes
+    const dealerCodes = [...new Set(hierarchy.map(h => h.dealer))];
+    const mddCodes = [...new Set(hierarchy.map(h => h.mdd))];
 
     for (const { start, end } of days) {
-    const existingSchedules = await WeeklyBeatMappingSchedule.findOne({
-        code,
+      const existingSchedule = await WeeklyBeatMappingSchedule.findOne({
+        code: userCode,
         startDate: { $lte: start },
-        endDate: { $gte: start }, // if any entry overlaps this day
-        });
-          
-
-        if (existingSchedules) {
-            const existingCodes = new Set(existingSchedules.schedule.map(d => d.code));
-          
-            const newDealers = await User.find({
-              position: { $in: ['dealer', 'mdd'] },
-              ...(itinerary.district.length && { district: { $in: itinerary.district } }),
-              ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
-              ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
-              code: { $nin: Array.from(existingCodes) }, // avoid duplicates
-            });
-          
-            const newScheduleEntries = newDealers.map(user => ({
-              code: user.code,
-              name: user.name,
-              latitude: user.latitude || 0,
-              longitude: user.longitude || 0,
-              status: 'pending',
-              distance: null,
-              district: user.district || '',
-              taluka: user.taluka || '',
-              zone: user.zone || '',
-              position: user.position || '',
-            }));
-          
-            existingSchedules.schedule.push(...newScheduleEntries);
-            existingSchedules.total += newScheduleEntries.length;
-            existingSchedules.pending += newScheduleEntries.length;
-          
-            await existingSchedules.save();
-            continue;
-          }
-          
-
-
-      const filteredDealers = await User.find({
-        position: { $in: ['dealer', 'mdd'] },
-        ...(itinerary.district.length && { district: { $in: itinerary.district } }),
-        ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
-        ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
+        endDate: { $gte: start },
       });
 
-      const schedule = filteredDealers.map(user => ({
+      const baseQuery = {
+        code: { $in: [...dealerCodes, ...mddCodes] },
+        ...(itinerary.district?.length && { district: { $in: itinerary.district } }),
+        ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
+        ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
+      };
+
+      const filteredUsers = await User.find(baseQuery);
+
+      const entries = filteredUsers.map(user => ({
         code: user.code,
         name: user.name,
         latitude: user.latitude || 0,
@@ -106,21 +198,34 @@ exports.addRoutePlan = async (req, res) => {
         position: user.position || '',
       }));
 
-      await WeeklyBeatMappingSchedule.create({
-        startDate: start,
-        endDate: end,
-        code,
-        schedule,
-        total: schedule.length,
-        done: 0,
-        pending: schedule.length,
-      });
+      if (existingSchedule) {
+        const existingCodes = new Set(existingSchedule.schedule.map(d => d.code));
+        const newEntries = entries.filter(e => !existingCodes.has(e.code));
+
+        existingSchedule.schedule.push(...newEntries);
+        existingSchedule.total += newEntries.length;
+        existingSchedule.pending += newEntries.length;
+        await existingSchedule.save();
+      } else {
+        await WeeklyBeatMappingSchedule.create({
+          startDate: start,
+          endDate: end,
+          code: userCode,
+          schedule: entries,
+          total: entries.length,
+          done: 0,
+          pending: entries.length,
+        });
+      }
     }
 
-    res.status(201).json({ message: 'Route Plan added and beat mappings created successfully.', route: newRoute });
+    return res.status(201).json({
+      message: 'Route Plan and beat mappings created successfully.',
+      route: newRoute,
+    });
   } catch (error) {
     console.error('Error in addRoutePlan:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    return res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
