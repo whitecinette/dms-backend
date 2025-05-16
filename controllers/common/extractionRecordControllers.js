@@ -5,6 +5,7 @@ const User = require('../../model/User');
 const moment = require("moment");
 const HierarchyEntries = require('../../model/HierarchyEntries');
 const { Parser } = require("json2csv");
+const ActorCode = require("../../model/ActorCode");
 
 const { BACKEND_URL } = process.env;
 
@@ -147,6 +148,73 @@ exports.addExtractionRecordsFromApp = async (req, res) => {
     }
   };
 
+// exports.getCurrentMonthExtractionsForUser = async (req, res) => {
+// try {
+//     console.log("Extrac get reached");
+//     const { code } = req.user;
+
+//     if (!code) {
+//     return res.status(400).json({
+//         success: false,
+//         message: "User code not found in token.",
+//     });
+//     }
+
+//     // Get start and end of current month in IST
+//     const now = new Date();
+//     const istOffset = 5.5 * 60 * 60 * 1000;
+
+//     const startOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+//     const endOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59));
+
+//     const startIST = new Date(startOfMonth.getTime() + istOffset);
+//     const endIST = new Date(endOfMonth.getTime() + istOffset);
+
+//     // Fetch extraction records
+//     const records = await ExtractionRecord.find({
+//     uploaded_by: code,
+//     createdAt: { $gte: startIST, $lte: endIST }
+//     }).sort({ createdAt: -1 });
+
+//     // Define table headers (for frontend)
+//     const tableHeaders = [
+//     "dealer_code",
+//     "product_name",
+//     "product_code",
+//     "product_category",
+//     "price",
+//     "quantity",
+//     "total",
+//     "segment"
+//     ];
+
+//     // Convert records to table format
+//     const tableData = records.map((rec) => ({
+//     dealer_code: rec.dealer || "",
+//     product_name: rec.product_name || "", // optional, only if you store it
+//     product_code: rec.product_code || "",
+//     product_category: rec.product_category || "",
+//     price: rec.price || 0,
+//     quantity: rec.quantity || 0,
+//     total: rec.amount || 0,
+//     segment: rec.segment || ""
+//     }));
+
+//     res.status(200).json({
+//     success: true,
+//     headers: tableHeaders,
+//     data: tableData,
+//     });
+
+// } catch (error) {
+//     console.error("Error in getCurrentMonthExtractionsForUser:", error);
+//     res.status(500).json({
+//     success: false,
+//     message: "Internal server error",
+//     });
+// }
+// };
+   
 exports.getCurrentMonthExtractionsForUser = async (req, res) => {
 try {
     console.log("Extrac get reached");
@@ -175,9 +243,21 @@ try {
     createdAt: { $gte: startIST, $lte: endIST }
     }).sort({ createdAt: -1 });
 
+    // Step 1: Get unique dealer codes from records
+    const dealerCodes = [...new Set(records.map(r => r.dealer).filter(Boolean))];
+
+    // Step 2: Fetch dealer names from ActorCodes
+    const dealerMap = {};
+    const actors = await ActorCode.find({ code: { $in: dealerCodes } });
+    actors.forEach(actor => {
+      dealerMap[actor.code] = actor.name;
+    });
+
+
     // Define table headers (for frontend)
     const tableHeaders = [
     "dealer_code",
+    "dealer_name",
     "product_name",
     "product_code",
     "product_category",
@@ -189,15 +269,17 @@ try {
 
     // Convert records to table format
     const tableData = records.map((rec) => ({
-    dealer_code: rec.dealer || "",
-    product_name: rec.product_name || "", // optional, only if you store it
-    product_code: rec.product_code || "",
-    product_category: rec.product_category || "",
-    price: rec.price || 0,
-    quantity: rec.quantity || 0,
-    total: rec.amount || 0,
-    segment: rec.segment || ""
+      dealer_code: rec.dealer || "",
+      dealer_name: dealerMap[rec.dealer] || "", // ✅ Added dealer name
+      product_name: rec.product_name || "",
+      product_code: rec.product_code || "",
+      product_category: rec.product_category || "",
+      price: rec.price || 0,
+      quantity: rec.quantity || 0,
+      total: rec.amount || 0,
+      segment: rec.segment || ""
     }));
+
 
     res.status(200).json({
     success: true,
@@ -213,8 +295,6 @@ try {
     });
 }
 };
-   
-
 
 exports.getExtractionStatus = async (req, res) => {
     try {
