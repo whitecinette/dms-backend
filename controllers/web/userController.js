@@ -138,3 +138,31 @@ exports.loginUserForApp = async (req, res) => {
       return res.status(500).json({ message: "Server Error", error });
     }
   };
+// fetched dealers credit limit
+exports.fetchCreditLimit = async (req, res) => {
+ try {
+   const { code } = req.user;
+
+   // Select code, name, position, and creditLimit fields
+   const user = await User.findOne({ code }).select("code name position credit_limit category").lean();
+
+   if (!user) {
+     return res.status(404).json({ message: "User not found" });
+   }
+
+   if (user.position !== "dealer") {
+     return res.status(403).json({ message: "Credit limit available only for dealers" });
+   }
+
+   res.status(200).json({
+     message: "Credit limit fetched successfully",
+     code: user.code,
+     name: user.name,
+     creditLimit: user.credit_limit,
+     category: user.category,
+   });
+ } catch (error) {
+   console.error("Error fetching credit limit:", error);
+   res.status(500).json({ message: "Internal Server Error" });
+ }
+};

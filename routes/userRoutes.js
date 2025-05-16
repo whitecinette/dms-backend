@@ -3,7 +3,7 @@ const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBy
     updateUserLabelsFromCSV, createSecurityKey, updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile } = require("../controllers/common/userController");
-const { loginUserForApp, registerUserForApp } = require("../controllers/web/userController");
+const { loginUserForApp, registerUserForApp, fetchCreditLimit } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
 
@@ -50,8 +50,8 @@ router.put("/admin/register-update-from-actor-codes", registerOrUpdateUsersFromA
 
 //get dealer
 router.get("/user/get-dealer-for-admin", adminOrSuperAdminAuth, getAllDealerAndMddForAdmin)
-
-
+// get dealers credit limit
+router.get("/fetch-dealer-credit-limit", userAuth, fetchCreditLimit);
     
 
 
