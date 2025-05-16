@@ -6,7 +6,7 @@ const {
   deleteOrderForAdmin,
 } = require("../controllers/admin/orderController");
 const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
-const { addOrderByDealer } = require("../controllers/common/orderController");
+const { addOrderByDealer, getAllOrdersForDealer } = require("../controllers/common/orderController");
 const { userAuth } = require("../middlewares/authmiddlewares");
 // get Order for admin
 router.get("/order/get-order", getOrderForAdmin);
@@ -23,5 +23,7 @@ router.delete(
 
 //dealer routes
 router.post("/order/add-order-by-dealer", userAuth, addOrderByDealer);
+router.get("/order/get-all-orders-by-dealer", userAuth, getAllOrdersForDealer);
+
 
 module.exports = router;

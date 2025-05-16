@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 // Add order by dealer
 exports.addOrderByDealer = async (req, res) => {
   try {
-    let { Products, Remarks } = req.body;
+    let { Products, Remark } = req.body;
     const UserId = req.user.id; // Assuming userAuth middleware sets req.user
 
     console.log(UserId);
@@ -67,7 +67,7 @@ exports.addOrderByDealer = async (req, res) => {
       OrderStatus: "pending",
       OrderDate: new Date(),
       DeliveryDate,
-      Remarks,
+      Remark : Remark || "No remark",
     });
     await newOrder.save();
 
@@ -85,3 +85,27 @@ exports.addOrderByDealer = async (req, res) => {
     });
   }
 };
+
+
+// Get all orders by dealer id
+exports.getAllOrdersForDealer = async (req, res) => {
+  try {
+    const UserId = req.user.id;
+    const orders = await Order.find({ UserId: UserId }).populate("Products.ProductId").sort({ OrderDate: -1 });
+
+    res.status(200).json({
+      success: true,
+      message: "Orders fetched successfully.",
+      orders,
+    });
+
+    
+  } catch (error) {
+    console.error("Error in getAllOrdersForDealer:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+}
