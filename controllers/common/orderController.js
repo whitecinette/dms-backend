@@ -23,8 +23,7 @@ exports.addOrderByDealer = async (req, res) => {
     let OrderNumber = `ORD-${uuidv4().slice(0, 8)}`; // shorten uuid
 
     // Set DeliveryDate to next day if not provided
-    let DeliveryDate = new Date();
-    DeliveryDate.setDate(DeliveryDate.getDate() + 1);
+    
 
     if (!Array.isArray(Products) || Products.length === 0) {
       return res.status(400).json({
