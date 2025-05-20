@@ -39,3 +39,81 @@ exports.uploadFinanceData = async (req, res) => {
     res.status(500).json({ message: "Server error", error });
   }
 };
+
+// GET /finance/main-labels
+exports.getMainLabels = async (req, res) => {
+  try {
+    const { search = "", type, startDate, endDate } = req.query;
+
+    const matchStage = {
+      role: "main",
+    };
+
+    // 🔍 Universal Search on label
+    if (search) {
+      matchStage.label = { $regex: search, $options: "i" };
+    }
+
+    // 🎯 Filter by type
+    if (type) {
+      matchStage.type = type;
+    }
+
+    // 📅 Date range filter (inclusive)
+    if (startDate && endDate) {
+      matchStage.startDate = { $gte: new Date(startDate) };
+      matchStage.endDate = { $lte: new Date(endDate) };
+    }
+
+    const results = await FinanceUpload.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: "$label",
+          type: { $first: "$type" },
+          function: { $first: "$function" },
+          startDate: { $first: "$startDate" },
+          endDate: { $first: "$endDate" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          label: "$_id",
+          type: 1,
+          function: 1,
+          startDate: 1,
+          endDate: 1,
+        },
+      },
+      { $sort: { startDate: -1 } }
+    ]);
+
+    res.status(200).json({ success: true, data: results });
+  } catch (err) {
+    console.error("Error fetching main labels:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// GET /finance/details/:label?role=main|sub
+exports.getFinanceDetailsByLabel = async (req, res) => {
+  try {
+    const { label } = req.params;
+    const { role = "main" } = req.query;
+
+    if (!label) {
+      return res.status(400).json({ success: false, message: "Label is required" });
+    }
+
+    const entries = await FinanceUpload.find({ label, role });
+    res.status(200).json({ success: true, data: entries });
+  } catch (error) {
+    console.error("Error fetching finance details:", error);
+    res.status(500).json({ success: false, message: "Server error", error });
+  }
+};
+
+
+
+
