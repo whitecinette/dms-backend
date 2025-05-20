@@ -15,10 +15,12 @@ const {
   deleteAttendanceByID,
   getJaipurDealers,
   addAttendanceByAdmin,
+  getAddedAttendanceByAdmin
 } = require("../controllers/common/attendanceController");
 const {
   userAuth,
   adminOrSuperAdminAuth,
+  superAdminAuth,
 } = require("../middlewares/authmiddlewares");
 const { upload } = require("../services/fileUpload");
 const upload_img = require("../middlewares/upload");
@@ -63,4 +65,7 @@ router.get("/get-jaipur-dealers", getJaipurDealers);
 
 // add attendance by admin
 router.post("/add-attendance-by-admin", adminOrSuperAdminAuth, addAttendanceByAdmin);
+//get all attendance add by admin
+router.get("/get-all-attendance-add-by-admin", superAdminAuth, getAddedAttendanceByAdmin);
+
 module.exports = router;

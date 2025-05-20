@@ -93,7 +93,7 @@ exports.adminOrSuperAdminAuth = async (req, res, next) => {
 
 exports.userAuth = async (req, res, next) => {
   try {
-    console.log("User auth reaching!!")
+    // console.log("User auth reaching!!")
       const token = req.header("Authorization");
       // console.log("Token: ", token);
 

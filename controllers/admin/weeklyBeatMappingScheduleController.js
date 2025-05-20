@@ -454,8 +454,8 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       const normalizedCode = schedule.code?.trim().toLowerCase();
       const employeeName = employeeMap[normalizedCode] || "Unknown";
 
-      // Find matching route name
-      const matchingRoute = routePlans.find((route) => {
+      // Find all matching routes
+      const matchingRoutes = routePlans.filter((route) => {
         const routeStartStr = new Date(route.startDate)
           .toISOString()
           .split("T")[0];
@@ -474,22 +474,18 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
         );
       });
 
-      // Create a map to count dealer visits
-      const dealerVisitMap = {};
-      dealers.forEach((dealer) => {
-        const key = `${dealer.code}-${dealer.status}`;
-        if (!dealerVisitMap[key]) {
-          dealerVisitMap[key] = {
-            ...dealer,
-            visitCount: dealer.status === "done" ? 1 : 0,
-          };
-        } else {
-          dealerVisitMap[key].visitCount += 1;
-        }
-      });
+      // Format routes with their details
+      const routes = matchingRoutes.map((route) => ({
+        name: route.name,
+        id: route._id,
+        status: route.status,
+        itinerary: {
 
-      // Convert map to array of unique dealers with visit counts
-      const uniqueDealers = Object.values(dealerVisitMap);
+          zones: route.itinerary?.zone || [],
+          districts: route.itinerary?.district || [],
+          talukas: route.itinerary?.taluka || [],
+        },
+      }));
 
       return {
         _id: schedule._id,
@@ -500,9 +496,8 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
         total: schedule.total,
         done: schedule.done,
         pending: schedule.pending,
-        schedule: uniqueDealers,
-        routeName: matchingRoute?.name || null,
-        routeStatus: matchingRoute?.status || null,
+        schedule: dealers,
+        routes: routes,
       };
     });
 
@@ -512,7 +507,9 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       const searchRegex = new RegExp(search, "i");
       filteredSchedules = formattedSchedules.filter(
         (schedule) =>
-          searchRegex.test(schedule.code) || searchRegex.test(schedule.name)
+          searchRegex.test(schedule.code) ||
+          searchRegex.test(schedule.name) ||
+          searchRegex.test(schedule.routes.map((r) => r.name).join(" "))
       );
     }
 
@@ -835,9 +832,15 @@ exports.addDailyBeatMapping = async (req, res) => {
 
       insertedCount++;
     }
+    if(insertedCount === 0) return res.status(200).json({
+      success: true,
+      message: "Beat mapping already created for today.",
+      totalMappedASMs: 0,
+    })
 
     return res.status(201).json({
-      message: "Daily beat mapping created successfully.",
+      success: true,
+      message: `${insertedCount} beat mapping created successfully.`,
       totalMappedASMs: insertedCount,
     });
   } catch (error) {
