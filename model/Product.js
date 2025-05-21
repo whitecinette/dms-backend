@@ -13,6 +13,10 @@ const productSchema = new mongoose.Schema(
       enum: ["active", "inactive"],
       default: "inactive",
     },
+    isAvailable: {
+     type: Boolean,
+     default: true,
+    },
   },
   { strict: false, timestamps: true }
 );

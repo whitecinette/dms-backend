@@ -413,3 +413,113 @@ exports.getProductsByBrand = async (req, res) => {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+// update products nameera
+exports.updateProducts = async (req, res) => {
+ try {
+   console.log("Starting updateProducts API");
+   if (!req.file) {
+     return res.status(400).json({ success: false, message: "No file uploaded" });
+   }
+
+   let results = [];
+   const stream = new Readable();
+   stream.push(req.file.buffer);
+   stream.push(null);
+
+   let isFirstRow = true;
+   let cleanedHeaders = [];
+
+   stream
+     .pipe(csvParser())
+     .on("data", (row) => {
+       if (isFirstRow) {
+         cleanedHeaders = Object.keys(row).map((h) => h.trim().toLowerCase());
+         isFirstRow = false;
+       }
+
+       let productEntry = {};
+       cleanedHeaders.forEach((header, index) => {
+         const originalKey = Object.keys(row)[index];
+         productEntry[header] = row[originalKey]?.trim();
+       });
+
+       // Generate fields if missing
+       productEntry.price = Number(productEntry.price);
+       productEntry.segment = determineSegment(productEntry.price);
+
+       if (!productEntry.product_name_code && productEntry.product_name) {
+         productEntry.product_name_code = generateIdentifier(productEntry.product_name);
+       }
+
+       if (!productEntry.product_code && productEntry.brand && productEntry.product_name) {
+         productEntry.product_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
+       }
+
+       if (!productEntry.model_code && productEntry.brand && productEntry.product_name) {
+         productEntry.model_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
+       }
+
+       // Ensure status default
+       productEntry.status = productEntry.status || "active";
+
+       results.push(productEntry);
+     })
+     .on("end", async () => {
+       try {
+         if (results.length === 0) {
+           return res.status(400).json({ success: false, message: "No valid data found in CSV." });
+         }
+
+         const modelCodesInCSV = results.map(p => p.model_code).filter(Boolean);
+         const existingProducts = await Product.find({ model_code: { $in: modelCodesInCSV } });
+         const existingModelCodes = existingProducts.map(p => p.model_code);
+
+         // Filter only new products
+         const newProducts = results.filter(p => !existingModelCodes.includes(p.model_code));
+
+         const toInsert = newProducts.map(p => ({
+           brand: p.brand,
+           product_name: p.product_name,
+           product_category: p.product_category,
+           price: p.price,
+           segment: p.segment,
+           model_code: p.model_code,
+           product_code: p.product_code,
+           product_name_code: p.product_name_code,
+           isAvailable: true,
+           status: p.status
+         }));
+
+         if (toInsert.length > 0) {
+           await Product.insertMany(toInsert, { ordered: false });
+         }
+
+         // Set isAvailable = true for products in CSV (both old and new)
+         await Product.updateMany(
+           { model_code: { $in: modelCodesInCSV } },
+           { $set: { isAvailable: true } }
+         );
+
+         // Set isAvailable = false for products NOT in CSV
+         await Product.updateMany(
+           { model_code: { $nin: modelCodesInCSV } },
+           { $set: { isAvailable: false } }
+         );
+
+         return res.status(200).json({
+           success: true,
+           message: "Products updated successfully",
+           added: toInsert.length,
+           markedAvailable: modelCodesInCSV.length,
+         });
+       } catch (error) {
+         console.error("Error in update logic:", error);
+         return res.status(500).json({ success: false, message: "Error updating products." });
+       }
+     });
+ } catch (error) {
+   console.error("Error in updateProducts:", error);
+   return res.status(500).json({ success: false, message: "Server error" });
+ }
+};
