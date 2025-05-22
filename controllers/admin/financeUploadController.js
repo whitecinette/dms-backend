@@ -114,6 +114,23 @@ exports.getFinanceDetailsByLabel = async (req, res) => {
   }
 };
 
+//delete/finance/:label
+exports.deleteFinanceByLabel = async (req, res) => {
+  try {
+    const { label } = req.params;
+    const{ startDate, endDate } = req.query;
 
+    if (!startDate || !endDate) {
+      return res.status(400).json({ warning: true, message: "Start date and end date are required" });
+    }
+    if (!label) {
+      return res.status(400).json({ warning: true, message: "Label is required" });
+    }
 
-
+    await FinanceUpload.deleteMany({ label, startDate, endDate });
+    res.status(200).json({ success: true, message: `${label} deleted successfully` });  
+  }catch (error) {
+    console.error("Error deleting finance data:", error);
+    res.status(500).json({ success: false, message: "Server error", error });
+  }
+}
