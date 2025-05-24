@@ -982,7 +982,7 @@ exports.getLatestAttendance = async (req, res) => {
       const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0)); // April 1, 2025
       const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)); // April 30, 2025
       dateFilter = { $gte: start, $lte: end };
-      console.log(start, end);
+      // console.log(start, end);
     }
 
     // Fetch attendance records
@@ -993,7 +993,7 @@ exports.getLatestAttendance = async (req, res) => {
       .sort({ date: 1, punchIn: -1 })
       .lean();
 
-    console.log(rawRecords.slice(0, 10));
+    // console.log(rawRecords.slice(0, 10));
     const attendanceMap = new Map();
 
     for (const record of rawRecords) {
