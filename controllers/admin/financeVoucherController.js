@@ -146,3 +146,97 @@ exports.getFinanceVouchersForAdmin = async (req, res) => {
   }
 };
 
+exports.getFinanceSummaryForUser = async (req, res) => {
+  try {
+    const { code } = req.user;
+
+    if (!code) {
+      return res.status(400).json({ success: false, message: "Code is required" });
+    }
+
+    const today = moment().startOf("day").toDate();
+    const tomorrow = moment().endOf("day").toDate();
+
+    const vouchers = await FinanceVoucher.find({ code });
+
+    let todayTotalOS = 0;
+    let todayDue = 0;
+    let todayOverdue = 0;
+    let totalDueOverdue = 0;
+
+    for (const v of vouchers) {
+        if (!v.dueDateISO || !v.pendingAmount || isNaN(v.pendingAmount)) continue;
+
+        const dueDate = moment(v.dueDateISO).startOf("day").toDate();
+        const pending = parseFloat(v.pendingAmount);
+
+        // Total OS (sum of all pending)
+        todayTotalOS += pending;
+
+        if (dueDate.getTime() === today.getTime()) {
+            todayDue += pending;
+        } else if (dueDate < today) {
+            todayOverdue += pending;
+        }
+    }
+
+    // Total Due Overdue = todayDue + todayOverdue
+    totalDueOverdue = todayDue + todayOverdue;
+
+
+    res.status(200).json({
+      success: true,
+      data: {
+        todayTotalOS,
+        todayDue,
+        todayOverdue,
+        totalDueOverdue,
+      },
+    });
+  } catch (error) {
+    console.error("Summary error:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+exports.getFinanceOutstandingBreakup = async (req, res) => {
+  try {
+    const { code } = req.user;
+    if (!code) return res.status(400).json({ success: false, message: "User code missing" });
+
+    const vouchers = await FinanceVoucher.find({ code }).sort({ dueDateISO: 1 });
+
+    const today = moment().startOf("day");
+    const data = [];
+
+    for (const v of vouchers) {
+      if (!v.dueDateISO || isNaN(v.pendingAmount)) continue;
+
+      const dueDate = moment(v.dueDateISO).startOf("day");
+      const date = v.date || "";
+      const odDays = dueDate.diff(today, "days"); // negative if overdue
+      const remarks =
+        odDays < 0 ? "Overdue" : odDays === 0 ? "Today Due" : "Upcoming Dues";
+
+      const dueOverdue =
+        remarks === "Overdue" || remarks === "Today Due" ? v.pendingAmount : 0;
+
+      data.push({
+        invoiceNumber: v.invoiceNumber || "",
+        date,
+        dueDate: v.dueDate || "",
+        invoiceAmount: parseFloat(v.invoiceAmount || 0),
+        paymentReceived: parseFloat(v.invoiceAmount || 0) - parseFloat(v.pendingAmount || 0),
+        pendingAmount: parseFloat(v.pendingAmount || 0),
+        overDueDays: odDays,
+        totalDueOverdue: dueOverdue,
+        remarks,
+      });
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Breakup fetch error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
