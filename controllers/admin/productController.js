@@ -163,6 +163,7 @@ exports.getAllProductsForAdmin = async (req, res) => {
     order = "",
     search = "",
     product_category = "",
+    isAvailable = "",
   } = req.query;
   try {
     const filters = {};
@@ -186,6 +187,10 @@ exports.getAllProductsForAdmin = async (req, res) => {
     if (product_category) {
       filters.product_category = product_category;
     }
+
+    if (isAvailable !== "") {
+     filters.isAvailable = isAvailable === "true"; // convert string to boolean
+   }
     const product = await Product.find(filters)
       .sort({ [sort]: sortOrder })
       .limit(Number(limit))
@@ -417,12 +422,11 @@ exports.getProductsByBrand = async (req, res) => {
 // update products nameera
 exports.updateProducts = async (req, res) => {
  try {
-   console.log("Starting updateProducts API");
    if (!req.file) {
      return res.status(400).json({ success: false, message: "No file uploaded" });
    }
 
-   let results = [];
+   const results = [];
    const stream = new Readable();
    stream.push(req.file.buffer);
    stream.push(null);
@@ -434,7 +438,7 @@ exports.updateProducts = async (req, res) => {
      .pipe(csvParser())
      .on("data", (row) => {
        if (isFirstRow) {
-         cleanedHeaders = Object.keys(row).map((h) => h.trim().toLowerCase());
+         cleanedHeaders = Object.keys(row).map(h => h.trim().toLowerCase());
          isFirstRow = false;
        }
 
@@ -444,24 +448,12 @@ exports.updateProducts = async (req, res) => {
          productEntry[header] = row[originalKey]?.trim();
        });
 
-       // Generate fields if missing
+       // Convert price to number and determine segment
        productEntry.price = Number(productEntry.price);
        productEntry.segment = determineSegment(productEntry.price);
 
-       if (!productEntry.product_name_code && productEntry.product_name) {
-         productEntry.product_name_code = generateIdentifier(productEntry.product_name);
-       }
-
-       if (!productEntry.product_code && productEntry.brand && productEntry.product_name) {
-         productEntry.product_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
-       }
-
-       if (!productEntry.model_code && productEntry.brand && productEntry.product_name) {
-         productEntry.model_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
-       }
-
-       // Ensure status default
-       productEntry.status = productEntry.status || "active";
+       // Set default status if missing
+       if (!productEntry.status) productEntry.status = "active";
 
        results.push(productEntry);
      })
@@ -473,35 +465,90 @@ exports.updateProducts = async (req, res) => {
 
          const modelCodesInCSV = results.map(p => p.model_code).filter(Boolean);
          const existingProducts = await Product.find({ model_code: { $in: modelCodesInCSV } });
-         const existingModelCodes = existingProducts.map(p => p.model_code);
+         const existingProductMap = {};
+         existingProducts.forEach(p => {
+           existingProductMap[p.model_code] = p.toObject();
+         });
 
-         // Filter only new products
-         const newProducts = results.filter(p => !existingModelCodes.includes(p.model_code));
+         // Separate new and existing products
+         const newProducts = [];
+         const bulkUpdates = [];
 
-         const toInsert = newProducts.map(p => ({
-           brand: p.brand,
-           product_name: p.product_name,
-           product_category: p.product_category,
-           price: p.price,
-           segment: p.segment,
-           model_code: p.model_code,
-           product_code: p.product_code,
-           product_name_code: p.product_name_code,
-           isAvailable: true,
-           status: p.status
-         }));
+         for (const p of results) {
+           const existing = existingProductMap[p.model_code];
 
-         if (toInsert.length > 0) {
-           await Product.insertMany(toInsert, { ordered: false });
+           if (!existing) {
+             // New product: generate product_code if missing
+             if (!p.product_code && p.brand && p.product_name) {
+               p.product_code = generateIdentifier(`${p.brand}_${p.product_name}`);
+             }
+             newProducts.push({
+               brand: p.brand,
+               product_name: p.product_name,
+               product_category: p.product_category,
+               price: p.price,
+               segment: p.segment,
+               model_code: p.model_code,
+               product_code: p.product_code,
+               product_name_code: p.product_name_code || generateIdentifier(p.product_name || ""),
+               isAvailable: true,
+               status: p.status
+             });
+           } else {
+             // Existing product: build update object only for fields present in CSV
+             // Do NOT update fields that are missing in CSV
+
+             // List of allowed fields to update from CSV
+             const updatableFields = [
+               "brand", "product_name", "product_category", "price",
+               "segment", "status", "product_name_code"
+             ];
+
+             const updateFields = { isAvailable: true };
+
+             updatableFields.forEach(field => {
+               if (field in p) {
+                 updateFields[field] = p[field];
+               }
+             });
+
+             // product_code special handling
+             if (!existing.product_code) {
+               // DB missing product_code
+               if (p.product_code) {
+                 updateFields.product_code = p.product_code;
+               } else if (p.brand && p.product_name) {
+                 updateFields.product_code = generateIdentifier(`${p.brand}_${p.product_name}`);
+               }
+             }
+             // If DB has product_code, do NOT update
+
+             bulkUpdates.push({
+               updateOne: {
+                 filter: { model_code: p.model_code },
+                 update: { $set: updateFields }
+               }
+             });
+           }
          }
 
-         // Set isAvailable = true for products in CSV (both old and new)
+         // Insert new products
+         if (newProducts.length > 0) {
+           await Product.insertMany(newProducts);
+         }
+
+         // Update existing products with partial fields
+         if (bulkUpdates.length > 0) {
+           await Product.bulkWrite(bulkUpdates);
+         }
+
+         // Mark products from CSV as available
          await Product.updateMany(
            { model_code: { $in: modelCodesInCSV } },
            { $set: { isAvailable: true } }
          );
 
-         // Set isAvailable = false for products NOT in CSV
+         // Mark products NOT in CSV as unavailable
          await Product.updateMany(
            { model_code: { $nin: modelCodesInCSV } },
            { $set: { isAvailable: false } }
@@ -510,14 +557,17 @@ exports.updateProducts = async (req, res) => {
          return res.status(200).json({
            success: true,
            message: "Products updated successfully",
-           added: toInsert.length,
-           markedAvailable: modelCodesInCSV.length,
+           added: newProducts.length,
+           updated: bulkUpdates.length,
+           markedAvailable: modelCodesInCSV.length
          });
+
        } catch (error) {
          console.error("Error in update logic:", error);
          return res.status(500).json({ success: false, message: "Error updating products." });
        }
      });
+
  } catch (error) {
    console.error("Error in updateProducts:", error);
    return res.status(500).json({ success: false, message: "Server error" });

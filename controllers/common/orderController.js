@@ -65,7 +65,7 @@ exports.addOrderByDealer = async (req, res) => {
       TotalPrice: totalPrice,
       OrderStatus: "pending",
       OrderDate: new Date(),
-      DeliveryDate,
+      // DeliveryDate,
       Remark : Remark || "No remark",
     });
     await newOrder.save();
