@@ -1,46 +1,136 @@
 const FinanceUpload = require("../../model/FinanceUpload");
+const path = require("path");
+const XLSX = require("xlsx");
 
-// POST /api/finance-upload
+
+// exports.uploadFinanceData = async (req, res) => {
+//   try {
+//     console.log("Reaching");
+//     const { label, type, startDate, endDate, rows } = req.body;
+
+//     if (!label || !type || !startDate || !endDate || !rows || !Array.isArray(rows)) {
+//       return res.status(400).json({ message: "Missing required fields or invalid data format" });
+//     }
+
+//     // Determine function
+//     const lowerType = type.toLowerCase();
+//     let func = "credit";
+//     if (lowerType.includes("debit")) func = "debit";
+
+//     // Determine role
+//     let role = "main";
+//     if (lowerType.includes("working")) role = "sub";
+
+//     // Map each row to include metadata
+//     const enrichedRows = rows.map(row => ({
+//       ...row,
+//       label,
+//       type,
+//       function: func,
+//       role,
+//       startDate,
+//       endDate,
+//     }));
+
+//     // Insert all rows
+//     await FinanceUpload.insertMany(enrichedRows);
+
+//     return res.status(200).json({ message: "Upload successful", inserted: enrichedRows.length });
+//   } catch (error) {
+//     console.error("Upload error:", error);
+//     res.status(500).json({ message: "Server error", error });
+//   }
+// };
+
+// GET /finance/main-labels
+
 exports.uploadFinanceData = async (req, res) => {
   try {
-    console.log("Reaching");
-    const { label, type, startDate, endDate, rows } = req.body;
+    console.log("Reachingg")
+    const file = req.file; // handled by multer
+    if (!file) return res.status(400).json({ message: "No file uploaded" });
 
-    if (!label || !type || !startDate || !endDate || !rows || !Array.isArray(rows)) {
-      return res.status(400).json({ message: "Missing required fields or invalid data format" });
+    const fileName = path.basename(file.originalname, path.extname(file.originalname));
+    console.log("File name: ", fileName);
+    const parts = fileName.split("_");
+
+    // Extract start and end date positions
+    const dateIndex = parts.findIndex(p => /^\d{2}-\d{2}-\d{4}$/.test(p));
+    if (dateIndex === -1 || parts[dateIndex + 1] !== "to" || !parts[dateIndex + 2]) {
+      return res.status(400).json({ message: "Filename must include startDate_to_endDate" });
     }
 
-    // Determine function
-    const lowerType = type.toLowerCase();
-    let func = "credit";
-    if (lowerType.includes("debit")) func = "debit";
+    const parseDate = (str) => {
+      const [day, month, year] = str.split("-").map(Number);
+      return new Date(year, month - 1, day);
+    };
 
-    // Determine role
-    let role = "main";
-    if (lowerType.includes("working")) role = "sub";
+    const startDate = parseDate(parts[dateIndex]);
+    const endDate = parseDate(parts[dateIndex + 2]);
+    if (isNaN(startDate) || isNaN(endDate)) {
+      return res.status(400).json({ message: "Invalid date format in file name" });
+    }
 
-    // Map each row to include metadata
-    const enrichedRows = rows.map(row => ({
-      ...row,
-      label,
-      type,
-      function: func,
-      role,
-      startDate,
-      endDate,
-    }));
+    const schemeParts = parts.slice(0, dateIndex);
+    const label = schemeParts.join(" ").replace(/_/g, " ");
 
-    // Insert all rows
-    await FinanceUpload.insertMany(enrichedRows);
+    const workbook = XLSX.read(file.buffer, { type: "buffer" });
 
-    return res.status(200).json({ message: "Upload successful", inserted: enrichedRows.length });
+    let totalInserted = 0;
+
+    for (const sheetName of workbook.SheetNames) {
+      const lower = sheetName.toLowerCase();
+      let func = "", role = "";
+
+      if (lower.includes("credit") && lower.includes("voucher")) {
+        func = "credit";
+        role = "main";
+      } else if (lower.includes("debit") && lower.includes("voucher")) {
+        func = "debit";
+        role = "main";
+      } else if (lower.includes("credit") && lower.includes("working")) {
+        func = "credit";
+        role = "sub";
+      } else if (lower.includes("debit") && lower.includes("working")) {
+        func = "debit";
+        role = "sub";
+      } else {
+        console.log(`❌ Skipping unrecognized sheet: ${sheetName}`);
+        continue;
+      }
+
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+
+
+      const enrichedRows = rows.map(row => ({
+        ...row,
+        label,
+        type: sheetName,
+        function: func,
+        role,
+        startDate,
+        endDate,
+      }));
+
+      try {
+        const result = await FinanceUpload.insertMany(enrichedRows, { ordered: false });
+        console.log(`✅ Inserted ${result.length} records for sheet: ${sheetName}`);
+        totalInserted += result.length;
+      } catch (insertErr) {
+        console.error(`❌ Insert failed for sheet: ${sheetName}`, insertErr);
+      }
+
+      totalInserted += enrichedRows.length;
+    }
+
+    return res.status(200).json({ message: "Upload successful", inserted: totalInserted });
   } catch (error) {
     console.error("Upload error:", error);
     res.status(500).json({ message: "Server error", error });
   }
 };
 
-// GET /finance/main-labels
 exports.getMainLabels = async (req, res) => {
   try {
     const { search = "", type, startDate, endDate } = req.query;
@@ -61,30 +151,36 @@ exports.getMainLabels = async (req, res) => {
 
     // 📅 Date range filter (inclusive)
     if (startDate && endDate) {
-      matchStage.startDate = { $gte: new Date(startDate) };
-      matchStage.endDate = { $lte: new Date(endDate) };
+      const startUTC = new Date(new Date(startDate).setHours(0, 0, 0, 0));
+      const endUTC = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+
+      matchStage.startDate = { $gte: startUTC };
+      matchStage.endDate = { $lte: endUTC };
     }
+
 
     const results = await FinanceUpload.aggregate([
       { $match: matchStage },
       {
         $group: {
-          _id: "$label",
-          type: { $first: "$type" },
-          function: { $first: "$function" },
-          startDate: { $first: "$startDate" },
-          endDate: { $first: "$endDate" },
+          _id: {
+            label: "$label",
+            type: "$type",
+            function: "$function",
+            startDate: "$startDate",
+            endDate: "$endDate"
+          }
         },
       },
       {
         $project: {
           _id: 0,
-          label: "$_id",
-          type: 1,
-          function: 1,
-          startDate: 1,
-          endDate: 1,
-        },
+          label: "$_id.label",
+          type: "$_id.type",
+          function: "$_id.function",
+          startDate: "$_id.startDate",
+          endDate: "$_id.endDate"
+        }
       },
       { $sort: { startDate: -1 } }
     ]);
