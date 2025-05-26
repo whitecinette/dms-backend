@@ -1,6 +1,6 @@
 const express = require('express');
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
-const { uploadFinanceData, getMainLabels, getFinanceDetailsByLabel, deleteFinanceByLabel, getCreditNotesForMdd } = require('../controllers/admin/financeUploadController');
+const { uploadFinanceData, getMainLabels, getFinanceDetailsByLabel, deleteFinanceByLabel, getCreditNotesForMdd, getCreditNotesWorkingForMdd } = require('../controllers/admin/financeUploadController');
 const upload = require('../services/multerMemory');
 const router = express.Router();
 
@@ -11,6 +11,7 @@ router.get("/finance/details/:label", getFinanceDetailsByLabel);
 router.delete("/finance/delete/:label", adminOrSuperAdminAuth, deleteFinanceByLabel);
 
 router.get("/finance/credit-notes", userAuth, getCreditNotesForMdd);
+router.get("/finance/credit-notes-working", userAuth, getCreditNotesWorkingForMdd);
 
 
 
