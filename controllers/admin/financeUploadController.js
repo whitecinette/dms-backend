@@ -1,48 +1,43 @@
+const { duration } = require("moment");
 const FinanceUpload = require("../../model/FinanceUpload");
 const path = require("path");
 const XLSX = require("xlsx");
 
+const formatDateForDisplay = (dateObj) => {
+  const options = { day: "2-digit", month: "short", year: "2-digit" };
+  return dateObj.toLocaleDateString("en-GB", options).replace(/ /g, "-");
+};
 
-// exports.uploadFinanceData = async (req, res) => {
-//   try {
-//     console.log("Reaching");
-//     const { label, type, startDate, endDate, rows } = req.body;
+const formatDateToRangeLabel = (start, end) => {
+  const safeDate = (d) => new Date(d instanceof Date ? d : new Date(d));
 
-//     if (!label || !type || !startDate || !endDate || !rows || !Array.isArray(rows)) {
-//       return res.status(400).json({ message: "Missing required fields or invalid data format" });
-//     }
+  if (!start || !end || isNaN(safeDate(start)) || isNaN(safeDate(end))) {
+    return "Invalid duration";
+  }
 
-//     // Determine function
-//     const lowerType = type.toLowerCase();
-//     let func = "credit";
-//     if (lowerType.includes("debit")) func = "debit";
+  const format = (date) =>
+    safeDate(date).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "2-digit",
+    }).replace(/ /g, " ").replace(",", "'");
 
-//     // Determine role
-//     let role = "main";
-//     if (lowerType.includes("working")) role = "sub";
+  return `${format(start)} to ${format(end)}`;
+};
 
-//     // Map each row to include metadata
-//     const enrichedRows = rows.map(row => ({
-//       ...row,
-//       label,
-//       type,
-//       function: func,
-//       role,
-//       startDate,
-//       endDate,
-//     }));
+const formatDateShort = (date) =>
+  new Date(date).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  }).replace(/ /g, "-").replace(",", "'");
 
-//     // Insert all rows
-//     await FinanceUpload.insertMany(enrichedRows);
 
-//     return res.status(200).json({ message: "Upload successful", inserted: enrichedRows.length });
-//   } catch (error) {
-//     console.error("Upload error:", error);
-//     res.status(500).json({ message: "Server error", error });
-//   }
-// };
 
-// GET /finance/main-labels
+
+
+
+
 
 exports.uploadFinanceData = async (req, res) => {
   try {
@@ -111,6 +106,7 @@ exports.uploadFinanceData = async (req, res) => {
         role,
         startDate,
         endDate,
+        'CN Date': formatDateForDisplay(new Date()),
       }));
 
       try {
@@ -239,7 +235,7 @@ exports.getCreditNotesForMdd = async (req, res) => {
 
     // Default to current month if no range is provided
     const today = new Date();
-    const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const defaultStart =  new Date(today.getFullYear(), today.getMonth(), 1);
     const defaultEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
     const startUTC = startDate
@@ -264,7 +260,14 @@ exports.getCreditNotesForMdd = async (req, res) => {
 
     const results = await FinanceUpload.find(matchStage).sort({ startDate: -1 });
 
-    res.status(200).json({ success: true, data: results });
+    const formattedResults = results.map((entry) => ({
+      ...entry.toObject(),
+      startDateFormatted: formatDateShort(entry.startDate),
+      endDateFormatted: formatDateShort(entry.endDate),
+    }));
+
+    res.status(200).json({ success: true, data: formattedResults });
+
   } catch (err) {
     console.error("Error in getCreditNotesForMdd:", err);
     res.status(500).json({ success: false, message: "Server error" });
