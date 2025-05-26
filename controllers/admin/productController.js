@@ -448,11 +448,9 @@ exports.updateProducts = async (req, res) => {
          productEntry[header] = row[originalKey]?.trim();
        });
 
-       // Convert price to number and determine segment
        productEntry.price = Number(productEntry.price);
        productEntry.segment = determineSegment(productEntry.price);
 
-       // Set default status if missing
        if (!productEntry.status) productEntry.status = "active";
 
        results.push(productEntry);
@@ -463,25 +461,25 @@ exports.updateProducts = async (req, res) => {
            return res.status(400).json({ success: false, message: "No valid data found in CSV." });
          }
 
-         const modelCodesInCSV = results.map(p => p.model_code).filter(Boolean);
-         const existingProducts = await Product.find({ model_code: { $in: modelCodesInCSV } });
+         // Use product_code as the identifier
+         const productCodesInCSV = results.map(p => p.product_code).filter(Boolean);
+         const existingProducts = await Product.find({ product_code: { $in: productCodesInCSV } });
          const existingProductMap = {};
          existingProducts.forEach(p => {
-           existingProductMap[p.model_code] = p.toObject();
+           existingProductMap[p.product_code] = p.toObject();
          });
 
-         // Separate new and existing products
          const newProducts = [];
          const bulkUpdates = [];
 
          for (const p of results) {
-           const existing = existingProductMap[p.model_code];
+           // Skip if product_code is missing
+           if (!p.product_code) continue;
+
+           const existing = existingProductMap[p.product_code];
 
            if (!existing) {
-             // New product: generate product_code if missing
-             if (!p.product_code && p.brand && p.product_name) {
-               p.product_code = generateIdentifier(`${p.brand}_${p.product_name}`);
-             }
+             // New product — add only if product_code exists and required fields are present
              newProducts.push({
                brand: p.brand,
                product_name: p.product_name,
@@ -495,10 +493,7 @@ exports.updateProducts = async (req, res) => {
                status: p.status
              });
            } else {
-             // Existing product: build update object only for fields present in CSV
-             // Do NOT update fields that are missing in CSV
-
-             // List of allowed fields to update from CSV
+             // Existing product — update fields
              const updatableFields = [
                "brand", "product_name", "product_category", "price",
                "segment", "status", "product_name_code"
@@ -512,45 +507,33 @@ exports.updateProducts = async (req, res) => {
                }
              });
 
-             // product_code special handling
-             if (!existing.product_code) {
-               // DB missing product_code
-               if (p.product_code) {
-                 updateFields.product_code = p.product_code;
-               } else if (p.brand && p.product_name) {
-                 updateFields.product_code = generateIdentifier(`${p.brand}_${p.product_name}`);
-               }
-             }
-             // If DB has product_code, do NOT update
-
+             // Do NOT update product_code (even if present)
              bulkUpdates.push({
                updateOne: {
-                 filter: { model_code: p.model_code },
+                 filter: { product_code: p.product_code },
                  update: { $set: updateFields }
                }
              });
            }
          }
 
-         // Insert new products
          if (newProducts.length > 0) {
            await Product.insertMany(newProducts);
          }
 
-         // Update existing products with partial fields
          if (bulkUpdates.length > 0) {
            await Product.bulkWrite(bulkUpdates);
          }
 
          // Mark products from CSV as available
          await Product.updateMany(
-           { model_code: { $in: modelCodesInCSV } },
+           { product_code: { $in: productCodesInCSV } },
            { $set: { isAvailable: true } }
          );
 
          // Mark products NOT in CSV as unavailable
          await Product.updateMany(
-           { model_code: { $nin: modelCodesInCSV } },
+           { product_code: { $nin: productCodesInCSV } },
            { $set: { isAvailable: false } }
          );
 
@@ -559,7 +542,7 @@ exports.updateProducts = async (req, res) => {
            message: "Products updated successfully",
            added: newProducts.length,
            updated: bulkUpdates.length,
-           markedAvailable: modelCodesInCSV.length
+           markedAvailable: productCodesInCSV.length
          });
 
        } catch (error) {
