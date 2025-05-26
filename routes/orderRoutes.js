@@ -5,6 +5,8 @@ const {
   editOrderForAdmin,
   deleteOrderForAdmin,
   getDealersForAdmin,
+  getMddForAdmin,
+  getMddOrderForAdmin,
 } = require("../controllers/admin/orderController");
 const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
 const { addOrderByDealer, getAllOrdersForDealer } = require("../controllers/common/orderController");
@@ -28,6 +30,7 @@ router.get("/order/get-all-orders-by-dealer", userAuth, getAllOrdersForDealer);
 
 //get dealer orders for admin
 router.get("/order/get-order-by-dealer", getDealersForAdmin);
+router.get("/order/get-order-by-mdd", getMddOrderForAdmin);
 
 
 module.exports = router;

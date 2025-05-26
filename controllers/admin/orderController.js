@@ -176,3 +176,61 @@ exports.getDealersForAdmin = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+exports.getMddOrderForAdmin = async (req, res) => {
+ try {
+   const mddData = await User.aggregate([
+     {
+       $match: { role: "mdd" }, // match only MDDs
+     },
+     {
+      $lookup: {
+        from: "orders",
+        let: { mddId: { $toString: "$_id" } },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$UserId", "$$mddId"] },
+                  { $eq: ["$OrderStatus", "pending"] },
+                ],
+              },
+            },
+          },
+        ],
+        as: "pendingOrders",
+      },
+    },    
+     {
+       $addFields: {
+         pendingOrdersCount: { $size: "$pendingOrders" },
+       },
+     },
+     {
+       $project: {
+         _id: 1,
+         name: 1,
+         code: 1,
+         pendingOrdersCount: 1,
+       },
+     },
+     {
+       $sort: { pendingOrdersCount: -1 }, // descending
+     },
+   ]);
+
+   const totalMddsWithPendingOrders = mddData.filter(
+     (mdd) => mdd.pendingOrdersCount > 0
+   ).length;
+
+   res.status(200).json({
+     success: true,
+     data: mddData,
+     totalMddsWithPendingOrders,
+   });
+ } catch (error) {
+   console.error(error);
+   res.status(500).json({ success: false, message: "Internal server error" });
+ }
+};
