@@ -230,3 +230,43 @@ exports.deleteFinanceByLabel = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error", error });
   }
 }
+
+
+exports.getCreditNotesForMdd = async (req, res) => {
+  try {
+    const code = req.user.code; // from JWT middleware
+    const { search = "", startDate, endDate } = req.query;
+
+    // Default to current month if no range is provided
+    const today = new Date();
+    const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const defaultEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+    const startUTC = startDate
+      ? new Date(new Date(startDate).setHours(0, 0, 0, 0))
+      : new Date(defaultStart.setHours(0, 0, 0, 0));
+
+    const endUTC = endDate
+      ? new Date(new Date(endDate).setHours(23, 59, 59, 999))
+      : new Date(defaultEnd.setHours(23, 59, 59, 999));
+
+    const matchStage = {
+      role: "main",
+      type: "credit note voucher",
+      ["SRD Code"]: code,
+      startDate: { $gte: startUTC },
+      endDate: { $lte: endUTC },
+    };
+
+    if (search) {
+      matchStage.label = { $regex: search, $options: "i" };
+    }
+
+    const results = await FinanceUpload.find(matchStage).sort({ startDate: -1 });
+
+    res.status(200).json({ success: true, data: results });
+  } catch (err) {
+    console.error("Error in getCreditNotesForMdd:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
