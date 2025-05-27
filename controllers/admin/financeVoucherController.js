@@ -13,7 +13,6 @@ function parseExcelSerialDate(serial) {
 
 exports.uploadFinanceVouchers = async (req, res) => {
   try {
-    console.log("uplo");
     if (!req.file) return res.status(400).json({ message: "File is required." });
 
     const isExcel = req.file.originalname.endsWith(".xlsx");
@@ -57,14 +56,24 @@ exports.uploadFinanceVouchers = async (req, res) => {
 
       const amtRaw = row["Invoice Amt"];
       const isCredit = typeof amtRaw === "string" && amtRaw.toLowerCase().includes("cr");
+      console.log("isCredit: ", isCredit);
+      console.log("amt row: ", amtRaw)
 
       const refRaw = row["Invoice/CN/DN No"];
-      const ref = typeof refRaw === "string" ? refRaw.toLowerCase() : "";
+      const refStr = typeof refRaw === "string" ? refRaw : refRaw?.toString() || "";
+      const refLower = refStr.toLowerCase();
+      const refUpper = refStr.toUpperCase();
 
       const voucherType = (() => {
-        if (ref.includes("scheme") || ref.includes("stk")) return isCredit ? "Credit Note" : "Debit Note";
-        return "Invoice";
+        if (refLower.includes("scheme") || refLower.includes("stk")) {
+          return isCredit ? "Credit Note" : "Debit Note";
+        }
+        if (refUpper.startsWith("SZD") || refUpper.startsWith("GT")) {
+          return "Invoice";
+        }
+        return "Debit Note";
       })();
+
 
       const pendingAmt = parseFloat((row["Pending Amt"] || "").toString().replace(/[^\d.-]/g, "")) || 0;
       const invoiceAmt = parseFloat((amtRaw || "").toString().replace(/[^\d.-]/g, "")) || 0;
@@ -205,6 +214,133 @@ exports.getFinanceOutstandingBreakup = async (req, res) => {
     if (!code) return res.status(400).json({ success: false, message: "User code missing" });
 
     const vouchers = await FinanceVoucher.find({ code }).sort({ dueDateISO: 1 });
+
+    const today = moment().startOf("day");
+    const data = [];
+
+    for (const v of vouchers) {
+      if (!v.dueDateISO || isNaN(v.pendingAmount)) continue;
+
+      const dueDate = moment(v.dueDateISO).startOf("day");
+      const date = v.date || "";
+      const odDays = dueDate.diff(today, "days"); // negative if overdue
+      const remarks =
+        odDays < 0 ? "Overdue" : odDays === 0 ? "Today Due" : "Upcoming Dues";
+
+      const dueOverdue =
+        remarks === "Overdue" || remarks === "Today Due" ? v.pendingAmount : 0;
+
+      data.push({
+        invoiceNumber: v.invoiceNumber || "",
+        date,
+        dueDate: v.dueDate || "",
+        invoiceAmount: parseFloat(v.invoiceAmount || 0),
+        paymentReceived: parseFloat(v.invoiceAmount || 0) - parseFloat(v.pendingAmount || 0),
+        pendingAmount: parseFloat(v.pendingAmount || 0),
+        overDueDays: odDays,
+        totalDueOverdue: dueOverdue,
+        remarks,
+      });
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Breakup fetch error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+exports.getCreditNotesForPC = async (req, res) => {
+  try {
+    const { code } = req.user;
+    if (!code) return res.status(400).json({ success: false, message: "User code missing" });
+
+    const vouchers = await FinanceVoucher.find({ code, voucherType: "Credit Note" }).sort({ dueDateISO: 1 });
+
+    const today = moment().startOf("day");
+    const data = [];
+
+    for (const v of vouchers) {
+      if (!v.dueDateISO || isNaN(v.pendingAmount)) continue;
+
+      const dueDate = moment(v.dueDateISO).startOf("day");
+      const date = v.date || "";
+      const odDays = dueDate.diff(today, "days"); // negative if overdue
+      const remarks =
+        odDays < 0 ? "Overdue" : odDays === 0 ? "Today Due" : "Upcoming Dues";
+
+      const dueOverdue =
+        remarks === "Overdue" || remarks === "Today Due" ? v.pendingAmount : 0;
+
+      data.push({
+        invoiceNumber: v.invoiceNumber || "",
+        date,
+        dueDate: v.dueDate || "",
+        invoiceAmount: parseFloat(v.invoiceAmount || 0),
+        paymentReceived: parseFloat(v.invoiceAmount || 0) - parseFloat(v.pendingAmount || 0),
+        pendingAmount: parseFloat(v.pendingAmount || 0),
+        overDueDays: odDays,
+        totalDueOverdue: dueOverdue,
+        remarks,
+      });
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Breakup fetch error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getDebitNotesForPC = async (req, res) => {
+  try {
+    const { code } = req.user;
+    if (!code) return res.status(400).json({ success: false, message: "User code missing" });
+
+    const vouchers = await FinanceVoucher.find({ code, voucherType: "Debit Note" }).sort({ dueDateISO: 1 });
+
+    const today = moment().startOf("day");
+    const data = [];
+
+    for (const v of vouchers) {
+      if (!v.dueDateISO || isNaN(v.pendingAmount)) continue;
+
+      const dueDate = moment(v.dueDateISO).startOf("day");
+      const date = v.date || "";
+      const odDays = dueDate.diff(today, "days"); // negative if overdue
+      const remarks =
+        odDays < 0 ? "Overdue" : odDays === 0 ? "Today Due" : "Upcoming Dues";
+
+      const dueOverdue =
+        remarks === "Overdue" || remarks === "Today Due" ? v.pendingAmount : 0;
+
+      data.push({
+        invoiceNumber: v.invoiceNumber || "",
+        date,
+        dueDate: v.dueDate || "",
+        invoiceAmount: parseFloat(v.invoiceAmount || 0),
+        paymentReceived: parseFloat(v.invoiceAmount || 0) - parseFloat(v.pendingAmount || 0),
+        pendingAmount: parseFloat(v.pendingAmount || 0),
+        overDueDays: odDays,
+        totalDueOverdue: dueOverdue,
+        remarks,
+      });
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Breakup fetch error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getInvoicesForPC = async (req, res) => {
+  try {
+    const { code } = req.user;
+    if (!code) return res.status(400).json({ success: false, message: "User code missing" });
+
+    const vouchers = await FinanceVoucher.find({ code, voucherType: "Invoice" }).sort({ dueDateISO: 1 });
 
     const today = moment().startOf("day");
     const data = [];
