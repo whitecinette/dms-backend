@@ -86,7 +86,6 @@ exports.updateGeotagLatLong = async (req, res) => {
         message: "Geotagging picture is required.",
       });
     }
-
     // Find the dealer before update to store previous data
     const previousDealer = await User.findOne({ code });
 
@@ -102,7 +101,7 @@ exports.updateGeotagLatLong = async (req, res) => {
       folder: "geotag_pictures",
       public_id: `${code}_${Date.now()}`,
       resource_type: "image",
-      transformation: [{ width: 600, height: 600, crop: "limit" }],
+      transformation: [{ width: 600, height: 600, crop: "limit", quality: "auto"}],
       timeout: 60000, // Extended timeout
     });
 
