@@ -36,7 +36,7 @@ exports.addNotification = async (req, res) => {
 ///get notification
 exports.getNotification = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(400).json({
@@ -53,44 +53,51 @@ exports.getNotification = async (req, res) => {
       });
     }
 
-    const notifications = await Notification.find();
+    // Get all notifications (within TTL), sorted by most recent
+    const notifications = await Notification.find().sort({ createdAt: -1 });
 
+    // Filter notifications based on user role and code
     const filteredNotifications = notifications.filter((notification) => {
       const codes = notification.targetCodes?.map((c) => c.code) || [];
+      const roles = notification.targetRole || [];
 
-      // Global broadcast if targetRole is "user" with no codes
-      if (notification.targetRole === "user") {
-        if (codes.length > 0) {
-          return codes.includes(user.code);
-        } else {
-          return true; // Treat as global
-        }
+      // Global broadcast to all users
+      if (roles.includes("user")) {
+        return codes.length > 0 ? codes.includes(user.code) : true;
       }
 
-      // If targetRole matches user's role
-      if (notification.targetRole === user.role) {
-        if (codes.length > 0) {
-          return codes.includes(user.code);
-        }
-        return true; // Role matches and no code restriction
+      // Match user role
+      if (roles.includes(user.role)) {
+        return codes.length > 0 ? codes.includes(user.code) : true;
       }
 
-      // If only targetCodes provided
-      if (!notification.targetRole && codes.length > 0) {
+      // Target only codes
+      if (roles.length === 0 && codes.length > 0) {
         return codes.includes(user.code);
       }
 
-      // No role or codes specified — treat as global
-      if (!notification.targetRole && codes.length === 0) {
+      // Truly global notification (no roles, no codes)
+      if (roles.length === 0 && codes.length === 0) {
         return true;
       }
 
       return false;
     });
 
+    // Separate unread and read notifications
+    const unread = filteredNotifications.filter(
+      (n) => !n.readBy.some((r) => r.toString() === userId)
+    );
+    const read = filteredNotifications.filter(
+      (n) => n.readBy.some((r) => r.toString() === userId)
+    );
+
+    // Combine with unread first, then read
+    const sortedNotifications = [...unread, ...read];
+
     return res.status(200).json({
       success: true,
-      notifications: filteredNotifications,
+      notifications: sortedNotifications,
     });
   } catch (err) {
     console.error("Error getting notification:", err);
@@ -166,7 +173,7 @@ exports.markAsSeen = async (req, res) => {
 //get notification count
 exports.getNotificationCount = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(400).json({
@@ -187,13 +194,14 @@ exports.getNotificationCount = async (req, res) => {
 
     const count = notifications.filter((notification) => {
       const codes = notification.targetCodes?.map((c) => c.code) || [];
+      const roles = notification.targetRole || [];
 
       const isVisible =
-        (notification.targetRole === "user" &&
+        (roles.includes("user") &&
           (codes.length === 0 || codes.includes(user.code))) ||
-        (notification.targetRole === user.role &&
+        (roles.includes(user.role) &&
           (codes.length === 0 || codes.includes(user.code))) ||
-        (!notification.targetRole &&
+        (roles.length === 0 &&
           (codes.length === 0 || codes.includes(user.code)));
 
       const isUnseen = !notification.readBy.some(

@@ -3,40 +3,47 @@ const User = require("../model/User");
 
 exports.notifyAdmins = async (notification) => {
   try {
-    // console.log("Notification:", notification);
-    let user = [];
-    if (notification.targetRole) {
-      if (notification.targetRole === "user") {
-        if (notification.targetCodes.length > 0) {
-          user = await User.find({
+    let users = [];
+
+    const hasTargetCodes = notification.targetCodes?.length > 0;
+    const hasTargetRole = notification.targetRole?.length > 0;
+
+    if (hasTargetRole) {
+      if (notification.targetRole.includes("user")) {
+        if (hasTargetCodes) {
+          // Specific users with given codes
+          users = await User.find({
             code: { $in: notification.targetCodes.map((c) => c.code) },
           });
         } else {
-          // Global notification to all users (treating "user" as global)
-          user = await User.find();
+          // Global notification to all users
+          users = await User.find();
         }
       } else {
-        if (notification.targetCodes.length > 0) {
-          user = await User.find({
+        if (hasTargetCodes) {
+          // Match users with specified codes (role doesn't matter in this case)
+          users = await User.find({
             code: { $in: notification.targetCodes.map((c) => c.code) },
           });
         } else {
-          user = await User.find({ role: notification.targetRole });
+          // Match users by any of the specified roles
+          users = await User.find({
+            role: { $in: notification.targetRole },
+          });
         }
       }
-    } else if (
-      (notification.targetCodes.length && notification.targetRole.length) > 0
-    ) {
-      user = await User.find({
+    } else if (hasTargetCodes) {
+      // Only codes provided (no roles)
+      users = await User.find({
         code: { $in: notification.targetCodes.map((c) => c.code) },
       });
     } else {
-      user = await User.find();
+      // Fallback: notify all users
+      users = await User.find();
     }
 
-    // console.log("User:", user);
-    // Emit to each admin by room name (userId)
-    user.forEach((user) => {
+    // Emit to each user by socket room (userId)
+    users.forEach((user) => {
       const userId = user._id.toString();
       io.to(userId).emit("notification", {
         notification,

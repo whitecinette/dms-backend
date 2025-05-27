@@ -5,6 +5,7 @@ const WeeklyBeatMappingSchedule = require('../../model/WeeklyBeatMappingSchedule
 const HierarchyEntries = require('../../model/HierarchyEntries');
 const ActorTypesHierarchy = require('../../model/ActorTypesHierarchy');
 const DeletedData = require('../../model/DeletedData');
+const Notification = require('../../model/Notification');
 
 // exports.addRoutePlan = async (req, res) => {
 //   try {
@@ -123,6 +124,12 @@ const DeletedData = require('../../model/DeletedData');
 //     res.status(500).json({ message: 'Internal Server Error' });
 //   }
 // };
+const formatDate = (date) =>
+  new Date(date).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 
 exports.addRoutePlan = async (req, res) => {
   try {
@@ -218,6 +225,13 @@ exports.addRoutePlan = async (req, res) => {
         });
       }
     }
+    const notification = {
+      title: 'Route Plan',
+      message: `The user with code ${userCode} wants to create ${name} routes from ${formatDate(startDate)} to ${formatDate(endDate)}.`,
+      filters: [userCode, name, startDate, endDate],
+      targetRole: ['admin','super_admin'],
+    }
+    await Notification.create(notification);
 
     return res.status(201).json({
       message: 'Route Plan and beat mappings created successfully.',
