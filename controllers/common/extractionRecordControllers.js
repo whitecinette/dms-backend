@@ -519,6 +519,231 @@ exports.getExtractionStatus = async (req, res) => {
       });
     }
   };
+
+// get extraction report for admin
+  exports.getExtractionReportForAdmin = async (req, res) => {
+   try {
+       const { startDate, endDate, segment, brand, metric = 'volume' } = req.query;
+
+       const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+       const end = endDate
+         ? new Date(endDate)
+         : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
+       
+       const matchStage = {
+           createdAt: { $gte: start, $lte: end }
+       };
+
+       if (segment) matchStage.segment = segment;
+       if (brand) matchStage.brand = brand;
+
+       const brands = ['Samsung', 'Vivo', 'Oppo', 'Xiaomi', 'Apple', 'OnePlus', 'Realme', 'Motorola'];
+
+       const getPriceClassExpr = {
+           $switch: {
+               branches: [
+                   { case: { $lt: ["$price", 6000] }, then: "<6k" },
+                   { case: { $lt: ["$price", 10000] }, then: "6-10k" },
+                   { case: { $lt: ["$price", 15000] }, then: "10-15k" },
+                   { case: { $lt: ["$price", 20000] }, then: "15-20k" },
+                   { case: { $lt: ["$price", 30000] }, then: "20-30k" },
+                   { case: { $lt: ["$price", 40000] }, then: "30-40k" },
+                   { case: { $lt: ["$price", 70000] }, then: "40-70k" },
+                   { case: { $lt: ["$price", 100000] }, then: "70-100k" },
+               ],
+               default: "100k+"
+           }
+       };
+
+       const aggregationPipeline = [
+           { $match: matchStage },
+           {
+               $project: {
+                   brand: {
+                       $cond: {
+                           if: { $in: [{ $toLower: "$brand" }, brands.map(b => b.toLowerCase())] },
+                           then: {
+                               $concat: [
+                                   { $toUpper: { $substrCP: ["$brand", 0, 1] } },
+                                   {
+                                       $substrCP: [
+                                           { $toLower: "$brand" },
+                                           1,
+                                           { $subtract: [{ $strLenCP: "$brand" }, 1] }
+                                       ]
+                                   }
+                               ]
+                           },
+                           else: "Others"
+                       }
+                   },
+                   priceClass: getPriceClassExpr,
+                   value: {
+                       $cond: {
+                           if: { $eq: [metric, "value"] },
+                           then: { $ifNull: ["$amount", { $multiply: ["$price", "$quantity"] }] },
+                           else: "$quantity"
+                       }
+                   }
+               }
+           },
+           {
+               $group: {
+                   _id: { priceClass: "$priceClass", brand: "$brand" },
+                   total: { $sum: "$value" }
+               }
+           },
+           {
+               $group: {
+                   _id: "$_id.priceClass",
+                   brands: {
+                       $push: {
+                           brand: "$_id.brand",
+                           total: "$total"
+                       }
+                   }
+               }
+           },
+           {
+               $project: {
+                   _id: 0,
+                   priceClass: "$_id",
+                   brands: 1
+               }
+           }
+       ];
+
+       const aggregatedData = await ExtractionRecord.aggregate(aggregationPipeline);
+
+       const response = aggregatedData.map(entry => {
+           const row = { "Price Class": entry.priceClass, "Rank of Samsung": null };
+
+           // Initialize all brands
+           brands.concat("Others").forEach(b => {
+               row[b] = 0;
+           });
+
+           entry.brands.forEach(b => {
+               row[b.brand] = b.total;
+           });
+
+           // Calculate rank of Samsung
+           const sortedBrands = Object.entries(row)
+               .filter(([key]) => brands.includes(key) || key === "Others")
+               .sort(([, a], [, b]) => b - a);
+
+           const samsungIndex = sortedBrands.findIndex(([b]) => b === "Samsung");
+           row["Rank of Samsung"] = samsungIndex >= 0 ? samsungIndex + 1 : null;
+
+           return row;
+       });
+
+       return res.status(200).json({
+           metricUsed: metric,
+           totalPriceClasses: response.length,
+           data: response
+       });
+
+   } catch (error) {
+       console.error("Error in getExtractionReport:", error.message, error.stack);
+       return res.status(500).json({ error: 'Internal Server Error', details: error.message });
+   }
+};
+
+// get extraction report for asm
+exports.getExtractionReportForAsm = async (req, res) => {
+ try {
+   const { asmCode } = req.query;
+
+   if (!asmCode) {
+     return res.status(400).json({ error: 'ASM code is required.' });
+   }
+
+   // Step 1: Find all hierarchy entries for the ASM
+   const hierarchyEntries = await HierarchyEntries.find({ asm: asmCode });
+
+   if (!hierarchyEntries.length) {
+     return res.status(404).json({ error: 'No hierarchy found for the given ASM code.' });
+   }
+
+   // Step 2: Extract unique MDD, TSE, and Dealer codes under this ASM
+   const mddSet = new Set();
+   const tseSet = new Set();
+   const dealerSet = new Set();
+
+   hierarchyEntries.forEach(entry => {
+     if (entry.mdd) mddSet.add(entry.mdd);
+     if (entry.tse) tseSet.add(entry.tse);
+     if (entry.dealer) dealerSet.add(entry.dealer);
+   });
+
+   const mddCodes = [...mddSet];
+   const tseCodes = [...tseSet];
+   const dealerCodes = [...dealerSet];
+
+   return res.status(200).json({
+     asm: asmCode,
+     totalMdd: mddCodes.length,
+     totalTse: tseCodes.length,
+     totalDealers: dealerCodes.length,
+     mddCodes,
+     tseCodes,
+     dealerCodes
+   });
+
+ } catch (error) {
+   console.error("Error getting report for ASM:", error);
+   return res.status(500).json({ error: 'Internal Server Error' });
+ }
+};
+
+// get extraction report for mdd
+
+exports.getExtractionReportForMdd = async (req, res) => {
+ try {
+   const { mddCode } = req.query;
+
+   if (!mddCode) {
+     return res.status(400).json({ error: 'MDD code is required.' });
+   }
+
+   // Step 1: Fetch all hierarchy entries for the given MDD
+   const hierarchyEntries = await HierarchyEntries.find({ mdd: mddCode });
+
+   if (!hierarchyEntries.length) {
+     return res.status(404).json({ error: 'No hierarchy found for the given MDD code.' });
+   }
+
+   // Step 2: Extract unique TSE and Dealer codes under this MDD
+   const tseSet = new Set();
+   const dealerSet = new Set();
+
+   hierarchyEntries.forEach(entry => {
+     if (entry.tse) tseSet.add(entry.tse);
+     if (entry.dealer) dealerSet.add(entry.dealer);
+   });
+
+   const tseCodes = [...tseSet];
+   const dealerCodes = [...dealerSet];
+
+   return res.status(200).json({
+     mdd: mddCode,
+     totalTse: tseCodes.length,
+     totalDealers: dealerCodes.length,
+     tseCodes,
+     dealerCodes
+   });
+
+ } catch (error) {
+   console.error("Error getting extraction report for MDD:", error);
+   return res.status(500).json({ error: 'Internal Server Error' });
+ }
+};
+
+
+
+
+  
   
   
 

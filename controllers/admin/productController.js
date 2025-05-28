@@ -448,12 +448,20 @@ exports.updateProducts = async (req, res) => {
          productEntry[header] = row[originalKey]?.trim();
        });
 
-       productEntry.price = Number(productEntry.price);
-       productEntry.segment = determineSegment(productEntry.price);
-
-       if (!productEntry.status) productEntry.status = "active";
-
-       results.push(productEntry);
+       if (productEntry.price !== undefined && productEntry.price !== null && productEntry.price !== "") {
+        productEntry.price = Number(productEntry.price);
+        productEntry.segment = determineSegment(productEntry.price);
+      } else {
+        // Remove price and segment if price is missing or empty,
+        // so it won't overwrite existing price/segment in DB during update
+        delete productEntry.price;
+        delete productEntry.segment;
+      }
+      
+      if (!productEntry.status) productEntry.status = "active";
+      
+      results.push(productEntry);
+      
      })
      .on("end", async () => {
        try {
@@ -461,7 +469,6 @@ exports.updateProducts = async (req, res) => {
            return res.status(400).json({ success: false, message: "No valid data found in CSV." });
          }
 
-         // Use product_code as the identifier
          const productCodesInCSV = results.map(p => p.product_code).filter(Boolean);
          const existingProducts = await Product.find({ product_code: { $in: productCodesInCSV } });
          const existingProductMap = {};
@@ -470,44 +477,53 @@ exports.updateProducts = async (req, res) => {
          });
 
          const newProducts = [];
+         const newProductSummary = []; // 👈 Store summary of new products
          const bulkUpdates = [];
 
          for (const p of results) {
-           // Skip if product_code is missing
            if (!p.product_code) continue;
 
            const existing = existingProductMap[p.product_code];
 
            if (!existing) {
-             // New product — add only if product_code exists and required fields are present
-             newProducts.push({
-               brand: p.brand,
+             // New product
+             const price = p.price !== undefined ? p.price : 0;
+
+             const newProduct = {
+               brand: p.brand || null,
                product_name: p.product_name,
-               product_category: p.product_category,
-               price: p.price,
-               segment: p.segment,
+               product_category: p.product_category || null,
+               price: price,
+               segment: determineSegment(price),
                model_code: p.model_code,
                product_code: p.product_code,
-               product_name_code: p.product_name_code || generateIdentifier(p.product_name || ""),
                isAvailable: true,
                status: p.status
+             };
+             
+
+             newProducts.push(newProduct);
+             newProductSummary.push({
+               product_code: newProduct.product_code,
+               product_name: newProduct.product_name
              });
            } else {
-             // Existing product — update fields
+             // Existing product
              const updatableFields = [
-               "brand", "product_name", "product_category", "price",
-               "segment", "status", "product_name_code"
-             ];
+              "brand", "product_name", "price",
+              "segment", "status"
+            ];
+            
+            const updateFields = { isAvailable: true };
+            
+            updatableFields.forEach(field => {
+              const value = p[field];
+              if (value !== undefined && value !== null && value !== "") {
+                updateFields[field] = value;
+              }
+            });
+            
 
-             const updateFields = { isAvailable: true };
-
-             updatableFields.forEach(field => {
-               if (field in p) {
-                 updateFields[field] = p[field];
-               }
-             });
-
-             // Do NOT update product_code (even if present)
              bulkUpdates.push({
                updateOne: {
                  filter: { product_code: p.product_code },
@@ -525,13 +541,11 @@ exports.updateProducts = async (req, res) => {
            await Product.bulkWrite(bulkUpdates);
          }
 
-         // Mark products from CSV as available
          await Product.updateMany(
            { product_code: { $in: productCodesInCSV } },
            { $set: { isAvailable: true } }
          );
 
-         // Mark products NOT in CSV as unavailable
          await Product.updateMany(
            { product_code: { $nin: productCodesInCSV } },
            { $set: { isAvailable: false } }
@@ -542,7 +556,8 @@ exports.updateProducts = async (req, res) => {
            message: "Products updated successfully",
            added: newProducts.length,
            updated: bulkUpdates.length,
-           markedAvailable: productCodesInCSV.length
+           markedAvailable: productCodesInCSV.length,
+           newProductList: newProductSummary // 👈 Return new products info
          });
 
        } catch (error) {
@@ -556,3 +571,4 @@ exports.updateProducts = async (req, res) => {
    return res.status(500).json({ success: false, message: "Server error" });
  }
 };
+
