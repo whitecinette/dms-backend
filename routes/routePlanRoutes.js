@@ -1,6 +1,6 @@
 const express = require("express");
-const { userAuth } = require('../middlewares/authmiddlewares');
-const { addRoutePlan, getRoutePlansForUser, getDropdownOptionsForMarketCoverageUser, getUserRoutesNamesForDropdown, deleteRoutePlanAndUpdateBeatMapping } = require("../controllers/common/routePlanController");
+const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
+const { addRoutePlan, getRoutePlansForUser, getDropdownOptionsForMarketCoverageUser, getUserRoutesNamesForDropdown, deleteRoutePlanAndUpdateBeatMapping, getAllRoutePlans, editRoutePlan } = require("../controllers/common/routePlanController");
 const router = express.Router();
 
 
@@ -12,5 +12,8 @@ router.delete('/route-plan/delete/:routeId', userAuth, deleteRoutePlanAndUpdateB
 // USER MODEL ROUES 
 router.get("/user/market-coverage/dropdown", userAuth, getDropdownOptionsForMarketCoverageUser);
 
+//admin
+router.get("/admin/route-plan/get", adminOrSuperAdminAuth, getAllRoutePlans);
+router.put("/admin/route-plan/update/:routeId", adminOrSuperAdminAuth, editRoutePlan);
 
 module.exports = router;
