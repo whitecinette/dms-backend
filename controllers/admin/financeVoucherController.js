@@ -108,6 +108,9 @@ exports.uploadFinanceVouchers = async (req, res) => {
 
     }
 
+    // Delete all existing records before inserting new ones
+    await FinanceVoucher.deleteMany({});
+
     await FinanceVoucher.insertMany(cleaned);
     return res.status(200).json({ message: "Upload successful", inserted: cleaned.length });
   } catch (err) {
@@ -115,6 +118,111 @@ exports.uploadFinanceVouchers = async (req, res) => {
     return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+// exports.uploadFinanceVouchers = async (req, res) => {
+//   try {
+//     if (!req.file) return res.status(400).json({ message: "File is required." });
+
+//     const isExcel = req.file.originalname.endsWith(".xlsx");
+//     const isCsv = req.file.originalname.endsWith(".csv");
+
+//     let rows = [];
+
+//     if (isExcel) {
+//       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+//       const sheet = workbook.Sheets[workbook.SheetNames[0]];
+//       rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+//     } else if (isCsv) {
+//       const csv = req.file.buffer.toString("utf-8");
+//       rows = XLSX.utils.sheet_to_json(XLSX.read(csv, { type: "string" }).Sheets.Sheet1, { defval: "" });
+//     } else {
+//       return res.status(400).json({ message: "Unsupported file format." });
+//     }
+
+//     const cleaned = [];
+
+//     for (const row of rows) {
+//       const rawDateVal = row.Date;
+//       const dueDateVal = row["Due Date"];
+
+//       // Skip repeated headers and total rows
+//       if (
+//         typeof rawDateVal === "string" && rawDateVal.toLowerCase().includes("total") ||
+//         typeof row["MDD Code"] === "string" && row["MDD Code"].toLowerCase().includes("mdd code")
+//       ) {
+//         continue;
+//       }
+
+//       // Safe moment parse (Excel formatted or serial fallback)
+//       const rawDate = moment(rawDateVal, "DD-MMM-YY", true).isValid()
+//         ? moment.tz(rawDateVal, "DD-MMM-YY", "Asia/Kolkata")
+//         : parseExcelSerialDate(rawDateVal);
+
+//       const dueDate = moment(dueDateVal, "DD-MMM-YY", true).isValid()
+//         ? moment.tz(dueDateVal, "DD-MMM-YY", "Asia/Kolkata")
+//         : parseExcelSerialDate(dueDateVal);
+
+//       const amtRaw = row["Invoice Amt"];
+//       const isCredit = typeof amtRaw === "string" && amtRaw.toLowerCase().includes("cr");
+//       console.log("isCredit: ", isCredit);
+//       console.log("amt row: ", amtRaw)
+
+//       const refRaw = row["Invoice/CN/DN No"];
+//       const refStr = typeof refRaw === "string" ? refRaw : refRaw?.toString() || "";
+//       const refLower = refStr.toLowerCase();
+//       const refUpper = refStr.toUpperCase();
+
+//       const voucherType = (() => {
+//         if (refLower.includes("scheme") || refLower.includes("stk")) {
+//           return isCredit ? "Credit Note" : "Debit Note";
+//         }
+//         if (refUpper.startsWith("SZD") || refUpper.startsWith("GT")) {
+//           return "Invoice";
+//         }
+//         return "Debit Note";
+//       })();
+
+
+//       const pendingAmt = parseFloat((row["Pending Amt"] || "").toString().replace(/[^\d.-]/g, "")) || 0;
+//       const invoiceAmt = parseFloat((amtRaw || "").toString().replace(/[^\d.-]/g, "")) || 0;
+//       const dueDays = parseInt(row["Due Days"]) || 0;
+//       const today = moment().startOf("day");
+
+//       let remarks = "Upcoming Dues";
+//       if (dueDate) {
+//         const diff = dueDate.diff(today, "days");
+//         if (diff < 0) remarks = "Overdue";
+//         else if (diff === 0) remarks = "Today Due";
+//       }
+
+//         cleaned.push({
+//         code: row["MDD Code"] || "",
+//         name: row["MDD Name"] || "",
+//         partyName: row["Party's Name"] || "",
+//         voucherName: row["Invoice/CN/DN No"] || "",
+//         voucherType,
+//         invoiceNumber: row["Invoice/CN/DN No"] || "",
+//         date: rawDate?.format("DD-MMM-YY") || rawDateVal,
+//         dateISO: rawDate?.toDate() || null,
+//         dueDate: dueDate?.format("DD-MMM-YY") || dueDateVal,
+//         dueDateISO: dueDate?.toDate() || null,
+//         dueDays,
+//         invoiceAmount: invoiceAmt,
+//         pendingAmount: pendingAmt,
+//         isCredit,
+//         remarks,
+//         overDueDays: dueDays,
+//         });
+
+//     }
+
+//     await FinanceVoucher.insertMany(cleaned);
+//     return res.status(200).json({ message: "Upload successful", inserted: cleaned.length });
+//   } catch (err) {
+//     console.error("Upload error:", err);
+//     return res.status(500).json({ message: "Server error", error: err.message });
+//   }
+// };
 
 exports.getFinanceVouchersForAdmin = async (req, res) => {
   try {
