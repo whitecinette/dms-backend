@@ -345,6 +345,7 @@ exports.getFinanceOutstandingBreakup = async (req, res) => {
         invoiceAmount: parseFloat(v.invoiceAmount || 0),
         paymentReceived: parseFloat(v.invoiceAmount || 0) - parseFloat(v.pendingAmount || 0),
         pendingAmount: parseFloat(v.pendingAmount || 0),
+        tds: "0.0",
         overDueDays: odDays,
         totalDueOverdue: dueOverdue,
         remarks,
