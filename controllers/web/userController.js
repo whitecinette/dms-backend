@@ -138,6 +138,37 @@ exports.loginUserForApp = async (req, res) => {
       return res.status(500).json({ message: "Server Error", error });
     }
   };
+
+exports.loginMddWithFirebasePhone = async (req, res) => {
+  try {
+    console.log("Hi mdd")
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ message: "Phone number is required" });
+
+    const user = await User.findOne({ role: "mdd", "owner_details.phone": phone });
+
+    if (!user) return res.status(404).json({ message: "MDD user not found with this phone" });
+
+    const tokenPayload = {
+      id: user._id,
+      code: user.code,
+      name: user.name,
+      role: user.role,
+      position: user.position,
+      status: user.status,
+      isVerified: user.isVerified,
+    };
+
+    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "7d" });
+
+    return res.status(200).json({ user, token });
+  } catch (err) {
+    console.error("Firebase MDD Login Error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+
 // fetched dealers credit limit
 exports.fetchCreditLimit = async (req, res) => {
  try {

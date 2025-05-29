@@ -3,7 +3,7 @@ const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBy
     updateUserLabelsFromCSV, createSecurityKey, updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile } = require("../controllers/common/userController");
-const { loginUserForApp, registerUserForApp, fetchCreditLimit } = require("../controllers/web/userController");
+const { loginUserForApp, registerUserForApp, fetchCreditLimit, loginMddWithFirebasePhone } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
 
@@ -57,6 +57,8 @@ router.get("/fetch-dealer-credit-limit", userAuth, fetchCreditLimit);
 
 // USER APIS 
 router.post("/app/user/login", loginUserForApp);
+router.post("/app/user/firebase-mdd-login-by-phone", loginMddWithFirebasePhone);
+
 router.post("/app/user/register", registerUserForApp);
 router.post("/user/change-password", changeUserPassword);
 router.get("/user/get-profile", userAuth, getProfile);
