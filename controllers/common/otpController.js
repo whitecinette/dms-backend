@@ -47,7 +47,7 @@ exports.verifyOtp = async (req, res) => {
     // Match user based on owner_details.phone
     const user = await User.findOne({ "owner_details.phone": phone, role : 'mdd' });
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ message: "User not found!" });
     }
 
     // Check if the user is active and verified
