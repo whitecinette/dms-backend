@@ -505,7 +505,8 @@ exports.updateProducts = async (req, res) => {
              newProducts.push(newProduct);
              newProductSummary.push({
                product_code: newProduct.product_code,
-               product_name: newProduct.product_name
+               product_name: newProduct.product_name,
+               price: newProduct.price
              });
            } else {
              // Existing product
