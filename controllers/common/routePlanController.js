@@ -239,7 +239,7 @@ exports.addRoutePlan = async (req, res) => {
       message: `The user with code ${userCode} wants to create ${name} routes from ${formatDate(
         startDate
       )} to ${formatDate(endDate)}.`,
-      filters: [userCode, name, startDate, endDate],
+      filters: [name, startDate, endDate],
       targetRole: ["admin", "super_admin"],
     };
     await Notification.create(notification);
@@ -598,114 +598,114 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
 };
 
 //get All route plan for admin
-exports.getAllRoutePlans = async (req, res) => {
-  try {
-    const { startDate, endDate, status, approved, search, itinerary: itineraryParam } = req.query;
+// exports.getAllRoutePlans = async (req, res) => {
+//   try {
+//     const { startDate, endDate, status, approved, search, itinerary: itineraryParam } = req.query;
 
-    // console.log("Request query:", req.query);
+//     // console.log("Request query:", req.query);
 
-    const query = {};
-    // console.log("Parsed itinerary:", itineraryParam);
+//     const query = {};
+//     // console.log("Parsed itinerary:", itineraryParam);
 
-    // Handle date range filters
-    if (startDate && endDate) {
-      const start = new Date(startDate).setHours(0, 0, 0, 0);
-      const end = new Date(endDate).setHours(23, 59, 59, 999);
-      query.startDate = { $gte: start, $lte: end };
-      query.endDate = { $gte: start, $lte: end };
-    }
+//     // Handle date range filters
+//     if (startDate && endDate) {
+//       const start = new Date(startDate).setHours(0, 0, 0, 0);
+//       const end = new Date(endDate).setHours(23, 59, 59, 999);
+//       query.startDate = { $gte: start, $lte: end };
+//       query.endDate = { $gte: start, $lte: end };
+//     }
 
-    // Handle status filter
-    if (status) {
-      query.status = status;
-    }
+//     // Handle status filter
+//     if (status) {
+//       query.status = status;
+//     }
 
-    // Handle approved filter
-    if (approved) {
-      query.approved = approved === 'true'; // Convert string to boolean
-    }
+//     // Handle approved filter
+//     if (approved) {
+//       query.approved = approved === 'true'; // Convert string to boolean
+//     }
 
-    // Handle itinerary filters
-    if (itineraryParam && itineraryParam.trim() !== '' && itineraryParam !== '[]') {
-      try {
-        const itinerary = JSON.parse(itineraryParam); // e.g., { "taluka": ["Dausa (M)"] }
+//     // Handle itinerary filters
+//     if (itineraryParam && itineraryParam.trim() !== '' && itineraryParam !== '[]') {
+//       try {
+//         const itinerary = JSON.parse(itineraryParam); // e.g., { "taluka": ["Dausa (M)"] }
 
-        // Validate itinerary input
-        if (typeof itinerary !== 'object' || Array.isArray(itinerary) || Object.keys(itinerary).length === 0) {
-          return res.status(400).json({ success: false, message: "Invalid itinerary filter format" });
-        }
+//         // Validate itinerary input
+//         if (typeof itinerary !== 'object' || Array.isArray(itinerary) || Object.keys(itinerary).length === 0) {
+//           return res.status(400).json({ success: false, message: "Invalid itinerary filter format" });
+//         }
 
-        // Build query for itinerary map
-        Object.entries(itinerary).forEach(([key, values]) => {
-          if (Array.isArray(values) && values.length > 0) {
-            query[`itinerary.${key}`] = { $in: values.map(val => val.trim()) };
-          } else if (typeof values === 'string' && values.trim() !== '') {
-            query[`itinerary.${key}`] = { $in: [values.trim()] };
-          }
-        });
-      } catch (err) {
-        console.warn("Invalid itinerary JSON:", err.message);
-        return res.status(400).json({ success: false, message: "Invalid itinerary filter format" });
-      }
-    }
+//         // Build query for itinerary map
+//         Object.entries(itinerary).forEach(([key, values]) => {
+//           if (Array.isArray(values) && values.length > 0) {
+//             query[`itinerary.${key}`] = { $in: values.map(val => val.trim()) };
+//           } else if (typeof values === 'string' && values.trim() !== '') {
+//             query[`itinerary.${key}`] = { $in: [values.trim()] };
+//           }
+//         });
+//       } catch (err) {
+//         console.warn("Invalid itinerary JSON:", err.message);
+//         return res.status(400).json({ success: false, message: "Invalid itinerary filter format" });
+//       }
+//     }
 
-    // Fetch routes based on the constructed query
-    // console.log("🚀 Query:", JSON.stringify(query, null, 2));
-    const routes = await RoutePlan.find(query);
+//     // Fetch routes based on the constructed query
+//     // console.log("🚀 Query:", JSON.stringify(query, null, 2));
+//     const routes = await RoutePlan.find(query);
 
-    // Fetch employees to map employee details
-    const employees = await User.find(
-      { role: "employee" },
-      "code name position"
-    );
+//     // Fetch employees to map employee details
+//     const employees = await User.find(
+//       { role: "employee" },
+//       "code name position"
+//     );
 
-    const employeeMap = employees.reduce((acc, emp) => {
-      acc[emp.code.trim().toLowerCase()] = {
-        name: emp.name,
-        position: emp.position,
-      };
-      return acc;
-    }, {});
+//     const employeeMap = employees.reduce((acc, emp) => {
+//       acc[emp.code.trim().toLowerCase()] = {
+//         name: emp.name,
+//         position: emp.position,
+//       };
+//       return acc;
+//     }, {});
 
-   // Format routes with employee details
-    const formattedRoutes = routes.map((route) => {
-      const code = route.code;
-      const employeeInfo = employeeMap[code.toLowerCase()];
-      return {
-        _id: route._id,
-        code: route.code,
-        name: route.name,
-        startDate: route.startDate,
-        endDate: route.endDate,
-        status: route.status,
-        approved: route.approved,
-        EmpName: employeeInfo?.name || null,
-        position: employeeInfo?.position || null,
-        itinerary: route.itinerary,
-      };
-    });
+//    // Format routes with employee details
+//     const formattedRoutes = routes.map((route) => {
+//       const code = route.code;
+//       const employeeInfo = employeeMap[code.toLowerCase()];
+//       return {
+//         _id: route._id,
+//         code: route.code,
+//         name: route.name,
+//         startDate: route.startDate,
+//         endDate: route.endDate,
+//         status: route.status,
+//         approved: route.approved,
+//         EmpName: employeeInfo?.name || null,
+//         position: employeeInfo?.position || null,
+//         itinerary: route.itinerary,
+//       };
+//     });
 
-    // Apply search filter on code, name, and EmpName
-    const filteredRoutes = formattedRoutes.filter((route) => {
-      const searchTerms = search ? search.toLowerCase().split(" ") : [];
-      return searchTerms.every((term) => {
-        return (
-          route.code.toLowerCase().includes(term) ||
-          route.name.toLowerCase().includes(term) ||
-          route.EmpName?.toLowerCase().includes(term)
-        );
-      });
-    });
+//     // Apply search filter on code, name, and EmpName
+//     const filteredRoutes = formattedRoutes.filter((route) => {
+//       const searchTerms = search ? search.toLowerCase().split(" ") : [];
+//       return searchTerms.every((term) => {
+//         return (
+//           route.code.toLowerCase().includes(term) ||
+//           route.name.toLowerCase().includes(term) ||
+//           route.EmpName?.toLowerCase().includes(term)
+//         );
+//       });
+//     });
 
-    res.status(200).json({
-      success: true,
-      data: filteredRoutes,
-    });
-  } catch (err) {
-    console.error("Error in getAllRoutePlans:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
+//     res.status(200).json({
+//       success: true,
+//       data: filteredRoutes,
+//     });
+//   } catch (err) {
+//     console.error("Error in getAllRoutePlans:", err);
+//     return res.status(500).json({ success: false, message: "Server error" });
+//   }
+// };
 
 //edit route plan by admin
 exports.editRoutePlan = async (req, res) => {
@@ -713,17 +713,15 @@ exports.editRoutePlan = async (req, res) => {
     const { routeId } = req.params;
     const { approved, status } = req.body;
     const route = await RoutePlan.findById(routeId);
+    console.log(req.body)
     if (!route) {
       return res
         .status(404)
         .json({ success: false, message: "Route not found" });
     }
 
-    if (approved === "true") {
-      route.approved = true;
-    } else if (approved === "false") {
-      route.approved = false;
-    }
+      route.approved = approved;
+
     if (status) {
       route.status = status;
     }
@@ -734,6 +732,205 @@ exports.editRoutePlan = async (req, res) => {
       .json({ success: true, message: "Route updated successfully" });
   } catch (err) {
     console.error("Error in editRoutePlan:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getAllRoutePlans = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      status,
+      approved,
+      search,
+      itinerary: itineraryParam,
+    } = req.query;
+
+    const query = {};
+
+    // Normalize and set timezone to UTC
+    if (startDate && endDate) {
+      const start = new Date(startDate).setHours(0, 0, 0, 0);
+      const end = new Date(endDate).setHours(23, 59, 59, 999);
+
+      query.startDate = { $gte: start };
+      query.endDate = { $lte: end };
+    }
+
+    if (status) query.status = status;
+    if (approved) query.approved = approved === "true";
+
+    if (
+      itineraryParam &&
+      itineraryParam.trim() !== "" &&
+      itineraryParam !== "[]"
+    ) {
+      try {
+        const itinerary = JSON.parse(itineraryParam); // e.g., { "taluka": ["Dausa (M)"] }
+
+        // Validate itinerary input
+        if (
+          typeof itinerary !== "object" ||
+          Array.isArray(itinerary) ||
+          Object.keys(itinerary).length === 0
+        ) {
+          return res
+            .status(400)
+            .json({
+              success: false,
+              message: "Invalid itinerary filter format",
+            });
+        }
+
+        // Build query for itinerary map
+        Object.entries(itinerary).forEach(([key, values]) => {
+          if (Array.isArray(values) && values.length > 0) {
+            query[`itinerary.${key}`] = {
+              $in: values.map((val) => val.trim()),
+            };
+          } else if (typeof values === "string" && values.trim() !== "") {
+            query[`itinerary.${key}`] = { $in: [values.trim()] };
+          }
+        });
+      } catch (err) {
+        console.warn("Invalid itinerary JSON:", err.message);
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid itinerary filter format" });
+      }
+    }
+
+    // Fetch routes and employees
+    const routes = await RoutePlan.find(query);
+    const employees = await User.find(
+      { role: "employee" },
+      "code name position"
+    );
+
+    // Create employee map for easy lookup
+    const employeeMap = employees.reduce((acc, emp) => {
+      acc[emp.code.trim().toLowerCase()] = {
+        name: emp.name,
+        position: emp.position,
+      };
+      return acc;
+    }, {});
+
+    // Process each route and get matching dealers
+    const results = await Promise.all(
+      routes.map(async (route) => {
+        const empCode = route.code?.toLowerCase();
+        const itinerary = route.itinerary || {};
+        //  console.log("ItiL: ", itinerary);
+        // Fetch beat mappings in date range for this code
+        const schedules = await WeeklyBeatMappingSchedule.find({
+          code: route.code,
+          $or: [
+            {
+              startDate: { $lte: route.endDate },
+              endDate: { $gte: route.startDate },
+            },
+          ],
+        });
+
+        // Flatten all dealer entries from schedule for the current route
+        const allDealers = schedules.flatMap((mapping) => {
+          const mappingStart = new Date(mapping.startDate).toISOString(); // Normalize
+          const mappingEnd = new Date(mapping.endDate).toISOString(); // Normalize
+          const routeStart = new Date(route.startDate).toISOString(); // Normalize
+          const routeEnd = new Date(route.endDate).toISOString(); // Normalize
+
+          const inRange = mappingEnd >= routeStart && mappingStart <= routeEnd;
+          if (!inRange) return [];
+
+          return mapping.schedule.map((dealer) => ({
+            code: dealer.code?.trim(),
+            name: dealer.name,
+            district: dealer.district?.trim(),
+            taluka: dealer.taluka?.trim(),
+            zone: dealer.zone?.trim(),
+            position: dealer.position,
+            status: dealer.status,
+          }));
+        });
+
+        //  console.log("taluka: ", itinerary.taluka);
+
+        // Filter dealers by itinerary match for the current route
+        const filteredDealers = allDealers.filter((dealer) => {
+          // Match against itinerary fields
+          const matchTaluka = itinerary
+            .get("taluka")
+            ?.some((t) => dealer.taluka?.toLowerCase() === t.toLowerCase());
+          const matchDistrict = itinerary
+            .get("district")
+            ?.some((d) => dealer.district?.toLowerCase() === d.toLowerCase());
+          const matchZone = itinerary
+            .get("zone")
+            ?.some((z) => dealer.zone?.toLowerCase() === z.toLowerCase());
+          // If any match is found in taluka, district, or zone
+          return matchTaluka || matchDistrict || matchZone;
+        });
+        // Remove duplicates by code
+        const dealerMap = filteredDealers.reduce((acc, dealer) => {
+          const code = dealer.code;
+
+          // If this code is not in map yet, or if current dealer is 'done' and existing is not
+          if (
+            !acc[code] ||
+            (dealer.status?.toLowerCase() === "done" &&
+              acc[code].status?.toLowerCase() !== "done")
+          ) {
+            acc[code] = dealer;
+          }
+
+          return acc;
+        }, {});
+
+        const matchedDealers = Object.values(dealerMap);
+
+        // Calculate total, done, and pending
+        const total = matchedDealers.length;
+        const done = matchedDealers.filter(
+          (d) => d.status?.toLowerCase() === "done"
+        ).length;
+        const pending = total - done;
+
+        return {
+          id: route._id,
+          code: route.code,
+          name: route.name,
+          EmpName: employeeMap[empCode]?.name || null,
+          position: employeeMap[empCode]?.position || null,
+          routeName: route.name,
+          startDate: route.startDate,
+          endDate: route.endDate,
+          status: route.status,
+          itinerary: route.itinerary,
+          approved: route.approved,
+          total,
+          done,
+          pending,
+        };
+      })
+    );
+
+    // Optional: apply search filter on name/code/position
+    const filtered = search
+      ? results.filter((r) => {
+          const term = search.toLowerCase();
+          return (
+            r.code?.toLowerCase().includes(term) ||
+            r.name?.toLowerCase().includes(term) ||
+            r.position?.toLowerCase().includes(term)
+          );
+        })
+      : results;
+
+    return res.status(200).json({ success: true, data: filtered });
+  } catch (err) {
+    console.error("Error in getAllRoutePlans:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };

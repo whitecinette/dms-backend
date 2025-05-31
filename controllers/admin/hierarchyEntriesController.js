@@ -221,6 +221,8 @@ exports.addHierarchEntriesByAdmin = async (req, res) => {
 
 // update dealers in hierarchy
 exports.updateHierarchyEntries = async (req, res) => {
+
+  console.log("updateHierarchyEntries called");
  try {
    if (!req.file) {
      return res.status(400).json({ success: false, message: "No file uploaded" });

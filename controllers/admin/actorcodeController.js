@@ -59,8 +59,7 @@ exports.uploadBulkActorCodes = async (req, res) => {
           !cleanedRow.code ||
           !cleanedRow.name ||
           !cleanedRow.position ||
-          !cleanedRow.role ||
-          !cleanedRow.parent_code
+          !cleanedRow.role
         ) {
           errors.push({ row, message: "Missing required fields" });
         } else {

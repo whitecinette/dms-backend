@@ -390,148 +390,148 @@ exports.addWeeklyBeatMappingUsingCSV = async (req, res) => {
 };
 
 //get weekly beat mapping for admin
-exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
-  try {
-    const {
-      startDate,
-      endDate,
-      search,
-      status,
-      page = 1,
-      limit = 20,
-    } = req.query;
+// exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
+//   try {
+//     const {
+//       startDate,
+//       endDate,
+//       search,
+//       status,
+//       page = 1,
+//       limit = 20,
+//     } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Start date and end date are required.",
-      });
-    }
+//     if (!startDate || !endDate) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Start date and end date are required.",
+//       });
+//     }
 
-    // Ensure full day coverage
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
+//     // Ensure full day coverage
+//     const start = new Date(startDate);
+//     start.setHours(0, 0, 0, 0);
 
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+//     const end = new Date(endDate);
+//     end.setHours(23, 59, 59, 999);
 
-    const query = {
-      startDate: { $gte: start },
-      endDate: { $lte: end },
-    };
+//     const query = {
+//       startDate: { $gte: start },
+//       endDate: { $lte: end },
+//     };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+//     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Fetch employees
-    const employees = await User.find(
-      { role: { $in: ["admin", "employee"] } },
-      "code name"
-    ).lean();
+//     // Fetch employees
+//     const employees = await User.find(
+//       { role: { $in: ["admin", "employee"] } },
+//       "code name"
+//     ).lean();
 
-    const employeeMap = employees.reduce((acc, emp) => {
-      acc[emp.code.trim().toLowerCase()] = emp.name;
-      return acc;
-    }, {});
+//     const employeeMap = employees.reduce((acc, emp) => {
+//       acc[emp.code.trim().toLowerCase()] = emp.name;
+//       return acc;
+//     }, {});
 
-    const schedules = await WeeklyBeatMappingSchedule.find(query)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+//     const schedules = await WeeklyBeatMappingSchedule.find(query)
+//       .skip(skip)
+//       .limit(parseInt(limit))
+//       .lean();
 
-    // Fetch route plans for the date range
-    const routePlans = await RoutePlan.find({
-      startDate: { $lte: end },
-      endDate: { $gte: start },
-    }).lean();
+//     // Fetch route plans for the date range
+//     const routePlans = await RoutePlan.find({
+//       startDate: { $lte: end },
+//       endDate: { $gte: start },
+//     }).lean();
 
-    const formattedSchedules = schedules.map((schedule) => {
-      let dealers = schedule.schedule || [];
+//     const formattedSchedules = schedules.map((schedule) => {
+//       let dealers = schedule.schedule || [];
 
-      if (status) {
-        dealers = dealers.filter((dealer) => dealer.status === status);
-      }
+//       if (status) {
+//         dealers = dealers.filter((dealer) => dealer.status === status);
+//       }
 
-      const normalizedCode = schedule.code?.trim().toLowerCase();
-      const employeeName = employeeMap[normalizedCode] || "Unknown";
+//       const normalizedCode = schedule.code?.trim().toLowerCase();
+//       const employeeName = employeeMap[normalizedCode] || "Unknown";
 
-      // Find all matching routes
-      const matchingRoutes = routePlans.filter((route) => {
-        const routeStartStr = new Date(route.startDate)
-          .toISOString()
-          .split("T")[0];
-        const routeEndStr = new Date(route.endDate).toISOString().split("T")[0];
-        const scheduleStartStr = new Date(schedule.startDate)
-          .toISOString()
-          .split("T")[0];
-        const scheduleEndStr = new Date(schedule.endDate)
-          .toISOString()
-          .split("T")[0];
+//       // Find all matching routes
+//       const matchingRoutes = routePlans.filter((route) => {
+//         const routeStartStr = new Date(route.startDate)
+//           .toISOString()
+//           .split("T")[0];
+//         const routeEndStr = new Date(route.endDate).toISOString().split("T")[0];
+//         const scheduleStartStr = new Date(schedule.startDate)
+//           .toISOString()
+//           .split("T")[0];
+//         const scheduleEndStr = new Date(schedule.endDate)
+//           .toISOString()
+//           .split("T")[0];
 
-        return (
-          route.code === schedule.code &&
-          routeStartStr === scheduleStartStr &&
-          routeEndStr === scheduleEndStr
-        );
-      });
+//         return (
+//           route.code === schedule.code &&
+//           routeStartStr === scheduleStartStr &&
+//           routeEndStr === scheduleEndStr
+//         );
+//       });
 
-      // Format routes with their details
-      const routes = matchingRoutes.map((route) => ({
-        name: route.name,
-        id: route._id,
-        status: route.status,
-        itinerary: {
+//       // Format routes with their details
+//       const routes = matchingRoutes.map((route) => ({
+//         name: route.name,
+//         id: route._id,
+//         status: route.status,
+//         itinerary: {
 
-          zones: route.itinerary?.zone || [],
-          districts: route.itinerary?.district || [],
-          talukas: route.itinerary?.taluka || [],
-        },
-      }));
+//           zones: route.itinerary?.zone || [],
+//           districts: route.itinerary?.district || [],
+//           talukas: route.itinerary?.taluka || [],
+//         },
+//       }));
 
-      return {
-        _id: schedule._id,
-        code: schedule.code,
-        name: employeeName,
-        startDate: schedule.startDate,
-        endDate: schedule.endDate,
-        total: schedule.total,
-        done: schedule.done,
-        pending: schedule.pending,
-        schedule: dealers,
-        routes: routes,
-      };
-    });
+//       return {
+//         _id: schedule._id,
+//         code: schedule.code,
+//         name: employeeName,
+//         startDate: schedule.startDate,
+//         endDate: schedule.endDate,
+//         total: schedule.total,
+//         done: schedule.done,
+//         pending: schedule.pending,
+//         schedule: dealers,
+//         routes: routes,
+//       };
+//     });
 
-    // Apply search (code or name)
-    let filteredSchedules = formattedSchedules;
-    if (search) {
-      const searchRegex = new RegExp(search, "i");
-      filteredSchedules = formattedSchedules.filter(
-        (schedule) =>
-          searchRegex.test(schedule.code) ||
-          searchRegex.test(schedule.name) ||
-          searchRegex.test(schedule.routes.map((r) => r.name).join(" "))
-      );
-    }
+//     // Apply search (code or name)
+//     let filteredSchedules = formattedSchedules;
+//     if (search) {
+//       const searchRegex = new RegExp(search, "i");
+//       filteredSchedules = formattedSchedules.filter(
+//         (schedule) =>
+//           searchRegex.test(schedule.code) ||
+//           searchRegex.test(schedule.name) ||
+//           searchRegex.test(schedule.routes.map((r) => r.name).join(" "))
+//       );
+//     }
 
-    const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
+//     const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
 
-    return res.status(200).json({
-      success: true,
-      data: filteredSchedules,
-      total: totalCount,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      totalPages: Math.ceil(totalCount / limit),
-    });
-  } catch (error) {
-    console.error("❌ Error fetching schedules:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       data: filteredSchedules,
+//       total: totalCount,
+//       page: parseInt(page),
+//       limit: parseInt(limit),
+//       totalPages: Math.ceil(totalCount / limit),
+//     });
+//   } catch (error) {
+//     console.error("❌ Error fetching schedules:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
 
 // Edit beat mapping for admin
 exports.editWeeklyBeatMappingScheduleByAdmin = async (req, res) => {
@@ -832,11 +832,12 @@ exports.addDailyBeatMapping = async (req, res) => {
 
       insertedCount++;
     }
-    if(insertedCount === 0) return res.status(200).json({
-      success: true,
-      message: "Beat mapping already created for today.",
-      totalMappedASMs: 0,
-    })
+    if (insertedCount === 0)
+      return res.status(200).json({
+        success: true,
+        message: "Beat mapping already created for today.",
+        totalMappedASMs: 0,
+      });
 
     return res.status(201).json({
       success: true,
@@ -1560,6 +1561,182 @@ exports.deleteDealerFromSchedule = async (req, res) => {
   } catch (error) {
     console.error("Error deleting dealer from schedule:", error);
     return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      search,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date and end date are required.",
+      });
+    }
+
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const query = {
+      startDate: { $gte: start },
+      endDate: { $lte: end },
+    };
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const employees = await User.find(
+      { role: { $in: ["admin", "employee"] } },
+      "code name"
+    ).lean();
+
+    const employeeMap = employees.reduce((acc, emp) => {
+      acc[emp.code.trim().toLowerCase()] = emp.name;
+      return acc;
+    }, {});
+
+    const schedules = await WeeklyBeatMappingSchedule.find(query).lean();
+
+    const routePlans = await RoutePlan.find({
+      startDate: { $lte: end },
+      endDate: { $gte: start },
+    }).lean();
+
+    // Group schedules by employee code
+    const scheduleMap = new Map();
+
+    for (const schedule of schedules) {
+      const normalizedCode = schedule.code?.trim().toLowerCase();
+      if (!normalizedCode) continue;
+
+      if (!scheduleMap.has(normalizedCode)) {
+        scheduleMap.set(normalizedCode, {
+          code: schedule.code,
+          name: employeeMap[normalizedCode] || "Unknown",
+          startDate: schedule.startDate,
+          endDate: schedule.endDate,
+          dealersMap: new Map(),
+          routes: [],
+          _id: schedule._id,
+        });
+      }
+
+      for (const dealer of schedule.schedule || []) {
+        const dealerCode = dealer.code || dealer._id || JSON.stringify(dealer);
+        const dealerStatus = dealer.status || "unknown";
+        const key = dealerCode; // Use dealerCode as key to ensure uniqueness per dealer
+
+        const existing = scheduleMap.get(normalizedCode).dealersMap.get(key);
+
+        if (dealerStatus === "pending" && existing?.status === "done") {
+          continue; // Skip pending if done exists for this dealer
+        }
+
+        if (!existing) {
+          scheduleMap.get(normalizedCode).dealersMap.set(key, {
+            ...dealer,
+            visited: dealerStatus === "done" ? 1 : 0, // Only count for "done" status
+          });
+        } else if (dealerStatus === "done") {
+          // Replace existing with "done" status and update visited count
+          scheduleMap.get(normalizedCode).dealersMap.set(key, {
+            ...dealer,
+            visited: (existing.visited || 0) + 1,
+          });
+        }
+      }
+
+      // Match routes
+      const matchingRoutes = routePlans.filter((route) => {
+        const routeStartStr = new Date(route.startDate).toISOString().split("T")[0];
+        const routeEndStr = new Date(route.endDate).toISOString().split("T")[0];
+        const scheduleStartStr = new Date(schedule.startDate).toISOString().split("T")[0];
+        const scheduleEndStr = new Date(schedule.endDate).toISOString().split("T")[0];
+
+        return (
+          route.code === schedule.code &&
+          routeStartStr === scheduleStartStr &&
+          routeEndStr === scheduleEndStr
+        );
+      });
+
+      const routeDetails = matchingRoutes.map((route) => ({
+        name: route.name,
+        id: route._id,
+        status: route.status,
+        itinerary: {
+          zones: route.itinerary?.zone || [],
+          districts: route.itinerary?.district || [],
+          talukas: route.itinerary?.taluka || [],
+        },
+      }));
+
+      scheduleMap.get(normalizedCode).routes.push(...routeDetails);
+    }
+
+    // Build final formatted results
+    let formattedSchedules = Array.from(scheduleMap.values()).map((entry) => {
+      const dealers = Array.from(entry.dealersMap.values());
+
+      const total = dealers.length;
+      const done = dealers.filter((d) => d.status === "done").length;
+      const pending = dealers.filter((d) => d.status === "pending").length;
+      const visited = dealers.reduce((acc, d) => acc + (d.visited || 0), 0);
+
+      return {
+        _id: entry._id,
+        code: entry.code,
+        name: entry.name,
+        startDate: entry.startDate,
+        endDate: entry.endDate,
+        total,
+        done,
+        pending,
+        visited, // Total visits for dealers with status "done"
+        schedule: dealers,
+        routes: entry.routes,
+      };
+    });
+
+    // Sort schedules to prioritize those with higher "done" count
+    formattedSchedules.sort((a, b) => b.done - a.done);
+
+    // Apply search filter
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      formattedSchedules = formattedSchedules.filter(
+        (schedule) =>
+          searchRegex.test(schedule.code) ||
+          searchRegex.test(schedule.name) ||
+          searchRegex.test(schedule.routes.map((r) => r.name).join(" "))
+      );
+    }
+
+    const paginatedSchedules = formattedSchedules.slice(skip, skip + parseInt(limit));
+
+    return res.status(200).json({
+      success: true,
+      data: paginatedSchedules,
+      total: formattedSchedules.length,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(formattedSchedules.length / limit),
+    });
+  } catch (error) {
+    console.error("❌ Error fetching schedules:", error);
+    res.status(500).json({
       success: false,
       message: "Internal server error",
       error: error.message,
