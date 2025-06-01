@@ -20,6 +20,6 @@ router.post("/user/get-subordinates", userAuth, getSubordinatesForUser);
 
 router.get("/user/get-dealers", userAuth, getDealersForUser);
 
-router.put('/update-hierarchy-entries', upload.single('file'),updateHierarchyEntries);
+router.put('/update-hierarchy-entries', userAuth, upload.single('file'),updateHierarchyEntries);
 
 module.exports = router;

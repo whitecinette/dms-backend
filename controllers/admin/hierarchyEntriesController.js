@@ -221,9 +221,10 @@ exports.addHierarchEntriesByAdmin = async (req, res) => {
 
 // update dealers in hierarchy
 exports.updateHierarchyEntries = async (req, res) => {
-
-  console.log("updateHierarchyEntries called");
  try {
+   const { user } = req.user;
+   console.log("User who called API:", user);
+
    if (!req.file) {
      return res.status(400).json({ success: false, message: "No file uploaded" });
    }
@@ -233,7 +234,6 @@ exports.updateHierarchyEntries = async (req, res) => {
      return res.status(400).json({ success: false, message: "Hierarchy name is required" });
    }
 
-   // 1️⃣ Hierarchy config fetch karo
    const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: hierarchy_name });
    if (!hierarchyConfig) {
      return res.status(400).json({ success: false, message: `Hierarchy '${hierarchy_name}' not found.` });
@@ -241,100 +241,143 @@ exports.updateHierarchyEntries = async (req, res) => {
 
    const allowedFields = hierarchyConfig.hierarchy.map(field => field.toLowerCase());
 
-   let csvRows = [];
-   const stream = new Readable();
-   stream.push(req.file.buffer);
-   stream.push(null);
+   const parseCsv = (buffer) => {
+     return new Promise((resolve, reject) => {
+       const rows = [];
+       let headersValidated = false;
 
-   let isFirstRow = true;
-   let headersMatched = false;
+       const stream = new Readable();
+       stream.push(buffer);
+       stream.push(null);
 
-   stream
-     .pipe(csvParser())
-     .on("headers", (headers) => {
-       const csvHeaders = headers.map(h => h.trim().toLowerCase());
+       stream
+         .pipe(csvParser())
+         .on("headers", (headers) => {
+           const csvHeaders = headers.map(h => h.trim().toLowerCase());
+           const fieldsMatched = allowedFields.every(f => csvHeaders.includes(f)) &&
+                                 csvHeaders.every(h => allowedFields.includes(h));
 
-       // Yaha par matching check
-       const fieldsMatched = allowedFields.every(field => csvHeaders.includes(field)) &&
-                              csvHeaders.every(header => allowedFields.includes(header));
-
-       if (!fieldsMatched) {
-         return res.status(400).json({
-           success: false,
-           message: "CSV headers do not match expected hierarchy fields.",
-           expectedFields: allowedFields,
-           receivedFields: csvHeaders
-         });
-       }
-       headersMatched = true;
-     })
-     .on("data", (row) => {
-       csvRows.push(row);
-     })
-     .on("end", async () => {
-       if (!headersMatched) {
-         return; // Response already sent if headers didn't match
-       }
-
-       if (csvRows.length === 0) {
-         return res.status(400).json({ success: false, message: "No data found in CSV file." });
-       }
-
-       try {
-         let updatedCount = 0;
-         let insertedCount = 0;
-
-         for (const row of csvRows) {
-           const filter = { hierarchy_name };
-
-           // Dynamic filter and update creation
-           allowedFields.forEach(field => {
-             if (row[field]) {
-               filter[field] = row[field].trim().toUpperCase();
-             }
-           });
-
-           const updateData = {};
-           allowedFields.forEach(field => {
-             if (row[field]) {
-               updateData[field] = row[field].trim().toUpperCase();
-             }
-           });
-
-           // **Check if entry exists**
-           const existingEntry = await HierarchyEntries.findOne(filter);
-
-           if (existingEntry) {
-             // Existing entry update
-             const result = await HierarchyEntries.updateOne(
-               filter,
-               { $set: updateData }
-             );
-             if (result.modifiedCount > 0) {
-               updatedCount++;
-             }
-           } else {
-             // **Insert new entry if not found**
-             const newEntry = new HierarchyEntries({ hierarchy_name, ...updateData });
-             await newEntry.save();
-             insertedCount++;
-             
+           if (!fieldsMatched) {
+             reject({
+               status: 400,
+               message: "CSV headers do not match expected hierarchy fields.",
+               expectedFields: allowedFields,
+               receivedFields: csvHeaders
+             });
            }
-         }
 
-         return res.status(200).json({
-           success: true,
-           message: `${updatedCount} records updated and ${insertedCount} new records added.`,
-         });
-
-       } catch (error) {
-         console.error("Error updating hierarchy entries:", error);
-         return res.status(500).json({ success: false, message: "Error updating entries." });
-       }
+           headersValidated = true;
+         })
+         .on("data", (row) => {
+           if (headersValidated) rows.push(row);
+         })
+         .on("end", () => resolve(rows))
+         .on("error", (err) => reject({ status: 500, message: "CSV parsing error", error: err }));
      });
+   };
+
+   // Parse CSV
+   let csvRows;
+   try {
+     csvRows = await parseCsv(req.file.buffer);
+   } catch (parseErr) {
+     console.error("CSV parse error:", parseErr);
+     return res.status(parseErr.status || 500).json({ success: false, message: parseErr.message, ...parseErr });
+   }
+
+   if (csvRows.length === 0) {
+     return res.status(400).json({ success: false, message: "No valid data found in CSV file." });
+   }
+
+   // ✅ Step: Validate all actor codes at once
+ // Track where each code came from (which field/column)
+let codeSourceMap = new Map(); // Map<code, fieldName>
+
+csvRows.forEach(row => {
+  for (const field of allowedFields) {
+    if (row[field]) {
+      const cleanCode = row[field].trim().toUpperCase();
+      codeSourceMap.set(cleanCode, field);
+    }
+  }
+});
+
+const allCodesArray = Array.from(codeSourceMap.keys());
+const existingActors = await ActorCode.find({ code: { $in: allCodesArray } }).select('code');
+const existingCodesSet = new Set(existingActors.map(a => a.code));
+
+// missing codes in actor code 
+const missingCodesDetailed = allCodesArray
+  .filter(code => !existingCodesSet.has(code))
+  .map(code => ({
+    code,
+    field: codeSourceMap.get(code)
+  }));
+
+if (missingCodesDetailed.length > 0) {
+  return res.status(400).json({
+    success: false,
+    message: "One or more actor codes not found in Actors collection.",
+    missingCodes: missingCodesDetailed
+  });
+}
+
+
+   // ✅ Step: Proceed with processing and updating DB
+   let updatedCount = 0;
+   let insertedCount = 0;
+
+   for (const row of csvRows) {
+     const filter = { hierarchy_name };
+     const updateData = {};
+
+     for (const field of allowedFields) {
+       if (row[field]) {
+         const cleanVal = row[field].trim().toUpperCase();
+         filter[field] = cleanVal;
+         updateData[field] = cleanVal;
+       }
+     }
+
+     const existingEntry = await HierarchyEntries.findOne(filter);
+
+     if (existingEntry) {
+       let hasChanged = false;
+       for (const key of allowedFields) {
+         const existingValue = (existingEntry[key] || "").trim().toUpperCase();
+         const newValue = (updateData[key] || "").trim().toUpperCase();
+         if (existingValue !== newValue) {
+           hasChanged = true;
+           break;
+         }
+       }
+
+       if (hasChanged) {
+         const result = await HierarchyEntries.updateOne(filter, {
+           $set: updateData,
+           $setOnInsert: { updatedBy: user?.name || user?.email || user?._id },
+         });
+         if (result.modifiedCount > 0) updatedCount++;
+       }
+     } else {
+       const newEntry = new HierarchyEntries({
+         hierarchy_name,
+         ...updateData,
+         createdBy: user?.name || user?.email || user?._id,
+       });
+       await newEntry.save();
+       insertedCount++;
+     }
+   }
+
+   return res.status(200).json({
+     success: true,
+     message: `${updatedCount} records updated and ${insertedCount} new records added.`,
+     updatedBy: user?.name || user?.email || user?._id || "Unknown"
+   });
 
  } catch (error) {
    console.error("Error in updateHierarchyEntries:", error);
-   res.status(500).json({ success: false, message: "Internal server error." });
+   return res.status(500).json({ success: false, message: "Internal server error." });
  }
 };

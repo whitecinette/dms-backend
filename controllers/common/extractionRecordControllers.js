@@ -6,6 +6,7 @@ const moment = require("moment");
 const HierarchyEntries = require('../../model/HierarchyEntries');
 const { Parser } = require("json2csv");
 const ActorCode = require("../../model/ActorCode");
+const SalesData = require('../../model/SalesData');
 
 const { BACKEND_URL } = process.env;
 
@@ -521,133 +522,379 @@ exports.getExtractionStatus = async (req, res) => {
   };
 
 // get extraction report for admin
-  exports.getExtractionReportForAdmin = async (req, res) => {
-   try {
-       const { startDate, endDate, segment, brand, metric = 'volume' } = req.query;
+// exports.getExtractionReportForAdmin = async (req, res) => {
+//  try {
+//      const { startDate, endDate, segment, brand, metric = 'volume' } = req.query;
 
-       const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-       const end = endDate
-         ? new Date(endDate)
-         : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
-       
-       const matchStage = {
-           createdAt: { $gte: start, $lte: end }
-       };
+//      const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+//      const end = endDate
+//        ? new Date(endDate)
+//        : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
 
-       if (segment) matchStage.segment = segment;
-       if (brand) matchStage.brand = brand;
+//      const matchStage = {
+//          createdAt: { $gte: start, $lte: end }
+//      };
 
-       const brands = ['Samsung', 'Vivo', 'Oppo', 'Xiaomi', 'Apple', 'OnePlus', 'Realme', 'Motorola'];
+//      if (segment) matchStage.segment = segment;
+//      if (brand) matchStage.brand = brand;
 
-       const getPriceClassExpr = {
+//      const brands = ['Samsung', 'Vivo', 'Oppo', 'Xiaomi', 'Apple', 'OnePlus', 'Realme', 'Motorola'];
+
+//      const aggregationPipeline = [
+//          { $match: matchStage },
+//          {
+//              $project: {
+//                  brand: {
+//                      $cond: {
+//                          if: { $in: [{ $toLower: "$brand" }, brands.map(b => b.toLowerCase())] },
+//                          then: {
+//                              $concat: [
+//                                  { $toUpper: { $substrCP: ["$brand", 0, 1] } },
+//                                  {
+//                                      $substrCP: [
+//                                          { $toLower: "$brand" },
+//                                          1,
+//                                          { $subtract: [{ $strLenCP: "$brand" }, 1] }
+//                                      ]
+//                                  }
+//                              ]
+//                          },
+//                          else: "Others"
+//                      }
+//                  },
+//                  priceClass: {
+//                      $switch: {
+//                          branches: [
+//                              { case: { $lt: ["$price", 6000] }, then: "<6k" },
+//                              { case: { $lt: ["$price", 10000] }, then: "6-10k" },
+//                              { case: { $lt: ["$price", 15000] }, then: "10-15k" },
+//                              { case: { $lt: ["$price", 20000] }, then: "15-20k" },
+//                              { case: { $lt: ["$price", 30000] }, then: "20-30k" },
+//                              { case: { $lt: ["$price", 40000] }, then: "30-40k" },
+//                              { case: { $lt: ["$price", 70000] }, then: "40-70k" },
+//                              { case: { $lt: ["$price", 100000] }, then: "70-100k" }
+//                          ],
+//                          default: "100k+"
+//                      }
+//                  },
+//                  priceClassOrder: {
+//                      $switch: {
+//                          branches: [
+//                              { case: { $lt: ["$price", 6000] }, then: 0 },
+//                              { case: { $lt: ["$price", 10000] }, then: 1 },
+//                              { case: { $lt: ["$price", 15000] }, then: 2 },
+//                              { case: { $lt: ["$price", 20000] }, then: 3 },
+//                              { case: { $lt: ["$price", 30000] }, then: 4 },
+//                              { case: { $lt: ["$price", 40000] }, then: 5 },
+//                              { case: { $lt: ["$price", 70000] }, then: 6 },
+//                              { case: { $lt: ["$price", 100000] }, then: 7 }
+//                          ],
+//                          default: 8
+//                      }
+//                  },
+//                  value: {
+//                      $cond: {
+//                          if: { $eq: [metric, "value"] },
+//                          then: { $ifNull: ["$amount", { $multiply: ["$price", "$quantity"] }] },
+//                          else: "$quantity"
+//                      }
+//                  }
+//              }
+//          },
+//          {
+//              $group: {
+//                  _id: {
+//                      priceClass: "$priceClass",
+//                      priceClassOrder: "$priceClassOrder",
+//                      brand: "$brand"
+//                  },
+//                  total: { $sum: "$value" }
+//              }
+//          },
+//          {
+//              $group: {
+//                  _id: {
+//                      priceClass: "$_id.priceClass",
+//                      priceClassOrder: "$_id.priceClassOrder"
+//                  },
+//                  brands: {
+//                      $push: {
+//                          brand: "$_id.brand",
+//                          total: "$total"
+//                      }
+//                  }
+//              }
+//          },
+//          {
+//              $sort: {
+//                  "_id.priceClassOrder": 1
+//              }
+//          },
+//          {
+//              $project: {
+//                  _id: 0,
+//                  priceClass: "$_id.priceClass",
+//                  brands: 1
+//              }
+//          }
+//      ];
+
+//      const aggregatedData = await ExtractionRecord.aggregate(aggregationPipeline);
+
+//      const response = aggregatedData.map(entry => {
+//     const row = { "Price Class": entry.priceClass, "Rank of Samsung": null };
+
+//     // Initialize all brands
+//     brands.concat("Others").forEach(b => {
+//         row[b] = 0;
+//     });
+
+//     // Fill brand totals for this price class
+//     entry.brands.forEach(b => {
+//         row[b.brand] = b.total;
+//     });
+
+//     // Calculate rank of Samsung
+//     const sortedBrands = Object.entries(row)
+//         .filter(([key]) => brands.includes(key) || key === "Others")
+//         .sort(([, a], [, b]) => b - a);
+
+//     const samsungIndex = sortedBrands.findIndex(([b]) => b === "Samsung");
+//     row["Rank of Samsung"] = samsungIndex >= 0 ? samsungIndex + 1 : null;
+
+//     // Calculate total for the price band (sum of all brand totals)
+//     const totalForPriceBand = sortedBrands.reduce((sum, [, val]) => sum + val, 0);
+//     row["Total"] = totalForPriceBand;
+
+//     return row;
+// });
+
+// // Calculate grand totals across all price bands for each brand and overall
+// const grandTotalRow = { "Price Class": "Total", "Rank of Samsung": null };
+
+// brands.concat("Others").forEach(b => {
+//     grandTotalRow[b] = response.reduce((sum, row) => sum + (row[b] || 0), 0);
+// });
+
+
+// // Append grand total row to response
+// response.push(grandTotalRow);
+
+
+//      return res.status(200).json({
+//          metricUsed: metric,
+//          totalPriceClasses: response.length,
+//          data: response
+//      });
+
+//  } catch (error) {
+//      console.error("Error in getExtractionReport:", error.message, error.stack);
+//      return res.status(500).json({ error: 'Internal Server Error', details: error.message });
+//  }
+// };
+
+exports.getExtractionReportForAdmin = async (req, res) => {
+ try {
+   const { startDate, endDate, segment, brand, metric = 'volume' } = req.query;
+
+   const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+   const end = endDate
+     ? new Date(endDate)
+     : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
+
+   const matchStage = { createdAt: { $gte: start, $lte: end } };
+   if (segment) matchStage.segment = segment;
+   if (brand) matchStage.brand = brand;
+
+   const brands = ['Samsung', 'Vivo', 'Oppo', 'Xiaomi', 'Apple', 'OnePlus', 'Realme', 'Motorola'];
+
+   // Price class map
+   const priceClassMap = {
+     0: "<6k",
+     1: "6-10k",
+     2: "10-15k",
+     3: "15-20k",
+     4: "20-30k",
+     5: "30-40k",
+     6: "40-70k",
+     7: "70-100k",
+     8: "100k+"
+   };
+
+   const aggregationPipeline = [
+     { $match: matchStage },
+     {
+       $project: {
+         brand: {
+           $cond: {
+             if: { $in: [{ $toLower: "$brand" }, brands.map(b => b.toLowerCase())] },
+             then: {
+               $concat: [
+                 { $toUpper: { $substrCP: ["$brand", 0, 1] } },
+                 {
+                   $substrCP: [
+                     { $toLower: "$brand" },
+                     1,
+                     { $subtract: [{ $strLenCP: "$brand" }, 1] }
+                   ]
+                 }
+               ]
+             },
+             else: "Others"
+           }
+         },
+         priceClassOrder: {
            $switch: {
-               branches: [
-                   { case: { $lt: ["$price", 6000] }, then: "<6k" },
-                   { case: { $lt: ["$price", 10000] }, then: "6-10k" },
-                   { case: { $lt: ["$price", 15000] }, then: "10-15k" },
-                   { case: { $lt: ["$price", 20000] }, then: "15-20k" },
-                   { case: { $lt: ["$price", 30000] }, then: "20-30k" },
-                   { case: { $lt: ["$price", 40000] }, then: "30-40k" },
-                   { case: { $lt: ["$price", 70000] }, then: "40-70k" },
-                   { case: { $lt: ["$price", 100000] }, then: "70-100k" },
-               ],
-               default: "100k+"
+             branches: [
+               { case: { $lt: ["$price", 6000] }, then: 0 },
+               { case: { $lt: ["$price", 10000] }, then: 1 },
+               { case: { $lt: ["$price", 15000] }, then: 2 },
+               { case: { $lt: ["$price", 20000] }, then: 3 },
+               { case: { $lt: ["$price", 30000] }, then: 4 },
+               { case: { $lt: ["$price", 40000] }, then: 5 },
+               { case: { $lt: ["$price", 70000] }, then: 6 },
+               { case: { $lt: ["$price", 100000] }, then: 7 }
+             ],
+             default: 8
            }
-       };
-
-       const aggregationPipeline = [
-           { $match: matchStage },
-           {
-               $project: {
-                   brand: {
-                       $cond: {
-                           if: { $in: [{ $toLower: "$brand" }, brands.map(b => b.toLowerCase())] },
-                           then: {
-                               $concat: [
-                                   { $toUpper: { $substrCP: ["$brand", 0, 1] } },
-                                   {
-                                       $substrCP: [
-                                           { $toLower: "$brand" },
-                                           1,
-                                           { $subtract: [{ $strLenCP: "$brand" }, 1] }
-                                       ]
-                                   }
-                               ]
-                           },
-                           else: "Others"
-                       }
-                   },
-                   priceClass: getPriceClassExpr,
-                   value: {
-                       $cond: {
-                           if: { $eq: [metric, "value"] },
-                           then: { $ifNull: ["$amount", { $multiply: ["$price", "$quantity"] }] },
-                           else: "$quantity"
-                       }
-                   }
-               }
-           },
-           {
-               $group: {
-                   _id: { priceClass: "$priceClass", brand: "$brand" },
-                   total: { $sum: "$value" }
-               }
-           },
-           {
-               $group: {
-                   _id: "$_id.priceClass",
-                   brands: {
-                       $push: {
-                           brand: "$_id.brand",
-                           total: "$total"
-                       }
-                   }
-               }
-           },
-           {
-               $project: {
-                   _id: 0,
-                   priceClass: "$_id",
-                   brands: 1
-               }
+         },
+         value: {
+           $cond: {
+             if: { $eq: [metric, "value"] },
+             then: { $ifNull: ["$amount", { $multiply: ["$price", "$quantity"] }] },
+             else: "$quantity"
            }
-       ];
+         }
+       }
+     },
+     {
+       $group: {
+         _id: {
+           priceClassOrder: "$priceClassOrder",
+           brand: "$brand"
+         },
+         total: { $sum: "$value" }
+       }
+     },
+     {
+       $group: {
+         _id: "$_id.priceClassOrder",
+         brands: {
+           $push: {
+             brand: "$_id.brand",
+             total: "$total"
+           }
+         }
+       }
+     },
+     { $sort: { "_id": 1 } }
+   ];
+   const samsungSales = await SalesData.aggregate([
+    {
+      $match: {
+        createdAt: { $gte: start, $lte: end }
+      }
+    },
+    {
+      $project: {
+        priceClassOrder: {
+          $switch: {
+            branches: [
+              { case: { $lt: ["$total_amount", 6000] }, then: 0 },
+              { case: { $lt: ["$total_amount", 10000] }, then: 1 },
+              { case: { $lt: ["$total_amount", 15000] }, then: 2 },
+              { case: { $lt: ["$total_amount", 20000] }, then: 3 },
+              { case: { $lt: ["$total_amount", 30000] }, then: 4 },
+              { case: { $lt: ["$total_amount", 40000] }, then: 5 },
+              { case: { $lt: ["$total_amount", 70000] }, then: 6 },
+              { case: { $lt: ["$total_amount", 100000] }, then: 7 }
+            ],
+            default: 8
+          }
+        },
+        value: {
+          $cond: {
+            if: { $eq: [metric, "value"] },
+            then: "$total_amount",
+            else: "$quantity"
+          }
+        }
+      }
+    },
+    {
+      $group: {
+        _id: "$priceClassOrder",
+        samsungTotal: { $sum: "$value" }
+      }
+    }
+  ]);
+  
+   const aggregatedData = await ExtractionRecord.aggregate(aggregationPipeline);
 
-       const aggregatedData = await ExtractionRecord.aggregate(aggregationPipeline);
+   const response = aggregatedData.map(entry => {
+    const row = {
+      "Price Class": priceClassMap[entry._id],
+      "Rank of Samsung": null
+    };
+  
+    // Initialize brand totals
+    brands.concat("Others").forEach(b => {
+      row[b] = 0;
+    });
+  
+    // Use values from ExtractionRecord
+    entry.brands.forEach(b => {
+      row[b.brand] = b.total;
+    });
+  
+    // ✅ Overwrite Samsung with data from SalesData
+    const samsungData = samsungSales.find(s => s._id === entry._id);
+    if (samsungData) {
+      row["Samsung"] = samsungData.samsungTotal;
+    }
+  
+    // Calculate rank of Samsung
+    const sortedBrands = Object.entries(row)
+      .filter(([key]) => brands.includes(key) || key === "Others")
+      .sort(([, a], [, b]) => b - a);
+  
+    const samsungIndex = sortedBrands.findIndex(([b]) => b === "Samsung");
+    row["Rank of Samsung"] = samsungIndex >= 0 ? samsungIndex + 1 : null;
+  
+    // Add total
+    row["Total"] = sortedBrands.reduce((sum, [, val]) => sum + val, 0);
+  
+    return row;
+  });
+  
 
-       const response = aggregatedData.map(entry => {
-           const row = { "Price Class": entry.priceClass, "Rank of Samsung": null };
+   // Grand total row
+   const grandTotalRow = { "Price Class": "Total", "Rank of Samsung": null };
+   brands.concat("Others").forEach(b => {
+     grandTotalRow[b] = response.reduce((sum, row) => sum + (row[b] || 0), 0);
+   });
+   grandTotalRow["Total"] = brands.concat("Others").reduce((sum, b) => sum + grandTotalRow[b], 0);
 
-           // Initialize all brands
-           brands.concat("Others").forEach(b => {
-               row[b] = 0;
-           });
+   response.push(grandTotalRow);
 
-           entry.brands.forEach(b => {
-               row[b.brand] = b.total;
-           });
+   return res.status(200).json({
+     metricUsed: metric,
+     // totalPriceClasses: response.length,
+     data: response
+   });
 
-           // Calculate rank of Samsung
-           const sortedBrands = Object.entries(row)
-               .filter(([key]) => brands.includes(key) || key === "Others")
-               .sort(([, a], [, b]) => b - a);
+ } catch (error) {
+   console.error("Error in getExtractionReport:", {
+     message: error.message,
+     stack: error.stack,
+     query: req.query
+   });
 
-           const samsungIndex = sortedBrands.findIndex(([b]) => b === "Samsung");
-           row["Rank of Samsung"] = samsungIndex >= 0 ? samsungIndex + 1 : null;
-
-           return row;
-       });
-
-       return res.status(200).json({
-           metricUsed: metric,
-           totalPriceClasses: response.length,
-           data: response
-       });
-
-   } catch (error) {
-       console.error("Error in getExtractionReport:", error.message, error.stack);
-       return res.status(500).json({ error: 'Internal Server Error', details: error.message });
-   }
+   return res.status(500).json({
+     error: 'Internal Server Error',
+     message: 'Failed to generate extraction report. Please try again later.'
+   });
+ }
 };
 
 // get extraction report for asm
@@ -737,6 +984,70 @@ exports.getExtractionReportForMdd = async (req, res) => {
  } catch (error) {
    console.error("Error getting extraction report for MDD:", error);
    return res.status(500).json({ error: 'Internal Server Error' });
+ }
+};
+
+
+exports.getHierarchyFilters = async (req, res) => {
+ try {
+   const hierarchyName = "default_sales_flow";
+   const hierarchyLevels = ['smd', 'asm', 'mdd', 'tse', 'dealer'];
+
+   // Extract the filter key and value from query
+   const filterKey = hierarchyLevels.find(level => req.query[level] !== undefined);
+   const filterValue = filterKey ? req.query[filterKey] : null;
+
+   // Step 1: Fetch all hierarchy entries for flow
+   let hierarchyEntries;
+   if (filterKey && filterValue) {
+     hierarchyEntries = await HierarchyEntries.find({
+       hierarchy_name: hierarchyName,
+       [filterKey]: filterValue,
+     });
+   } else {
+     hierarchyEntries = await HierarchyEntries.find({ hierarchy_name: hierarchyName });
+   }
+
+   // Step 2: Collect all unique codes for name mapping
+   const codeSet = new Set();
+   hierarchyEntries.forEach(entry => {
+     Object.entries(entry._doc).forEach(([key, value]) => {
+       if (!['_id', 'hierarchy_name', 'createdAt', 'updatedAt', '__v'].includes(key) && value) {
+         codeSet.add(value);
+       }
+     });
+   });
+   const allCodes = [...codeSet];
+
+   // Step 3: Fetch actor names for these codes
+   const actorCodes = await ActorCode.find({ code: { $in: allCodes } });
+   const codeNameMap = {};
+   actorCodes.forEach(actor => {
+     codeNameMap[actor.code] = actor.name;
+   });
+
+   // Step 4: Map filtered entries without hierarchy_name
+   const result = hierarchyEntries.map(entry => {
+     const obj = {};
+     Object.entries(entry._doc).forEach(([key, value]) => {
+       if (!['_id', 'hierarchy_name', 'createdAt', 'updatedAt', '__v'].includes(key)) {
+         obj[key] = {
+           code: value,
+           name: codeNameMap[value] || null
+         };
+       }
+     });
+     return obj;
+   });
+
+   return res.status(200).json({
+     filterKey,
+     filterValue,
+     data: result
+   });
+ } catch (error) {
+   console.error("Error in getHierarchyFilters:", error);
+   return res.status(500).json({ error: "Internal Server Error" });
  }
 };
 
