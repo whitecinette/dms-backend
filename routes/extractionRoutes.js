@@ -16,7 +16,5 @@ router.post("/admin/extraction-status", getExtractionStatus);
 router.get("/admin/get-extraction-records/download",  getExtractionRecordsForDownload);
 
 router.get("/get-extraction-report-for-admin", getExtractionReportForAdmin);
-router.get("/get-extraction-report-for-asm", getExtractionReportForAsm);
-router.get("/get-extraction-report-for-mdd", getExtractionReportForMdd);
 router.get("/get-hierarchy-filter", getHierarchyFilters);
 module.exports = router;
