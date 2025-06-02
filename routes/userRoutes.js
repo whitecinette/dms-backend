@@ -3,7 +3,7 @@ const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBy
     updateUserLabelsFromCSV, createSecurityKey, updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
 const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile } = require("../controllers/common/userController");
-const { loginUserForApp, registerUserForApp, fetchCreditLimit, loginMddWithFirebasePhone } = require("../controllers/web/userController");
+const { loginUserForApp, registerUserForApp, fetchCreditLimit, loginMddWithFirebasePhone, handleRefreshToken } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
 
@@ -74,5 +74,8 @@ router.post("/admin/get-users-by-positions", getUsersByPositions);
 router.put("/admin/update-user-labels", upload.single('file'), updateUserLabelsFromCSV);
 
 router.post("/admin/create-security-key", superAdminAuth, createSecurityKey);
+
+//Refresh token
+router.post("/user/Refresh-token", handleRefreshToken);
 
 module.exports = router;    
