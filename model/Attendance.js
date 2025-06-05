@@ -13,8 +13,8 @@ const attendanceSchema = new mongoose.Schema(
         "Present",
         "Absent",
         "Half Day",
-        "Approved",
-        "Rejected",
+        // "Approved",
+        // "Rejected",
       ], // Fixed "Half-day"
       default: "Present",
     },
@@ -29,12 +29,12 @@ const attendanceSchema = new mongoose.Schema(
     punchInLongitude: { type: mongoose.Schema.Types.Decimal128 },
     punchOutLatitude: { type: mongoose.Schema.Types.Decimal128, default: null },
     punchOutLongitude: { type: mongoose.Schema.Types.Decimal128, default: null },
-    leaveType: {
-      type: String,
-      enum: ["Sick", "Casual", "Paid", "Unpaid", "Other"],
-      required: false, // Changed to optional
-    },
-    leaveDescription: { type: String, required: false },
+    // leaveType: {
+    //   type: String,
+    //   enum: ["Sick", "Casual", "Paid", "Unpaid", "Other"],
+    //   required: false, // Changed to optional
+    // },
+    // leaveDescription: { type: String, required: false },
   },
   { strict: false, timestamps: true }
 );

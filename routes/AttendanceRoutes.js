@@ -37,12 +37,6 @@ router.post(
 router.get("/get-attandance", userAuth, getAttendanceForEmployee);
 router.get("/get-attendance/:code", getAttendanceByEmployeeForAdmin);
 router.get("/get-all-attendance", getAttendance);
-
-// leave
-router.post("/request-leave/:employeeId", requestLeave);
-router.get("/get-emp-leave/:employeeId", getEmpLeave);
-router.get("/get-all-leaves", getAllEmpLeaves);
-
 // router.get('/dealers/:code', getDealersByEmployeeCode);
 
 router.get("/get-attendance-by-date/:date", userAuth, getAttendanceByDate);
