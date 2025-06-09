@@ -130,15 +130,22 @@ const formatDate = (date) =>
 exports.addRoutePlan = async (req, res) => {
   try {
     const {
-      startDate,
-      endDate,
+      // startDate,
+      // endDate,
       itinerary,
       status = "inactive",
       approved = false,
     } = req.body;
+
     const { code: userCode, position } = req.user;
 
-    const locationFields = ["district", "taluka", "zone", "state", "province"];
+    const todayIST = moment().tz("Asia/Kolkata");
+    const startDate = todayIST.clone().startOf("day").toDate(); // Today 00:00 IST
+    const endDate = todayIST.clone().endOf("day").toDate(); 
+
+    console.log("Startdate and enddate: ", startDate, endDate);
+
+    const locationFields = ["district", "taluka", "zone", "state", "province", "town"];
     const nameParts = locationFields
       .filter(
         (field) =>
@@ -195,6 +202,7 @@ exports.addRoutePlan = async (req, res) => {
         }),
         ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
         ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
+        ...(itinerary.town?.length && { town: { $in: itinerary.town } }),
       };
 
       const filteredUsers = await User.find(baseQuery);
@@ -208,9 +216,11 @@ exports.addRoutePlan = async (req, res) => {
         distance: null,
         district: user.district || "",
         taluka: user.taluka || "",
+        town: user.town || "",
         zone: user.zone || "",
         position: user.position || "",
       }));
+
 
       if (existingSchedule) {
         const existingCodes = new Set(
@@ -284,8 +294,8 @@ exports.getRoutePlansForUser = async (req, res) => {
         _id: route._id,
         code: route.code,
         name: route.name,
-        startDate: route.startDate,
-        endDate: route.endDate,
+        startDate: moment(route.startDate).tz("Asia/Kolkata").format("YYYY-MM-DD HH:mm:ss"),
+        endDate: moment(route.endDate).tz("Asia/Kolkata").format("YYYY-MM-DD HH:mm:ss"),
         status: route.status,
         approved: route.approved,
         itinerary: mergedArray, // ✅ Final merged array
@@ -320,6 +330,7 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
       const districts = new Set();
       const talukas = new Set();
       const zones = new Set();
+      const towns = new Set();
 
       users.forEach((user) => {
         if (user.district && !["NA", null, ""].includes(user.district)) {
@@ -331,6 +342,9 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
         if (user.zone && !["NA", null, ""].includes(user.zone)) {
           zones.add(user.zone);
         }
+        if (user.town && !["NA", null, ""].includes(user.town)) {
+          towns.add(user.town);
+        }
       });
 
       return res.status(200).json({
@@ -339,6 +353,7 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
           taluka: [...talukas],
           district: [...districts],
           zone: [...zones],
+          town: [...towns],
         },
       });
     }
@@ -376,11 +391,14 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
     const districts = new Set();
     const talukas = new Set();
     const zones = new Set();
+    const towns = new Set();
 
     users.forEach((user) => {
       if (user.district) districts.add(user.district);
       if (user.taluka) talukas.add(user.taluka);
       if (user.zone) zones.add(user.zone);
+      if (user.town) towns.add(user.town);
+
     });
 
     return res.status(200).json({
@@ -390,7 +408,9 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
       taluka: [...talukas],
       district: [...districts],
       zone: [...zones],
+      town: [...towns],
     });
+
   } catch (error) {
     console.error("Error in getDropdownOptionsForMarketCoverage:", error);
     return res.status(500).json({ success: false, message: "Server error" });

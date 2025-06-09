@@ -859,6 +859,7 @@ exports.getBeatMappingReport = async (req, res) => {
       zone = [],
       district = [],
       taluka = [],
+      town = [],
       travel = [],
       code, // only for admin
     } = req.body;
@@ -897,6 +898,7 @@ exports.getBeatMappingReport = async (req, res) => {
             zone: dealer.zone || "Unknown",
             district: dealer.district || "Unknown",
             taluka: dealer.taluka || "Unknown",
+            town: dealer.town || "Unknown",
             position: dealer.position || "dealer",
             visits: 0,
             doneCount: 0,
@@ -922,6 +924,7 @@ exports.getBeatMappingReport = async (req, res) => {
         zone: d.zone,
         district: d.district,
         taluka: d.taluka,
+        town: d.town,
         position: d.position,
         status: isDone ? "done" : "pending",
         visits: isDone ? d.doneCount : 0,
@@ -937,8 +940,9 @@ exports.getBeatMappingReport = async (req, res) => {
       const matchDistrict =
         !district.length || district.includes(entry.district);
       const matchTaluka = !taluka.length || taluka.includes(entry.taluka);
+      const matchTown = !town.length || town.includes(entry.town);
       // Travel filter can be added here later if defined
-      return matchStatus && matchZone && matchDistrict && matchTaluka;
+      return matchStatus && matchZone && matchDistrict && matchTaluka && matchTown;
     });
 
     // Count summary
