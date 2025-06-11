@@ -13,6 +13,7 @@ const attendanceSchema = new mongoose.Schema(
         "Present",
         "Absent",
         "Half Day",
+        "Leave",
         // "Approved",
         // "Rejected",
       ], // Fixed "Half-day"
@@ -28,7 +29,10 @@ const attendanceSchema = new mongoose.Schema(
     punchInLatitude: { type: mongoose.Schema.Types.Decimal128 },
     punchInLongitude: { type: mongoose.Schema.Types.Decimal128 },
     punchOutLatitude: { type: mongoose.Schema.Types.Decimal128, default: null },
-    punchOutLongitude: { type: mongoose.Schema.Types.Decimal128, default: null },
+    punchOutLongitude: {
+      type: mongoose.Schema.Types.Decimal128,
+      default: null,
+    },
     // leaveType: {
     //   type: String,
     //   enum: ["Sick", "Casual", "Paid", "Unpaid", "Other"],

@@ -6,9 +6,18 @@ const dayjs = require("dayjs");
 
 // Utility
 function getDaysLeftInMonth() {
-  const today = dayjs();
+  const today = dayjs().subtract(1, 'day');
   const endOfMonth = today.endOf("month");
   return endOfMonth.date() - today.date() + 1;
+}
+
+function getCurrentPeriod() {
+  const date = dayjs().subtract(1, 'day');
+  return {
+    month: date.format('MMM'),
+    year: date.format('YY'),
+    fullDate: date.format('DD-MM-YYYY')
+  };
 }
 
 function formatSP10(
@@ -73,26 +82,45 @@ function CalculateBlackBox(bbTarget, bbAch, daysLeft) {
 }
 
 function generateRow(original, daysLeft, currentMonth, currentDate) {
-  const spTargetMay = Number(original["10k SP Tgt May 25"] || 0);
-  const spAchMay = Number(original["10k SP Ach May 25"] || 0);
-  const bbTargetMay = Number(original["Black Box Tgt May 25"] || 0);
-  const bbAchMay = Number(original["Black Box Ach May 25"] || 0);
-  const spTargetQ2 = Number(original["10k SP Tgt Q2 25"] || 0);
-  const spAchQ2 = Number(original["10k SP Ach Q2 25"] || 0);
-  const bbTargetQ2 = Number(original["Black Box Tgt Q2 25"] || 0);
-  const bbAchQ2 = Number(original["Black Box Ach Q2 25"] || 0);
+  const { month, year } = getCurrentPeriod();
 
-  // Calculate percentages and required ADS for May
-  const { spAchPercent: spAchPercentMay, spRequiredAds: spRequiredAdsMay } =
-    CalculateSP10(spTargetMay, spAchMay, daysLeft);
-  const { bbAchPercent: bbAchPercentMay, bbRequiredAds: bbRequiredAdsMay } =
-    CalculateBlackBox(bbTargetMay, bbAchMay, daysLeft);
+  // Get values directly from column names
+  const data = {
+    sp: {
+      current: {
+        target: Number(original[`10k SP Tgt ${currentMonth} ${year}`] || 0),
+        achievement: Number(original[`10k SP Ach ${currentMonth} ${year}`] || 0)
+      },
+      q2: {
+        target: Number(original[`10k SP Tgt Q2 ${year}`] || 0),
+        achievement: Number(original[`10k SP Ach Q2 ${year}`] || 0)
+      }
+    },
+    bb: {
+      current: {
+        target: Number(original[`Black Box Tgt ${currentMonth} ${year}`] || 0),
+        achievement: Number(original[`Black Box Ach ${currentMonth} ${year}`] || 0)
+      },
+      q2: {
+        target: Number(original[`Black Box Tgt Q2 ${year}`] || 0),
+        achievement: Number(original[`Black Box Ach Q2 ${year}`] || 0)
+      }
+    }
+  };
 
-  const { spAchPercent: spAchPercentQ2, spRequiredAds: spRequiredAdsQ2 } =
-    CalculateSP10(spTargetQ2, spAchQ2, daysLeft);
-  const { bbAchPercent: bbAchPercentQ2, bbRequiredAds: bbRequiredAdsQ2 } =
-    CalculateBlackBox(bbTargetQ2, bbAchQ2, daysLeft);
+  // Calculate metrics
+  const metrics = {
+    current: {
+      sp: CalculateSP10(data.sp.current.target, data.sp.current.achievement, daysLeft),
+      bb: CalculateBlackBox(data.bb.current.target, data.bb.current.achievement, daysLeft)
+    },
+    q2: {
+      sp: CalculateSP10(data.sp.q2.target, data.sp.q2.achievement, daysLeft),
+      bb: CalculateBlackBox(data.bb.q2.target, data.bb.q2.achievement, daysLeft)
+    }
+  };
 
+  // Return formatted data
   return {
     Name: original["DEALER Name"] || original["Dealer Name"] || "",
     "Phone Number": original["Phone Number"] || "",
@@ -102,34 +130,32 @@ function generateRow(original, daysLeft, currentMonth, currentDate) {
     "User Id": original["User Id"] || "",
     City: original["City"] || "",
     Area: original["Area"] || "",
-    "SP10 May 25": formatSP10(
-      spTargetMay,
-      spAchMay,
-      spAchPercentMay,
-      spRequiredAdsMay,
+    [`SP10 ${currentMonth} ${year}`]: formatSP10(
+      data.sp.current.target,
+      data.sp.current.achievement,
+      metrics.current.sp.spAchPercent,
+      metrics.current.sp.spRequiredAds,
       currentMonth
     ),
-    "Blackbox May 25": formatBlackBox(
-      bbTargetMay,
-      bbAchMay,
-      bbAchPercentMay,
-      bbRequiredAdsMay,
+    [`Blackbox ${currentMonth} ${year}`]: formatBlackBox(
+      data.bb.current.target,
+      data.bb.current.achievement,
+      metrics.current.bb.bbAchPercent,
+      metrics.current.bb.bbRequiredAds,
       currentMonth
     ),
-    "SP10 Q2 25": formatSP10Q(
-      spTargetQ2,
-      spAchQ2,
-      spAchPercentQ2,
-      spRequiredAdsQ2,
-      currentMonth
+    [`SP10 Q2 ${year}`]: formatSP10Q(
+      data.sp.q2.target,
+      data.sp.q2.achievement,
+      metrics.q2.sp.spAchPercent,
+      metrics.q2.sp.spRequiredAds
     ),
-    "Blackbox Q2 25": formatBlackBoxQ(
-      bbTargetQ2,
-      bbAchQ2,
-      bbAchPercentQ2,
-      bbRequiredAdsQ2,
-      currentMonth
-    ),
+    [`Blackbox Q2 ${year}`]: formatBlackBoxQ(
+      data.bb.q2.target,
+      data.bb.q2.achievement,
+      metrics.q2.bb.bbAchPercent,
+      metrics.q2.bb.bbRequiredAds
+    )
   };
 }
 
@@ -139,8 +165,9 @@ exports.AlphaMessages = async (req, res) => {
   const daysLeft = getDaysLeftInMonth();
   const formattedRows = [];
 
-  const currentMonth = dayjs().format("MMM'YY"); // Example: May'25
-  const currentDate = dayjs().format("DD-MM-YYYY");
+  const currentMonth = dayjs().subtract(1).format("MMM"); // Get current month
+  const currentYear = dayjs().subtract(1).format("YY"); // Get current year
+  const currentDate = dayjs().subtract(1).format("DD-MM-YYYY");
 
   let headersValidated = false;
   let headerErrorSent = false;
@@ -149,14 +176,14 @@ exports.AlphaMessages = async (req, res) => {
     "Dealer Code",
     "Dealer Name",
     "Phone Number",
-    "10k SP Tgt May 25",
-    "10k SP Ach May 25",
-    "Black Box Tgt May 25",
-    "Black Box Ach May 25",
-    "10k SP Tgt Q2 25",
-    "10k SP Ach Q2 25",
-    "Black Box Tgt Q2 25",
-    "Black Box Ach Q2 25",
+    `10k SP Tgt ${currentMonth} ${currentYear}`,
+    `10k SP Ach ${currentMonth} ${currentYear}`,
+    `Black Box Tgt ${currentMonth} ${currentYear}`,
+    `Black Box Ach ${currentMonth} ${currentYear}`,
+    `10k SP Tgt Q2 ${currentYear}`,
+    `10k SP Ach Q2 ${currentYear}`,
+    `Black Box Tgt Q2 ${currentYear}`,
+    `Black Box Ach Q2 ${currentYear}`,
   ];
 
   fs.createReadStream(filePath)
@@ -207,8 +234,8 @@ exports.AlphaMessages = async (req, res) => {
         "User Id",
         "City",
         "Area", // Added to fields
-        "SP10 May 25",
-        "Blackbox May 25",
+        `SP10 ${currentMonth} ${currentYear}`,
+        `Blackbox ${currentMonth} ${currentYear}`,
         "SP10 Q2 25",
         "Blackbox Q2 25",
       ];

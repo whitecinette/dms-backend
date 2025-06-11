@@ -580,8 +580,7 @@ exports.getAttendanceByEmployeeForAdmin = async (req, res) => {
       Present: 6,
       Pending: 5,
       "Half Day": 4,
-      Approved: 3,
-      Rejected: 2,
+      Leave: 3,
       Absent: 1,
     };
 
@@ -710,6 +709,7 @@ exports.getAttendanceByDate = async (req, res) => {
       leave: 0,
       absent: 0,
       pending: 0,
+      total: attendanceRecords.length,
     };
 
     attendanceRecords.forEach(({ status }) => {
@@ -955,8 +955,7 @@ exports.getLatestAttendance = async (req, res) => {
       Present: 6,
       Pending: 5,
       "Half Day": 4,
-      Approved: 3,
-      Rejected: 2,
+      Leave: 3,
       Absent: 1,
     };
 
@@ -1280,8 +1279,7 @@ exports.downloadAllAttendance = async (req, res) => {
       Present: 6,
       Pending: 5,
       "Half Day": 4,
-      Approved: 3,
-      Rejected: 2,
+      Leave: 3,
       Absent: 1,
     };
 
