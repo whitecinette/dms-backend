@@ -1,45 +1,46 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
-const travelSchema = new mongoose.Schema({
-  code: {
-    type: String,
-    required: true,
-    ref: "ActorCode"
+const TravelBillSchema = new mongoose.Schema(
+  {
+    billType: {
+      type: String,
+      enum: ['Restaurant', 'Travel', 'Hotel', 'Transport', 'Fuel', 'Other'],
+      required: true,
+    },
+    billImage: {
+      type: String,
+      required: true,
+    },
+    amount: {
+      type: Number,
+      required: false,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected', 'paid'],
+      default: 'pending',
+    },
+    isGenerated: {
+      type: Boolean,
+      default: false,
+    },
+    remarks: {
+      type: String,
+    },
+    approvedAt: {
+      type: Date,
+    },
+    paidAt: {
+      type: Date,
+    },
+    code: {
+     type: String,
+   }
   },
-  travelDate: {
-    type: Date,
-    required: true,
-  },
-  locations: [ 
-    {
-      city: { type: String, required: true },
-      state: { type: String }, 
-      latitude: { type: Number }, 
-      longitude: { type: Number },
-    }
-  ],
-  purpose: String,
-  modeOfTransport: String,
-  returnDate: Date,
-  travelDuration: Number,
-  totalDistance: Number, 
-  status: {
-    type: String,
-    enum: ["Scheduled", "Ongoing", "Completed", "Cancelled"],
-    default: "Scheduled",
-  },
-}, {
-  timestamps: true,
-  strict: false,
-});
-
-// ⏳ Travel duration calculation
-travelSchema.pre("save", function (next) {
-  if (this.travelDate && this.returnDate) {
-    const durationInMs = new Date(this.returnDate) - new Date(this.travelDate);
-    this.travelDuration = Math.ceil(durationInMs / (1000 * 60 * 60 * 24)); // in days
+  {
+    timestamps: true, // createdAt (when uploaded), updatedAt (on any change)
+    strict: false,
   }
-  next();
-});
+);
 
-module.exports = mongoose.model("Travel", travelSchema);
+module.exports = mongoose.model('Travels', TravelBillSchema);

@@ -1,5 +1,9 @@
 const Travel = require("../../model/Travel");
-
+const moment = require("moment");
+const fsPromises = require("fs/promises");
+const cloudinary = require("../../config/cloudinary");
+const ActorCode = require("../../model/ActorCode");
+const User = require("../../model/User");
 exports.scheduleTravel = async (req, res) => {
  try {
    const { code } = req.user;
@@ -53,3 +57,167 @@ exports.getAllTravelSchedule = async (req, res) => {
    res.status(500).json({ message: "Failed to fetch travel data" });
  }
 };
+
+
+exports.uploadBills = async (req, res) => {
+ try {
+   const { code } = req.user;
+   const { billType, isGenerated, remarks } = req.body;
+
+   if (!req.file) {
+     return res.status(400).json({ message: "Bill image is required" });
+   }
+
+   const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+   const publicId = `${code}_${timestamp}`;
+
+   const result = await cloudinary.uploader.upload(req.file.path, {
+     resource_type: 'image',
+     folder: 'Travel Bills',
+     public_id: publicId,
+     transformation: [
+       { width: 800, height: 800, crop: "limit" },
+       { quality: "auto" },
+       { fetch_format: "auto" },
+     ],
+   });
+
+   const newBill = new Travel({
+     billType,
+     billImage: result.secure_url,
+     isGenerated: isGenerated || false,
+     remarks: remarks || '',
+     code: code,
+   });
+
+   await newBill.save();
+
+   return res.status(201).json({
+     message: "Bill uploaded successfully",
+     bill: newBill,
+   });
+
+ } catch (error) {
+   console.error("Error in bill upload", error);
+   return res.status(500).json({ message: "Internal server error" });
+ }
+};
+
+
+exports.getTravelBills = async (req, res) => {
+ try {
+   const { role } = req.user;
+   let { search, status, billType, fromDate, toDate, page = 1, limit = 10 } = req.query;
+
+   page = parseInt(page);
+   limit = parseInt(limit);
+   const skip = (page - 1) * limit;
+
+   const query = {};
+
+   // HR can only see employee bills
+   if (role === "hr") {
+     const employees = await User.find({ role: "employee" }, "code").lean();
+     const employeeCodes = employees.map(emp => emp.code);
+     query.code = { $in: employeeCodes };
+   }
+
+   // Apply filters
+   if (status) query.status = status;
+   if (billType) query.billType = billType;
+   if (fromDate && toDate) {
+     query.createdAt = {
+       $gte: new Date(fromDate),
+       $lte: new Date(toDate),
+     };
+   }
+
+   // Get total records
+   const totalCount = await Travel.countDocuments(query);
+
+   // Fetch paginated bills
+   const bills = await Travel.find(query)
+     .sort({ createdAt: -1 })
+     .skip(skip)
+     .limit(limit)
+     .lean();
+
+   // Add employee name from ActorCode
+   let formattedBills = await Promise.all(
+     bills.map(async (bill) => {
+       const actor = await ActorCode.findOne({ code: bill.code }, "name").lean();
+       return {
+         ...bill,
+         employeeName: actor?.name || "Unknown",
+         employeeCode: bill.code,
+       };
+     })
+   );
+
+   // Post-pagination search (optional)
+   if (search) {
+     formattedBills = formattedBills.filter(
+       (bill) =>
+         bill.employeeName?.toLowerCase().includes(search.toLowerCase()) ||
+         bill.employeeCode?.toLowerCase().includes(search.toLowerCase())
+     );
+   }
+
+   res.status(200).json({
+     success: true,
+     message: "Travel bills retrieved successfully",
+     currentPage: page,
+     totalPages: Math.ceil(totalCount / limit),
+     totalRecords: totalCount,
+     bills: formattedBills,
+   });
+ } catch (error) {
+   console.error("Error retrieving travel bills:", error);
+   res.status(500).json({ success: false, message: "Internal Server Error" });
+ }
+};
+
+
+exports.getBillsForEmp = async (req, res) => {
+ try {
+   const { code } = req.user;
+
+   // 1. Fetch bills for the employee
+   const bills = await Travel.find({ code }).sort({ createdAt: -1 });
+
+   // 2. Fetch employee name from ActorCode collection
+   const actor = await ActorCode.findOne({ code }, { name: 1, _id: 0 });
+
+   return res.status(200).json({
+     message: "Bills fetched successfully",
+     employee: {
+       code,
+       name: actor?.name || 'N/A',
+     },
+     bills,
+   });
+
+ } catch (error) {
+   console.error("Error getting bills for employee:", error);
+   return res.status(500).json({ message: "Internal server error" });
+ }
+};
+
+exports.editTravelBill = async (req, res) =>{
+ try{
+
+ }catch(error){
+console.log("error in editing travel bilss")
+ }
+}
+
+
+
+
+
+
+
+
+
+
+
