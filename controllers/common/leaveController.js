@@ -77,6 +77,9 @@ exports.requestLeave = async (req, res) => {
 
     const savedLeave = await newLeave.save();
 
+    const startDate = fromDate;
+    const endDate = toDate;
+
     const notification = {
       title: "Leave Request",
       message: `Employee ${code} requested leave from ${formatDate(
