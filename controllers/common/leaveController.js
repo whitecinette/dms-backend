@@ -51,6 +51,7 @@ exports.requestLeave = async (req, res) => {
           toDate: { $gte: from },
         },
       ],
+      status: { $in: ["approved", "pending"] },
     });
 
     if (existingLeave) {
