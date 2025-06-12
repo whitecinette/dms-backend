@@ -7,8 +7,8 @@ const TravelBillSchema = new mongoose.Schema(
       enum: ['Restaurant', 'Travel', 'Hotel', 'Transport', 'Fuel', 'Other'],
       required: true,
     },
-    billImage: {
-      type: String,
+    billImages: {
+      type: [String],
       required: true,
     },
     amount: {

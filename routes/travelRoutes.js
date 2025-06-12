@@ -10,7 +10,7 @@ router.post("/schedule-travel", userAuth, scheduleTravel);
 router.get("/get-all-travel-schedule", getAllTravelSchedule);
 
 // bill upload
-router.post("/upload-bills", userAuth, upload_img.single("billsUpload"), uploadBills);
+router.post("/upload-bills", userAuth, upload_img.array("billsUpload", 10), uploadBills);
 router.get("/get-bills-for-admin", userAuth, getTravelBills);
 router.get("/get-bills-for-emp", userAuth, getBillsForEmp);
 router.put("/edit-travel-bill", userAuth, editTravelBill);

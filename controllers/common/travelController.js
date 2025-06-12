@@ -64,27 +64,33 @@ exports.uploadBills = async (req, res) => {
    const { code } = req.user;
    const { billType, isGenerated, remarks } = req.body;
 
-   if (!req.file) {
-     return res.status(400).json({ message: "Bill image is required" });
+   if (!req.files || req.files.length === 0) {
+     return res.status(400).json({ message: "At least one bill image is required" });
    }
 
-   const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
-   const publicId = `${code}_${timestamp}`;
+   const uploadedBills = [];
 
-   const result = await cloudinary.uploader.upload(req.file.path, {
-     resource_type: 'image',
-     folder: 'Travel Bills',
-     public_id: publicId,
-     transformation: [
-       { width: 800, height: 800, crop: "limit" },
-       { quality: "auto" },
-       { fetch_format: "auto" },
-     ],
-   });
+   for (const file of req.files) {
+     const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+     const publicId = `${code}_${timestamp}_${Math.floor(Math.random() * 1000)}`;
+
+     const result = await cloudinary.uploader.upload(file.path, {
+       resource_type: 'image',
+       folder: 'Travel Bills',
+       public_id: publicId,
+       transformation: [
+         { width: 800, height: 800, crop: "limit" },
+         { quality: "auto" },
+         { fetch_format: "auto" },
+       ],
+     });
+
+     uploadedBills.push(result.secure_url);
+   }
 
    const newBill = new Travel({
      billType,
-     billImage: result.secure_url,
+     billImages: uploadedBills,
      isGenerated: isGenerated || false,
      remarks: remarks || '',
      code: code,
@@ -93,7 +99,7 @@ exports.uploadBills = async (req, res) => {
    await newBill.save();
 
    return res.status(201).json({
-     message: "Bill uploaded successfully",
+     message: "Bills uploaded successfully",
      bill: newBill,
    });
 
@@ -102,6 +108,8 @@ exports.uploadBills = async (req, res) => {
    return res.status(500).json({ message: "Internal server error" });
  }
 };
+
+
 
 
 exports.getTravelBills = async (req, res) => {
