@@ -1,8 +1,8 @@
 const express = require('express');
 const { upload } = require('../services/fileUpload');
-const { uploadSalesDataThroughCSV } = require('../controllers/admin/salesDataController');
-const { getSalesReportByCode, getDashboardSalesMetricsByCode, getSalesReportForUser, getDashboardSalesMetricsForUser, masterSalesAPI, getSalesWithHierarchyCSV, getSalesReportProductWise } = require('../controllers/common/salesDataController');
-const { userAuth, authMiddleware } = require('../middlewares/authmiddlewares');
+const { uploadSalesDataThroughCSV, getSalesDataToAdmin } = require('../controllers/admin/salesDataController');
+const { getSalesReportByCode, getDashboardSalesMetricsByCode, getSalesReportForUser,  getDashboardSalesMetricsForUser, masterSalesAPI, getSalesWithHierarchyCSV, getSalesReportProductWise } = require('../controllers/common/salesDataController');
+const { userAuth, authMiddleware, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
 router.post("/sales-data/upload/csv", upload.single("file"), uploadSalesDataThroughCSV);
@@ -20,5 +20,8 @@ router.get("/sales/hierarchy/csv", getSalesWithHierarchyCSV);
 router.post("/user/sales-data/report/self", userAuth, getSalesReportForUser);
 router.post("/user/sales-data/dashboard/metrics/self", userAuth, getDashboardSalesMetricsForUser);
 router.post("/user/sales-data/product-wise", userAuth, getSalesReportProductWise);
+
+
+router.get("/admin/getSalesRecords", adminOrSuperAdminAuth, getSalesDataToAdmin)
 
 module.exports = router;

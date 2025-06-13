@@ -72,3 +72,66 @@ exports.uploadSalesDataThroughCSV = async (req, res) => {
 const cleanHeader = (header) => {
   return header.trim().toLowerCase().replace(/\s+/g, "_");
 };
+
+//get sales data to the admin
+exports.getSalesDataToAdmin = async (req, res) => {
+  try {
+    const { startDate, endDate, search, salesType, page = 1, limit = 50 } = req.query;
+
+    const query = {};
+
+    // Handle date range filter
+    if (startDate || endDate) {
+      query.date = {};  // Changed from createdAt to date
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.date.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.date.$lte = end;
+      }
+    }
+
+    // Handle search filter
+    if (search) {
+      query.$or = [{ product_code: { $regex: search, $options: "i" } }];
+    }
+
+    // Handle salesType filter
+    if (salesType) {
+      query.sales_type = salesType;
+    }
+
+
+    // Fetch paginated data
+    const data = await SalesData.find(query)
+      .sort({date: -1})
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit));
+      
+
+    // Count total matching documents
+    const totalRecords = await SalesData.countDocuments(query);
+
+    // Calculate total pages
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    // Send response
+    res.status(200).json({
+      success: true,
+      message: "Successfully retrieved all records",
+      data,
+      totalRecords,
+      totalPages,
+    });
+  } catch (err) {
+    console.error("Error getting sales records:", err);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};

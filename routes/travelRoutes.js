@@ -13,5 +13,5 @@ router.get("/get-all-travel-schedule", getAllTravelSchedule);
 router.post("/upload-bills", userAuth, upload_img.array("billsUpload", 10), uploadBills);
 router.get("/get-bills-for-admin", userAuth, getTravelBills);
 router.get("/get-bills-for-emp", userAuth, getBillsForEmp);
-router.put("/edit-travel-bill", userAuth, editTravelBill);
+router.put("/edit-travel-bill/:id", userAuth, editTravelBill);
 module.exports = router;

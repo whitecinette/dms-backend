@@ -4,6 +4,7 @@ const fsPromises = require("fs/promises");
 const cloudinary = require("../../config/cloudinary");
 const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
+const { emitWarning } = require("process");
 exports.scheduleTravel = async (req, res) => {
  try {
    const { code } = req.user;
@@ -211,21 +212,75 @@ exports.getBillsForEmp = async (req, res) => {
  }
 };
 
-exports.editTravelBill = async (req, res) =>{
- try{
+exports.editTravelBill = async (req, res) => {
+  try {
+    const { status, amount } = req.body;
+    const { id } = req.params;
 
- }catch(error){
-console.log("error in editing travel bilss")
- }
-}
+    // Validate required inputs
+    if (!status || !id) {
+      return res.status(400).json({
+        success: false,
+        status: "error",
+        message: "Status and ID are required",
+      });
+    }
 
+     if(status === "pending"){
+      return res.status(400).json({
+        success: false,
+        status: "warning",
+        message: "Cannot change status to pending",
+      });
+     }
 
+    // Prepare update object
+    const updateData = {
+      status,
+      updatedAt: new Date(),
+    };
 
+   
 
+    // Add amount to update only if it's provided and valid
+    if (amount !== undefined) {
+      if (isNaN(amount)) {
+        return res.status(400).json({
+          success: false,
+          status: "error",
+          message: "Amount must be a valid number",
+        });
+      }
+      updateData.amount = amount;
+    }
 
+    // Find and update in one operation
+    const bill = await Travel.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
 
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        status: "error",
+        message: "Travel bill not found",
+      });
+    }
 
-
-
-
-
+    return res.status(200).json({
+      success: true,
+      status: "success",
+      message: "Travel bill updated successfully",
+      data: bill,
+    });
+  } catch (error) {
+    console.error("Error editing travel bill:", error);
+    return res.status(500).json({
+      success: false,
+      status: "error",
+      message: "Internal server error",
+    });
+  }
+};

@@ -1066,7 +1066,6 @@ exports.editAttendanceByID = async (req, res) => {
   }
 };
 
-
 exports.downloadAllAttendance = async (req, res) => {
   try {
     const { role } = req.user;
