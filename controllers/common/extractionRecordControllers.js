@@ -7,6 +7,7 @@ const HierarchyEntries = require('../../model/HierarchyEntries');
 const { Parser } = require("json2csv");
 const ActorCode = require("../../model/ActorCode");
 const SalesData = require('../../model/SalesData');
+const XLSX = require("xlsx");
 
 const { BACKEND_URL } = process.env;
 
@@ -340,6 +341,25 @@ exports.getExtractionStatus = async (req, res) => {
           uploaded_by: tseCode,
           createdAt: { $gte: start, $lte: end }
         });
+
+      // Fetch dealer details for all dealers associated with this TSE
+      const dealerDetails = await User.find(
+        { code: { $in: dealers } },
+        { code: 1, name: 1, _id: 0 }
+      );
+
+      // Create allDealers array with status
+      const allDealers = dealers.map((dealerCode) => {
+        const dealer = dealerDetails.find((d) => d.code === dealerCode) || {
+          code: dealerCode,
+          name: "N/A",
+        };
+        return {
+          code: dealer.code,
+          name: dealer.name,
+          status: doneDealers.includes(dealerCode) ? "done" : "pending",
+        };
+      });
   
         const doneCount = doneDealers.length;
         const totalCount = dealers.length;
@@ -358,7 +378,8 @@ exports.getExtractionStatus = async (req, res) => {
           done: doneCount,
           donePercent,
           pending: pendingCount,
-          pendingPercent
+          pendingPercent,
+          allDealers
         });
       }
   
@@ -435,91 +456,245 @@ exports.getExtractionStatus = async (req, res) => {
 
   
   
-  exports.getExtractionRecordsForDownload = async (req, res) => {
-    try {
-      const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
+  // exports.getExtractionRecordsForDownload = async (req, res) => {
+  //   try {
+  //     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
   
-      // Step 1: Define default date range
-      const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
-      const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+  //     // Step 1: Define default date range
+  //     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+  //     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
   
-      // Step 2: Build hierarchy filter
-      const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
-      if (smd.length) hierarchyFilter.smd = { $in: smd };
-      if (asm.length) hierarchyFilter.asm = { $in: asm };
-      if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
+  //     // Step 2: Build hierarchy filter
+  //     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+  //     if (smd.length) hierarchyFilter.smd = { $in: smd };
+  //     if (asm.length) hierarchyFilter.asm = { $in: asm };
+  //     if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
   
-      const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
-      if (!hierarchyEntries.length) {
-        return res.status(200).json({ message: "No records found", data: [], total: 0 });
-      }
+  //     const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+  //     if (!hierarchyEntries.length) {
+  //       return res.status(200).json({ message: "No records found", data: [], total: 0 });
+  //     }
   
-      // Step 3: Group dealers by TSE
-      const tseToDealersMap = {};
-      hierarchyEntries.forEach(({ tse, dealer }) => {
-        if (!tseToDealersMap[tse]) tseToDealersMap[tse] = new Set();
-        tseToDealersMap[tse].add(dealer);
+  //     // Step 3: Group dealers by TSE
+  //     const tseToDealersMap = {};
+  //     hierarchyEntries.forEach(({ tse, dealer }) => {
+  //       if (!tseToDealersMap[tse]) tseToDealersMap[tse] = new Set();
+  //       tseToDealersMap[tse].add(dealer);
+  //     });
+  
+  //     const tseCodes = Object.keys(tseToDealersMap);
+  
+  //     // Step 4: Get all users once
+  //     const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
+  //     const userMap = users.reduce((acc, user) => {
+  //       acc[user.code] = user.name;
+  //       return acc;
+  //     }, {});
+  
+  //     // Step 5: Fetch extraction records
+  //     const allRecords = [];
+  
+  //     for (const tseCode of tseCodes) {
+  //       const dealers = Array.from(tseToDealersMap[tseCode]);
+  
+  //       const records = await ExtractionRecord.find({
+  //         dealer: { $in: dealers },
+  //         uploaded_by: tseCode,
+  //         createdAt: { $gte: start, $lte: end },
+  //       }).sort({ createdAt: -1 }).lean();
+  
+  //       records.forEach(record => {
+  //         allRecords.push({
+  //           name: userMap[tseCode] || "N/A",
+  //           code: tseCode,
+  //           dealerCode: record.dealer,
+  //           segment: `="${record.segment}"`,
+  //           brand: record.brand,
+  //           productName: record.product_name,
+  //           productCode: record.product_code,
+  //           price: record.price,
+  //           quantity: record.quantity,
+  //           amount: record.amount,
+  //           productCategory: record.product_category,
+  //           date: new Date(record.createdAt).toISOString().split("T")[0],
+  //         });
+  //       });
+  //     }
+  
+  //     // Step 6: Format for CSV
+  //     const fields = [
+  //       "name", "code", "dealerCode", "segment", "brand", "productName",
+  //       "productCode", "price", "quantity", "amount", "productCategory", "date",
+  //     ];
+  //     const parser = new Parser({ fields });
+  //     const csv = parser.parse(allRecords);
+  
+  //     res.header("Content-Type", "text/csv");
+  //     res.attachment("extraction_records.csv");
+  //     return res.send(csv);
+  
+  //   } catch (error) {
+  //     console.error("Error in getExtractionRecordsForDownload:", error);
+  //     return res.status(500).json({
+  //       message: "Error downloading extraction records",
+  //       error: error.message,
+  //     });
+  //   }
+  // };
+
+ exports.getExtractionRecordsForDownload = async (req, res) => {
+  try {
+    const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
+
+    const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+    const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+
+    const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+    if (smd.length) hierarchyFilter.smd = { $in: smd };
+    if (asm.length) hierarchyFilter.asm = { $in: asm };
+    if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
+
+    const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+    if (!hierarchyEntries.length) {
+      return res.status(200).json({ message: "No records found", data: [], total: 0 });
+    }
+
+    const tseToDealersMap = {};
+    hierarchyEntries.forEach(({ tse, dealer }) => {
+      if (!tseToDealersMap[tse]) tseToDealersMap[tse] = new Set();
+      tseToDealersMap[tse].add(dealer);
+    });
+
+    const tseCodes = Object.keys(tseToDealersMap);
+
+    const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
+    const userMap = users.reduce((acc, user) => {
+      acc[user.code] = user.name;
+      return acc;
+    }, {});
+
+    const allDealerCodes = Array.from(new Set(hierarchyEntries.map((entry) => entry.dealer)));
+    const dealerDetails = await User.find(
+      { code: { $in: allDealerCodes } },
+      { code: 1, name: 1, _id: 0 }
+    ).lean();
+    const dealerMap = dealerDetails.reduce((acc, dealer) => {
+      acc[dealer.code] = dealer.name || "N/A";
+      return acc;
+    }, {});
+
+    const summaryData = [];
+    const recordsData = [];
+
+    for (const tseCode of tseCodes) {
+      const dealers = Array.from(tseToDealersMap[tseCode]);
+
+      const doneDealers = await ExtractionRecord.distinct("dealer", {
+        dealer: { $in: dealers },
+        uploaded_by: tseCode,
+        createdAt: { $gte: start, $lte: end },
       });
-  
-      const tseCodes = Object.keys(tseToDealersMap);
-  
-      // Step 4: Get all users once
-      const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
-      const userMap = users.reduce((acc, user) => {
-        acc[user.code] = user.name;
-        return acc;
-      }, {});
-  
-      // Step 5: Fetch extraction records
-      const allRecords = [];
-  
-      for (const tseCode of tseCodes) {
-        const dealers = Array.from(tseToDealersMap[tseCode]);
-  
-        const records = await ExtractionRecord.find({
-          dealer: { $in: dealers },
-          uploaded_by: tseCode,
-          createdAt: { $gte: start, $lte: end },
-        }).sort({ createdAt: -1 }).lean();
-  
-        records.forEach(record => {
-          allRecords.push({
-            name: userMap[tseCode] || "N/A",
-            code: tseCode,
-            dealerCode: record.dealer,
-            segment: `="${record.segment}"`,
-            brand: record.brand,
-            productName: record.product_name,
-            productCode: record.product_code,
-            price: record.price,
-            quantity: record.quantity,
-            amount: record.amount,
-            productCategory: record.product_category,
-            date: new Date(record.createdAt).toISOString().split("T")[0],
-          });
+
+      const doneCount = doneDealers.length;
+      const totalCount = dealers.length;
+      const pendingCount = totalCount - doneCount;
+
+      const donePercent = totalCount > 0 ? ((doneCount / totalCount) * 100).toFixed(2) : "0.00";
+      const pendingPercent = totalCount > 0 ? ((pendingCount / totalCount) * 100).toFixed(2) : "0.00";
+
+      // Create a row for each dealer
+      dealers.forEach((dealerCode) => {
+        summaryData.push({
+          name: userMap[tseCode] || "N/A",
+          code: tseCode,
+          total: totalCount,
+          done: doneCount,
+          donePercent,
+          pending: pendingCount,
+          pendingPercent,
+          dealerName: dealerMap[dealerCode] || "N/A",
+          dealerCode,
+          status: doneDealers.includes(dealerCode) ? "done" : "pending",
         });
-      }
-  
-      // Step 6: Format for CSV
-      const fields = [
-        "name", "code", "dealerCode", "segment", "brand", "productName",
-        "productCode", "price", "quantity", "amount", "productCategory", "date",
-      ];
-      const parser = new Parser({ fields });
-      const csv = parser.parse(allRecords);
-  
-      res.header("Content-Type", "text/csv");
-      res.attachment("extraction_records.csv");
-      return res.send(csv);
-  
-    } catch (error) {
-      console.error("Error in getExtractionRecordsForDownload:", error);
-      return res.status(500).json({
-        message: "Error downloading extraction records",
-        error: error.message,
+      });
+
+      const records = await ExtractionRecord.find({
+        dealer: { $in: dealers },
+        uploaded_by: tseCode,
+        createdAt: { $gte: start, $lte: end },
+      }).sort({ createdAt: -1 }).lean();
+
+      records.forEach((record) => {
+        recordsData.push({
+          name: userMap[tseCode] || "N/A",
+          code: tseCode,
+          dealerCode: record.dealer,
+          dealerName: dealerMap[record.dealer] || "N/A",
+          dealerStatus: doneDealers.includes(record.dealer) ? "done" : "pending",
+          segment: record.segment,
+          brand: record.brand,
+          productName: record.product_name,
+          productCode: record.product_code,
+          price: record.price,
+          quantity: record.quantity,
+          amount: record.amount,
+          productCategory: record.product_category,
+          date: new Date(record.createdAt).toISOString().split("T")[0],
+        });
       });
     }
-  };
+
+    const wb = XLSX.utils.book_new();
+
+    // Summary sheet
+    const summaryFields = [
+      "name",
+      "code",
+      "total",
+      "done",
+      "donePercent",
+      "pending",
+      "pendingPercent",
+      "dealerName",
+      "dealerCode",
+      "status",
+    ];
+    const summaryWs = XLSX.utils.json_to_sheet(summaryData, { header: summaryFields });
+    XLSX.utils.book_append_sheet(wb, summaryWs, "Summary");
+
+    // Records sheet
+    const recordsFields = [
+      "name",
+      "code",
+      "dealerCode",
+      "dealerName",
+      "dealerStatus",
+      "segment",
+      "brand",
+      "productName",
+      "productCode",
+      "price",
+      "quantity",
+      "amount",
+      "productCategory",
+      "date",
+    ];
+    const recordsWs = XLSX.utils.json_to_sheet(recordsData, { header: recordsFields });
+    XLSX.utils.book_append_sheet(wb, recordsWs, "Records");
+
+    const buffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" });
+    res.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.attachment("extraction_records.xlsx");
+    return res.send(buffer);
+
+  } catch (error) {
+    console.error("Error in getExtractionRecordsForDownload:", error);
+    return res.status(500).json({
+      message: "Error downloading extraction records",
+      error: error.message,
+    });
+  }
+};
 
 // get extraction report for admin
 // exports.getExtractionReportForAdmin = async (req, res) => {
