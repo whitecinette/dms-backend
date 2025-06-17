@@ -13,7 +13,7 @@ const TravelBillSchema = new mongoose.Schema(
     },
     amount: {
       type: Number,
-      required: false,
+      required: true,
     },
     status: {
       type: String,

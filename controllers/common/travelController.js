@@ -5,93 +5,47 @@ const cloudinary = require("../../config/cloudinary");
 const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
 const { emitWarning } = require("process");
-exports.scheduleTravel = async (req, res) => {
- try {
-   const { code } = req.user;
-
-   const {
-     travelDate,
-     locations, 
-     purpose,
-     modeOfTransport,
-     returnDate,
-   } = req.body;
-
-   if (!Array.isArray(locations) || locations.length < 2) {
-     return res.status(400).json({
-       message: "At least two locations are required (start and end)."
-     });
-   }
-
-   const newTravel = new Travel({
-     code,
-     travelDate,
-     locations,
-     purpose,
-     modeOfTransport,
-     returnDate,
-   });
-
-   await newTravel.save();
-
-   res.status(201).json({
-     message: "Travel scheduled successfully",
-     travel: newTravel,
-   });
- } catch (error) {
-   console.error("Schedule travel error:", error);
-   res.status(500).json({ message: "Failed to schedule travel" });
- }
-}; 
-
-exports.getAllTravelSchedule = async (req, res) => {
- try {
-
-   const travelData = await Travel.find({ }).sort({ travelDate: -1 });
-
-   res.status(200).json({
-     message: "Travel data fetched successfully",
-     travelData,
-   });
- } catch (error) {
-   console.log("Get Travel error:", error);
-   res.status(500).json({ message: "Failed to fetch travel data" });
- }
-};
+const path = require("path");
 
 
 exports.uploadBills = async (req, res) => {
  try {
    const { code } = req.user;
-   const { billType, isGenerated, remarks } = req.body;
+   const { billType, isGenerated, remarks, amount } = req.body;
 
    if (!req.files || req.files.length === 0) {
-     return res.status(400).json({ message: "At least one bill image is required" });
+     return res.status(400).json({ message: "At least one bill file is required" });
    }
 
-   const uploadedBills = [];
+   const uploadedBills = await Promise.all(
+     req.files.map((file) => {
+       const ext = path.extname(file.originalname).toLowerCase(); 
+       const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+       const publicId = `${code}_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
-   for (const file of req.files) {
-     const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
-     const publicId = `${code}_${timestamp}_${Math.floor(Math.random() * 1000)}`;
+       // Determine the resource type
+       let resourceType = "image"; // default
+       if (ext === ".pdf") resourceType = "raw";
 
-     const result = await cloudinary.uploader.upload(file.path, {
-       resource_type: 'image',
-       folder: 'Travel Bills',
-       public_id: publicId,
-       transformation: [
-         { width: 800, height: 800, crop: "limit" },
-         { quality: "auto" },
-         { fetch_format: "auto" },
-       ],
-     });
+       return cloudinary.uploader.upload(file.path, {
+         resource_type: resourceType,
+         folder: "Travel Bills",
+         public_id: publicId,
+         transformation: resourceType === "image" ? [
+           { width: 800, height: 800, crop: "limit" },
+           { quality: "auto" },
+           { fetch_format: "auto" },
+         ] : undefined,
+       });
+     })
+   );
 
-     uploadedBills.push(result.secure_url);
-   }
+   const fileUrls = uploadedBills.map((result) => result.secure_url);
 
    const newBill = new Travel({
      billType,
-     billImages: uploadedBills,
+     billImages: fileUrls,
+     amount: amount,
      isGenerated: isGenerated || false,
      remarks: remarks || '',
      code: code,
@@ -109,8 +63,6 @@ exports.uploadBills = async (req, res) => {
    return res.status(500).json({ message: "Internal server error" });
  }
 };
-
-
 
 
 exports.getTravelBills = async (req, res) => {
@@ -190,9 +142,35 @@ exports.getTravelBills = async (req, res) => {
 exports.getBillsForEmp = async (req, res) => {
  try {
    const { code } = req.user;
+   const { startDate, status } = req.query;
 
-   // 1. Fetch bills for the employee
-   const bills = await Travel.find({ code }).sort({ createdAt: -1 });
+   // Build dynamic filter
+   const filter = { code };
+
+   // Add status filter if provided
+   if (status) {
+     filter.status = status;
+   }
+
+   // Add date range filter if provided
+   if (startDate) {
+    const start = new Date(startDate);
+    start.setUTCHours(0, 0, 0, 0);
+    
+    const nextDay = new Date(start);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    nextDay.setUTCHours(0, 0, 0, 0);
+    
+    filter.createdAt = {
+      $gte: start,
+      $lt: nextDay
+    };
+    
+
+  }
+  
+   // 1. Fetch filtered bills
+   const bills = await Travel.find(filter).sort({ createdAt: -1 });
 
    // 2. Fetch employee name from ActorCode collection
    const actor = await ActorCode.findOne({ code }, { name: 1, _id: 0 });
@@ -211,6 +189,7 @@ exports.getBillsForEmp = async (req, res) => {
    return res.status(500).json({ message: "Internal server error" });
  }
 };
+
 
 exports.editTravelBill = async (req, res) => {
   try {
