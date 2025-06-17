@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 
 const TravelBillSchema = new mongoose.Schema(
   {
+   billNumber: {
+    type: String,
+    required: true,
+    unique: true,
+  },  
     billType: {
       type: String,
       enum: ['Restaurant', 'Travel', 'Hotel', 'Transport', 'Fuel', 'Other'],
