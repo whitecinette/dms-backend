@@ -11,7 +11,7 @@ const notificationSchema = new mongoose.Schema(
     targetRole: [
       {
         type: String,
-        enum: ["admin", "super_admin", "dealer", "employee", "mdd", "user", ""],
+        enum: ["admin", "super_admin", "dealer", "employee", "mdd", "user", "hr", ""],
         default: "", // Set a default value if needed
         required: false,
       },
