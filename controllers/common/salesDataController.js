@@ -961,7 +961,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 
     const actor = await ActorCode.findOne({ code });
     if (!actor) {
-      return res.status(404).json({ success: false, message: "Actor not found for the provided code." });
+      return res.status(404).json({ success: false, message: "Actor not found for the provided code!" });
     }
 
     const { role, position } = actor;
