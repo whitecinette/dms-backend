@@ -621,43 +621,62 @@ exports.registerUserByAdmin = async (req, res) => {
 
 // 📌 Edit User by Admins
 exports.editUserByAdmins = async (req, res) => {
-    try {
-        const { id } = req.params; // Extract user ID from request parameters
-        const updateData = req.body; // Extract incoming update data
+  try {
+    const userRole = req.user.role;
+    const { id } = req.params; // Extract user ID from request parameters
+    const updateData = req.body; // Extract incoming update data
+    const role = updateData.role;
 
-        if (!id) {
-            return res.status(400).json({ message: "User ID is required" });
-        }
-
-        if (!updateData || Object.keys(updateData).length === 0) {
-            return res.status(400).json({ message: "No update data provided" });
-        }
-
-        // Construct the dynamic update object
-        let updateFields = {};
-
-        for (const key in updateData) {
-            if (updateData[key] !== undefined) {
-                updateFields[key] = updateData[key];
-            }
-        }
-
-        // Perform the update with $set
-        const updatedUser = await User.findByIdAndUpdate(
-            id,
-            { $set: updateFields },
-            { new: true, runValidators: true }
-        );
-
-        if (!updatedUser) {
-            return res.status(404).json({ message: "User not found" });
-        }
-
-        res.status(200).json(updatedUser);
-    } catch (error) {
-        console.error("Error updating user:", error);
-        res.status(500).json({ message: "Internal server error" });
+    if (userRole === "admin" && (role === "admin" || role === "super_admin")) {
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: `Unauthorized! You cannot change the role to ${role}`,
+        });
     }
+    if (userRole === "hr" && (role === "admin" || role === "hr" || role==="super_admin")) {
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: `Unauthorized! You cannot change the role to ${role}`,
+        });
+    }
+
+    if (!id) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    if (!updateData || Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: "No update data provided" });
+    }
+
+    // Construct the dynamic update object
+    let updateFields = {};
+
+    for (const key in updateData) {
+      if (updateData[key] !== undefined) {
+        updateFields[key] = updateData[key];
+      }
+    }
+
+    // Perform the update with $set
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: updateFields },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json(updatedUser);
+  } catch (error) {
+    console.error("Error updating user:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 };
 
 

@@ -215,7 +215,7 @@ exports.getBillsForEmp = async (req, res) => {
 
 exports.editTravelBill = async (req, res) => {
   try {
-    const { status, amount } = req.body;
+    const { status } = req.body;
     const { id } = req.params;
 
     // Validate required inputs
@@ -240,18 +240,6 @@ exports.editTravelBill = async (req, res) => {
       status,
       updatedAt: new Date(),
     };
-
-    // Add amount to update only if it's provided and valid
-    if (amount !== undefined) {
-      if (isNaN(amount)) {
-        return res.status(400).json({
-          success: false,
-          status: "error",
-          message: "Amount must be a valid number",
-        });
-      }
-      updateData.amount = amount;
-    }
 
     // Find and update in one operation
     const bill = await Travel.findByIdAndUpdate(

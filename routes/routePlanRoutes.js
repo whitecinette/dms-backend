@@ -12,8 +12,8 @@ router.delete('/route-plan/delete/:routeId', userAuth, deleteRoutePlanAndUpdateB
 // USER MODEL ROUES 
 router.get("/user/market-coverage/dropdown", userAuth, getDropdownOptionsForMarketCoverageUser);
 
-//admin
-router.get("/admin/route-plan/get", adminOrSuperAdminAuth, getAllRoutePlans);
-router.put("/admin/route-plan/update/:routeId", adminOrSuperAdminAuth, editRoutePlan);
+//admin and Hr
+router.get("/admin/route-plan/get", userAuth, getAllRoutePlans);
+router.put("/admin/route-plan/update/:routeId", userAuth, editRoutePlan);
 
 module.exports = router;

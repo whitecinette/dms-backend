@@ -658,7 +658,7 @@ exports.getAttendanceByDate = async (req, res) => {
         return positions;
       }, []);
     }
-    let employeeFilter;
+    let employeeFilter = {status : "active"};
     if (role === "super_admin" || role === "admin") {
       // Step 2: Fetch Employees Based on Firm Filter (If Applied)
       employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
@@ -764,7 +764,7 @@ exports.getLatestAttendance = async (req, res) => {
       }, []);
     }
 
-    let employeeFilter;
+    let employeeFilter = {status : "active"};
     if (role === "super_admin" || role === "admin") {
       employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
     } else if (role === "hr") {
@@ -1092,7 +1092,7 @@ exports.downloadAllAttendance = async (req, res) => {
       }, []);
     }
 
-    let employeeFilter;
+    let employeeFilter = {status : "active"};
     if (role === "super_admin" || role === "admin") {
       employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
     } else if (role === "hr") {

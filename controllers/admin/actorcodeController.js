@@ -236,7 +236,7 @@ exports.editActorCode = async (req, res) => {
   try {
     const userRole = req.user.role;
     // Check if role is one of the allowed roles
-    if (!["admin", "superAdmin", "hr"].includes(userRole)) {
+    if (!["admin", "super_admin", "hr"].includes(userRole)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
     if (
@@ -257,6 +257,22 @@ exports.editActorCode = async (req, res) => {
     const actor = await ActorCode.findById(actorId);
     if (!actor) {
       return res.status(404).json({ message: "Actor not found." });
+    }
+
+    if (userRole === "admin" && (role === "admin" || role === "super_admin")) {
+      return res.status(401).json({
+        success: false,
+        message: `Unauthorized! You cannot change the role to ${role}`,
+      });
+    }
+    if (
+      userRole === "hr" &&
+      (role === "admin" || role === "hr" || role === "super_admin")
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: `Unauthorized! You cannot change the role to ${role}`,
+      });
     }
 
     const existingActor = await ActorCode.findOne({ code });
@@ -280,7 +296,7 @@ exports.editActorCode = async (req, res) => {
         role,
         status,
         parent_code,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       },
       { new: true }
     );

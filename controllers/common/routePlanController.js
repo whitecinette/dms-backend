@@ -324,7 +324,7 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
         .json({ success: false, message: "User position missing in token" });
     }
     // If role is admin, super_admin or Hr -> return all dropdown options
-    if (["admin", "super_admin", "Hr"].includes(role)) {
+    if (["admin", "super_admin", "hr"].includes(role)) {
       const users = await User.find({});
 
       const districts = new Set();

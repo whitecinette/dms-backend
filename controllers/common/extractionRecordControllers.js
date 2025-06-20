@@ -365,8 +365,8 @@ exports.getExtractionStatus = async (req, res) => {
         const totalCount = dealers.length;
         const pendingCount = totalCount - doneCount;
   
-        const donePercent = totalCount > 0 ? ((doneCount / totalCount) * 100).toFixed(2) : "0.00";
-        const pendingPercent = totalCount > 0 ? ((pendingCount / totalCount) * 100).toFixed(2) : "0.00";
+        const donePercent = totalCount > 0 ? Math.round(((doneCount / totalCount) * 100)) : "0";
+        const pendingPercent = totalCount > 0 ? Math.round(((pendingCount / totalCount) * 100)) : "0";
   
         // Fetch name from User model
         const user = await User.findOne({ code: tseCode });
@@ -376,9 +376,9 @@ exports.getExtractionStatus = async (req, res) => {
           code: tseCode,
           total: totalCount,
           done: doneCount,
-          donePercent,
+          "Done Percent":`${donePercent}%`,
           pending: pendingCount,
-          pendingPercent,
+          "Pending Percent":`${pendingPercent}%`,
           allDealers
         });
       }
@@ -599,22 +599,22 @@ exports.getExtractionStatus = async (req, res) => {
       const totalCount = dealers.length;
       const pendingCount = totalCount - doneCount;
 
-      const donePercent = totalCount > 0 ? ((doneCount / totalCount) * 100).toFixed(2) : "0.00";
-      const pendingPercent = totalCount > 0 ? ((pendingCount / totalCount) * 100).toFixed(2) : "0.00";
+      const donePercent = totalCount > 0 ? Math.round(((doneCount / totalCount) * 100)) : "0.00";
+      const pendingPercent = totalCount > 0 ? Math.round(((pendingCount / totalCount) * 100)) : "0.00";
 
       // Create a row for each dealer
       dealers.forEach((dealerCode) => {
         summaryData.push({
-          name: userMap[tseCode] || "N/A",
-          code: tseCode,
-          total: totalCount,
-          done: doneCount,
-          donePercent,
-          pending: pendingCount,
-          pendingPercent,
-          dealerName: dealerMap[dealerCode] || "N/A",
-          dealerCode,
-          status: doneDealers.includes(dealerCode) ? "done" : "pending",
+          Name: userMap[tseCode] || "N/A",
+          CODE: tseCode,
+          TOTAL: totalCount,
+          DONE: doneCount,
+          "DONE PERCENT": donePercent,
+          Pending: pendingCount,
+          "PENDING PERCENT":pendingPercent,
+          "DEALER NAME": dealerMap[dealerCode] || "N/A",
+          "DEALER CODE" :dealerCode,
+          STATUS: doneDealers.includes(dealerCode) ? "Done" : "Pending",
         });
       });
 
@@ -626,20 +626,20 @@ exports.getExtractionStatus = async (req, res) => {
 
       records.forEach((record) => {
         recordsData.push({
-          name: userMap[tseCode] || "N/A",
-          code: tseCode,
-          dealerCode: record.dealer,
-          dealerName: dealerMap[record.dealer] || "N/A",
-          dealerStatus: doneDealers.includes(record.dealer) ? "done" : "pending",
-          segment: record.segment,
-          brand: record.brand,
-          productName: record.product_name,
-          productCode: record.product_code,
-          price: record.price,
-          quantity: record.quantity,
-          amount: record.amount,
-          productCategory: record.product_category,
-          date: new Date(record.createdAt).toISOString().split("T")[0],
+          "Name": userMap[tseCode] || "N/A",
+          "CODE": tseCode,
+          "DEALER CODE": record.dealer,
+          "DEALER NAME": dealerMap[record.dealer] || "N/A",
+          "DEALER STATUS": doneDealers.includes(record.dealer) ? "Done" : "Pending",
+          "SEGMENT": record.segment,
+          "BRAND": record.brand,
+          "PRODUCT NAME": record.product_name,
+          "PRODUCT CODE": record.product_code,
+          "PRICE": record.price,
+          "QUANTITY": record.quantity,
+          "AMOUNT": record.amount,
+          "PRODUCT CATEGORY": record.product_category,
+          "DATE": new Date(record.createdAt).toISOString().split("T")[0],
         });
       });
     }
@@ -648,36 +648,36 @@ exports.getExtractionStatus = async (req, res) => {
 
     // Summary sheet
     const summaryFields = [
-      "name",
-      "code",
-      "total",
-      "done",
-      "donePercent",
-      "pending",
-      "pendingPercent",
-      "dealerName",
-      "dealerCode",
-      "status",
+      "Name",
+      "CODE",
+      "TOTAL",
+      "DONE",
+      "DONE PERCENT",
+      "Pending",
+      "PENDING PERCENT",
+      "DEALER NAME",
+      "DEALER CODE",
+      "STATUS",
     ];
     const summaryWs = XLSX.utils.json_to_sheet(summaryData, { header: summaryFields });
     XLSX.utils.book_append_sheet(wb, summaryWs, "Summary");
 
     // Records sheet
     const recordsFields = [
-      "name",
-      "code",
-      "dealerCode",
-      "dealerName",
-      "dealerStatus",
-      "segment",
-      "brand",
-      "productName",
-      "productCode",
-      "price",
-      "quantity",
-      "amount",
-      "productCategory",
-      "date",
+      "Name",
+      "CODE",
+      "DEALER CODE",
+      "DEALER NAME",
+      "DEALER STATUS",
+      "SEGMENT",
+      "BRAND",
+      "PRODUCT NAME",
+      "PRODUCT CODE",
+      "PRICE",
+      "QUANTITY",
+      "AMOUNT",
+      "PRODUCT CATEGORY",
+      "DATE",
     ];
     const recordsWs = XLSX.utils.json_to_sheet(recordsData, { header: recordsFields });
     XLSX.utils.book_append_sheet(wb, recordsWs, "Records");
