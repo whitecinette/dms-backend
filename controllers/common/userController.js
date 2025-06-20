@@ -297,6 +297,7 @@ exports.changeUserPassword = async (req, res) => {
 
 // get Profile
 exports.getProfile = async (req, res) => {
+ console.log("enterring the get profile api");
   try {
     const { code } = req.user; // Extract employee code from authenticated user
 
@@ -322,3 +323,53 @@ exports.getProfile = async (req, res) => {
     });
   }
 };
+
+exports.forgetPasswordForApp = async (req, res) => {
+ console.log("🔁 Reaching to reset password API");
+
+ try {
+   // ✅ Extract from body (now includes code)
+   const { code, oldPassword, newPassword } = req.body;
+   console.log("Received body:", req.body);
+   for (let key in req.body) {
+     console.log(`${key} = "${req.body[key]}"`, req.body[key].length);
+   }
+   
+   // ✅ Validate input
+   if (!code || !oldPassword || !newPassword) {
+     return res.status(400).json({ message: "Code, old password, and new password are required" });
+   }
+
+   // ✅ Fetch user
+   const user = await User.findOne({ code });
+   if (!user) {
+     return res.status(404).json({ message: "User not found" });
+   }
+
+   // ✅ Debug log for password check
+   console.log("Entered Old Password:", oldPassword);
+   console.log("Stored Hashed Password:", user.password);
+
+   // ✅ Compare old password
+   const isMatch = await bcrypt.compare(oldPassword, user.password);
+   console.log("Password Match Result:", isMatch);
+
+   if (!isMatch) {
+     return res.status(401).json({
+       message: "Old password incorrect. Want to continue with OTP?",
+       askOtp: true,
+     });
+   }
+
+   // ✅ Hash and update new password
+   const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+   user.password = hashedNewPassword;
+   await user.save();
+
+   return res.status(200).json({ message: "Password updated successfully" });
+ } catch (error) {
+   console.error("❌ Error resetting password:", error);
+   return res.status(500).json({ message: "Something went wrong" });
+ }
+};
+
