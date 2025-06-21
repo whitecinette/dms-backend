@@ -220,84 +220,59 @@ exports.getUsersByPositions = async (req, res) => {
 };
 
 exports.changeUserPassword = async (req, res) => {
-  try {
-    const { code, oldPassword, newPassword, securityKey } = req.body;
+ try {
+   // Extract code from the token (set by userAuth middleware)
+   const { code } = req.user
+   const { oldPassword, newPassword } = req.body;
 
-    // Validate required fields
-    if (!code || !oldPassword || !newPassword || !securityKey) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Code, old password, new password, and security key are required",
-      });
-    }
+   // Validate required fields
+   if (!code || !oldPassword || !newPassword) {
+     return res.status(400).json({
+       success: false,
+       message: "Old password and new password are required",
+     });
+   }
 
-    // Verify security key
-    if (securityKey !== process.env.passwordkey) {
-      return res.status(403).json({
-        success: false,
-        message: "Invalid security key",
-      });
-    }
+   // Find the user by code
+   const user = await User.findOne({ code });
+   if (!user) {
+     return res.status(404).json({
+       success: false,
+       message: "User not found",
+     });
+   }
 
-    // Find the user by code
-    const user = await User.findOne({ code });
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
+   // Compare old password
+   const isMatch = await bcrypt.compare(oldPassword, user.password);
+   if (!isMatch) {
+     return res.status(400).json({
+       success: false,
+       message: "Current password is incorrect",
+     });
+   }
 
-    // Verify old password
-    const isMatch = await bcrypt.compare(oldPassword, user.password);
-    if (!isMatch) {
-      return res.status(400).json({
-        success: false,
-        message: "Current password is incorrect",
-      });
-    }
+   // Hash and update new password
+   const hashedPassword = await bcrypt.hash(newPassword, 10);
+   user.password = hashedPassword;
+   await user.save();
 
-    // Store previous data for notification
-    // const previousData = { ...user.toObject() };
-
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update password
-    user.password = hashedPassword;
-    await user.save();
-
-    // Create changes object for notification
-    // const changes = [
-    //   {
-    //     field: "password",
-    //     oldValue: "**********", // Mask the old password
-    //     newValue: "**********", // Mask the new password
-    //   },
-    // ];
-
-    // Send notification to admins
-    // const userEmail = user.email || `${user.code}@dummyemail.com`;
-    // await sendNotificationToAdmins(changes, previousData, user, userEmail);
-
-    return res.status(200).json({
-      success: true,
-      message: "Password updated successfully",
-    });
-  } catch (error) {
-    console.error("Error changing password:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
+   return res.status(200).json({
+     success: true,
+     message: "Password updated successfully",
+   });
+ } catch (error) {
+   console.error("Error changing password:", error);
+   return res.status(500).json({
+     success: false,
+     message: "Internal server error",
+   });
+ }
 };
+
 
 
 // get Profile
 exports.getProfile = async (req, res) => {
- console.log("enterring the get profile api");
   try {
     const { code } = req.user; // Extract employee code from authenticated user
 

@@ -60,7 +60,7 @@ router.post("/app/user/login", loginUserForApp);
 router.post("/app/user/firebase-mdd-login-by-phone", loginMddWithFirebasePhone);
 
 router.post("/app/user/register", registerUserForApp);
-router.post("/user/change-password", changeUserPassword);
+router.post("/user/change-password",userAuth, changeUserPassword);
 router.get("/user/get-profile", userAuth, getProfile);
 
 // edit user by thier role 
