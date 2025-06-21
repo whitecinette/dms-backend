@@ -658,12 +658,11 @@ exports.getAttendanceByDate = async (req, res) => {
         return positions;
       }, []);
     }
-    let employeeFilter = {status : "active"};
+    let employeeFilter = { status: "active" };
     if (role === "super_admin" || role === "admin") {
-      // Step 2: Fetch Employees Based on Firm Filter (If Applied)
-      employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
+      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
     } else if (role === "hr") {
-      employeeFilter = { role: { $in: ["employee"] } };
+      employeeFilter.role = { $in: ["employee"] };
     } else {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -763,12 +762,11 @@ exports.getLatestAttendance = async (req, res) => {
         return positions;
       }, []);
     }
-
-    let employeeFilter = {status : "active"};
+    let employeeFilter = { status: "active" };
     if (role === "super_admin" || role === "admin") {
-      employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
+      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
     } else if (role === "hr") {
-      employeeFilter = { role: { $in: ["employee"] } };
+      employeeFilter.role = { $in: ["employee"] };
     } else {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -1091,12 +1089,11 @@ exports.downloadAllAttendance = async (req, res) => {
         return positions;
       }, []);
     }
-
-    let employeeFilter = {status : "active"};
+    let employeeFilter = { status: "active" };
     if (role === "super_admin" || role === "admin") {
-      employeeFilter = { role: { $in: ["admin", "employee", "hr"] } };
+      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
     } else if (role === "hr") {
-      employeeFilter = { role: { $in: ["employee"] } };
+      employeeFilter.role = { $in: ["employee"] };
     } else {
       return res.status(403).json({ message: "Unauthorized" });
     }

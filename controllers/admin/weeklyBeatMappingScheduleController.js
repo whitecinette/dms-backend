@@ -942,7 +942,9 @@ exports.getBeatMappingReport = async (req, res) => {
       const matchTaluka = !taluka.length || taluka.includes(entry.taluka);
       const matchTown = !town.length || town.includes(entry.town);
       // Travel filter can be added here later if defined
-      return matchStatus && matchZone && matchDistrict && matchTaluka && matchTown;
+      return (
+        matchStatus && matchZone && matchDistrict && matchTaluka && matchTown
+      );
     });
 
     // Count summary
@@ -1574,33 +1576,54 @@ exports.deleteDealerFromSchedule = async (req, res) => {
 
 exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
   try {
-    const {
-      startDate,
-      endDate,
-      search,
-      page = 1,
-      limit = 20,
-    } = req.query;
+    const { startDate, endDate, search, page = 1, limit = 20 } = req.query;
 
-    if (!startDate || !endDate) {
+    // Validate date formats (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!startDate) {
       return res.status(400).json({
         success: false,
-        message: "Start date and end date are required.",
+        message: "startDate is required.",
+      });
+    }
+    if (!dateRegex.test(startDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate format. Use YYYY-MM-DD.",
+      });
+    }
+    if (endDate && !dateRegex.test(endDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid endDate format. Use YYYY-MM-DD.",
       });
     }
 
-    const start = new Date(startDate);
+    // Set start and end dates
+    let start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+    let end;
+    if (endDate) {
+      end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+    } else {
+      end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+    }
 
-    const query = {
-      startDate: { $gte: start },
-      endDate: { $lte: end },
-    };
+    // Log dates for debugging
+    // console.log("Query Start:", start.toISOString());
+    // console.log("Query End:", end.toISOString());
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    // Query for schedules that overlap with the date range
+    let query = {
+      startDate: { $lte: end },
+      endDate: { $gte: start },
+    };
+
+    // Fetch employees
     const employees = await User.find(
       { role: { $in: ["admin", "employee"] } },
       "code name"
@@ -1611,8 +1634,13 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       return acc;
     }, {});
 
-    const schedules = await WeeklyBeatMappingSchedule.find(query).lean();
+    // Fetch schedules with pagination
+    const schedules = await WeeklyBeatMappingSchedule.find(query)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
 
+    // Fetch route plans for the date range
     const routePlans = await RoutePlan.find({
       startDate: { $lte: end },
       endDate: { $gte: start },
@@ -1640,21 +1668,20 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       for (const dealer of schedule.schedule || []) {
         const dealerCode = dealer.code || dealer._id || JSON.stringify(dealer);
         const dealerStatus = dealer.status || "unknown";
-        const key = dealerCode; // Use dealerCode as key to ensure uniqueness per dealer
+        const key = dealerCode;
 
         const existing = scheduleMap.get(normalizedCode).dealersMap.get(key);
 
         if (dealerStatus === "pending" && existing?.status === "done") {
-          continue; // Skip pending if done exists for this dealer
+          continue;
         }
 
         if (!existing) {
           scheduleMap.get(normalizedCode).dealersMap.set(key, {
             ...dealer,
-            visited: dealerStatus === "done" ? 1 : 0, // Only count for "done" status
+            visited: dealerStatus === "done" ? 1 : 0,
           });
         } else if (dealerStatus === "done") {
-          // Replace existing with "done" status and update visited count
           scheduleMap.get(normalizedCode).dealersMap.set(key, {
             ...dealer,
             visited: (existing.visited || 0) + 1,
@@ -1662,17 +1689,22 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
         }
       }
 
-      // Match routes
+      // Match routes using UTC date comparison
       const matchingRoutes = routePlans.filter((route) => {
-        const routeStartStr = new Date(route.startDate).toISOString().split("T")[0];
-        const routeEndStr = new Date(route.endDate).toISOString().split("T")[0];
-        const scheduleStartStr = new Date(schedule.startDate).toISOString().split("T")[0];
-        const scheduleEndStr = new Date(schedule.endDate).toISOString().split("T")[0];
+        const routeStart = new Date(route.startDate).setUTCHours(0, 0, 0, 0);
+        const routeEnd = new Date(route.endDate).setUTCHours(0, 0, 0, 0);
+        const scheduleStart = new Date(schedule.startDate).setUTCHours(
+          0,
+          0,
+          0,
+          0
+        );
+        const scheduleEnd = new Date(schedule.endDate).setUTCHours(0, 0, 0, 0);
 
         return (
           route.code === schedule.code &&
-          routeStartStr === scheduleStartStr &&
-          routeEndStr === scheduleEndStr
+          routeStart === scheduleStart &&
+          routeEnd === scheduleEnd
         );
       });
 
@@ -1703,18 +1735,16 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
         _id: entry._id,
         code: entry.code,
         name: entry.name,
-        startDate: entry.startDate,
-        endDate: entry.endDate,
         total,
         done,
         pending,
-        visited, // Total visits for dealers with status "done"
+        visited,
         schedule: dealers,
         routes: entry.routes,
       };
     });
 
-    // Sort schedules to prioritize those with higher "done" count
+    // Sort schedules by "done" count
     formattedSchedules.sort((a, b) => b.done - a.done);
 
     // Apply search filter
@@ -1728,15 +1758,16 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       );
     }
 
-    const paginatedSchedules = formattedSchedules.slice(skip, skip + parseInt(limit));
+    // Get total count for pagination
+    const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
 
     return res.status(200).json({
       success: true,
-      data: paginatedSchedules,
-      total: formattedSchedules.length,
+      data: formattedSchedules,
+      total: totalCount,
       page: parseInt(page),
       limit: parseInt(limit),
-      totalPages: Math.ceil(formattedSchedules.length / limit),
+      totalPages: Math.ceil(totalCount / limit),
     });
   } catch (error) {
     console.error("❌ Error fetching schedules:", error);
