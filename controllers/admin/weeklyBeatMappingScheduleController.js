@@ -1057,6 +1057,8 @@ exports.markDealerDone = async (req, res) => {
   try {
     console.log("Done rach");
     const { dealerCode, distance } = req.body;
+    const {userLat, userLng, dealerLat, dealerLng} = req.body;
+    console.log("COORDS: ", userLat, userLng, dealerLat, dealerLng)
     const userCode = req.user.code;
     console.log("Distance: ", distance);
 
@@ -1070,7 +1072,7 @@ exports.markDealerDone = async (req, res) => {
     if (distance > 0.2) {
       return res
         .status(400)
-        .json({ message: "You are more than 200 meters away from the dealer" });
+        .json({ message: `You are more than 200 meters (${distance}m) away from the dealer` });
     }
 
     const nowIST = moment().tz("Asia/Kolkata");

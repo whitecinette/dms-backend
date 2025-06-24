@@ -1,5 +1,6 @@
 const ActorCode = require("../../model/ActorCode");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
+const Firm = require("../../model/Firm");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const SalesData = require("../../model/SalesData");
 const User = require("../../model/User");
@@ -664,4 +665,69 @@ exports.getDealersForUser = async (req, res) => {
     console.error("Error in getDealersForUser:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
+};
+
+
+exports.getHierarchyDataByFirmName = async (req, res) => {
+ try {
+   const { name: firmName } = req.query;
+
+   if (!firmName) {
+     return res.status(400).json({
+       success: false,
+       message: "Firm name is required in query"
+     });
+   }
+
+   // 🔍 Find the firm and its flows
+   const firm = await Firm.findOne({ name: firmName }).populate("flowTypes", "name");
+   if (!firm) {
+     return res.status(404).json({
+       success: false,
+       message: `Firm '${firmName}' not found`
+     });
+   }
+
+   const flowNames = firm.flowTypes.map(flow => flow.name);
+   if (flowNames.length === 0) {
+     return res.status(404).json({
+       success: false,
+       message: "No flowTypes assigned to this firm"
+     });
+   }
+
+   // 🔍 Get all hierarchy entries by flow names
+   const hierarchyEntries = await HierarchyEntries.find({
+     hierarchy_name: { $in: flowNames }
+   });
+
+   // 🔁 Group & clean data
+   const groupedData = {};
+   for (const entry of hierarchyEntries) {
+     const flow = entry.hierarchy_name;
+     if (!groupedData[flow]) groupedData[flow] = [];
+
+     // Convert to plain object and remove unwanted keys
+     const obj = entry.toObject();
+     delete obj._id;
+     delete obj.__v;
+     delete obj.hierarchy_name;
+
+     groupedData[flow].push(obj);
+   }
+
+   return res.status(200).json({
+     success: true,
+     message: "Hierarchy entries fetched successfully",
+     data: groupedData
+   });
+
+ } catch (error) {
+   console.error("❌ Error fetching hierarchy entries:", error);
+   return res.status(500).json({
+     success: false,
+     message: "Server error",
+     error: error.message
+   });
+ }
 };
