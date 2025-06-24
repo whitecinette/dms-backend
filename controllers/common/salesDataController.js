@@ -950,13 +950,21 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
       
       return res.status(400).json({ success: false, message: "Code, start_date, and end_date are required." });
     }
-    const convertToIST = (date) => {
-      let d = new Date(date);
-      return new Date(d.getTime() + (5.5 * 60 * 60 * 1000)); // Convert UTC to IST
-    };
+    // const convertToIST = (date) => {
+    //   let d = new Date(date);
+    //   return new Date(d.getTime() + (5.5 * 60 * 60 * 1000)); // Convert UTC to IST
+    // };
     
-    const startDate = convertToIST(new Date(start_date));
-    const endDate = convertToIST(new Date(end_date));
+    // const startDate = convertToIST(new Date(start_date));
+    // const endDate = convertToIST(new Date(end_date));
+    
+    const startDate = new Date(start_date);
+    startDate.setUTCHours(0, 0, 0, 0);
+
+    const endDate = new Date(end_date);
+    endDate.setUTCHours(0, 0, 0, 0);
+
+
     // console.log("whoa whoa");
 
     const actor = await ActorCode.findOne({ code });
