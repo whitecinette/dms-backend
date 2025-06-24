@@ -5,6 +5,9 @@ const {
   sendNotificationToAdmins,
 } = require("../../helpers/notificationHelper");
 const { getAdditionalFields } = require("../../helpers/userHelpers");
+const Firm = require("../../model/Firm");
+const HierarchyEntries = require("../../model/HierarchyEntries");
+const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 
 exports.loginUser = async (req, res) => {
   try {
@@ -345,6 +348,91 @@ exports.forgetPasswordForApp = async (req, res) => {
  } catch (error) {
    console.error("❌ Error resetting password:", error);
    return res.status(500).json({ message: "Something went wrong" });
+ }
+};
+
+
+exports.getAllHierarchyUsersByFirm = async (req, res) => {
+ try {
+   const { firmName } = req.query;
+
+   if (!firmName) {
+     return res.status(400).json({ message: "firmName is required in query params." });
+   }
+
+   // 1. Get Firm by name
+   const firm = await Firm.findOne({ name: new RegExp(`^${firmName}$`, 'i') });
+   if (!firm) return res.status(404).json({ message: "Firm not found" });
+
+   if (!firm.flowTypes || firm.flowTypes.length === 0) {
+     return res.status(200).json({
+       firm: firm.name,
+       flows: [],
+       message: "No flowTypes linked to this firm."
+     });
+   }
+
+   const flowsResult = [];
+
+   // 2. Loop through ActorTypeHierarchy IDs
+   for (const flowTypeId of firm.flowTypes) {
+     const actorFlow = await ActorTypesHierarchy.findById(flowTypeId); // ✅ Correct model now
+
+     if (!actorFlow) {
+       console.warn(`⚠️ ActorTypeHierarchy not found for ID: ${flowTypeId}`);
+       continue;
+     }
+
+     const flowName = actorFlow.name;
+     const levels = actorFlow.hierarchy || [];
+
+     if (levels.length === 0) {
+       console.warn(`⚠️ No levels defined in flow: ${flowName}`);
+       continue;
+     }
+
+     // 3. Fetch all hierarchy entries assigned to this flow
+     const hierarchyEntries = await HierarchyEntries.find({
+       hierarchy_name: flowName
+     });
+
+     if (hierarchyEntries.length === 0) {
+       console.warn(`⚠️ No hierarchy entries found for flow: ${flowName}`);
+       continue;
+     }
+
+     const hierarchyMap = {};
+     let employeeCount = 0;
+
+     for (const level of levels) {
+       const levelCodes = hierarchyEntries.map(e => e[level]).filter(Boolean);
+       const uniqueCodes = [...new Set(levelCodes)];
+
+       const users = await User.find({
+         code: { $in: uniqueCodes },
+         role: "employee"
+       }).select("code name position");
+
+       hierarchyMap[level] = users;
+       employeeCount += users.length;
+     }
+
+     flowsResult.push({
+       flowName: flowName,
+       totalEmployees: employeeCount,
+       hierarchy: hierarchyMap
+     });
+   }
+
+   return res.status(200).json({
+     firm: firm.name,
+     flows: flowsResult,
+     message: flowsResult.length ? "Data fetched successfully" : "No employee data found"
+   });
+
+ } catch (err) {
+   console.error("❌ Error in getAllHierarchyUsersByFirm:", err);
+   res.status(500).json({ message: "Server error", error: err.message });
  }
 };
 

@@ -2,45 +2,86 @@ const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid"); // Import UUID for unique ID generation
 
 const firmSchema = new mongoose.Schema(
+ {
+  firmId: {
+    type: String,
+    required: true,
+    unique: true,
+    default: uuidv4,
+  },
+  name: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  owners: [
     {
-        firmId: { type: String, unique: true, required: true }, // Unique firm ID
-        name: { type: String, required: true, unique: true },
-        owners: [
-            {
-                name: { type: String, required: true },
-                phone: { type: String, required: true },
-                email: { type: String, required: true, unique: true }
-            }
-        ],
-        gstNumber: { type: String, required: true, unique: true },
-        logo: {
-            type: String
-        },
-        address: {
-            street: { type: String, required: true },
-            city: { type: String, required: true },
-            state: { type: String, required: true },
-            zipCode: { type: String, required: true },
-        },
-        contact: {
-            phone: { type: String },
-            email: { type: String },
-        },
-        accountDetails: {
-            bankName: { type: String },
-            accountNumber: { type: String },
-            ifscCode: { type: String },
-            branchName: { type: String },
-            accountHolderName: { type: String },
-        },
-        website: String,
-        registrationDate: { type: Date, default: Date.now },
-        status: { type: String, enum: ["Active", "Inactive"], default: "Active" },
+      name: { type: String, required: true },
+      phone: { type: String, required: true },
+      email: { type: String, required: true },
     },
-    { 
-        timestamps: true,
-        strict: false
-     }
+  ],
+
+  gstNumber: { type: String, unique: true },
+  logo: { type: String },
+
+  address: {
+    street: { type: String },
+    city: { type: String },
+    state: { type: String },
+    zipCode: { type: String },
+  },
+
+  contact: {
+    phone: { type: String },
+    email: { type: String },
+  },
+
+  accountDetails: {
+    bankName: String,
+    accountNumber: String,
+    ifscCode: String,
+    branchName: String,
+    accountHolderName: String,
+  },
+
+  website: String,
+  registrationDate: { type: Date, default: Date.now },
+  status: { type: String, enum: ["Active", "Inactive"], default: "Active" },
+  description: {
+    type: String,
+    default: "",
+  },
+  orgId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Organization",
+    required: true,
+  },
+  // You can assign one or multiple hierarchy types
+  flowTypes: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ActorTypesHierarchy",
+    },
+  ],
+  branding: {
+    logoUrl: String,
+    primaryColor: String,
+    secondaryColor: String,
+  },
+  config: {
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: undefined,
+  },
+},
+{
+  timestamps: true,
+  strict: false,
+}
 );
+
+// ✅ Compound index to ensure name is unique per org
+firmSchema.index({ name: 1, orgId: 1 }, { unique: true });
 
 module.exports = mongoose.model("Firm", firmSchema);

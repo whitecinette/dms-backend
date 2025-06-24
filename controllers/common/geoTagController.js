@@ -7,55 +7,69 @@ const UpdatedData = require("../../model/UpdatedData");
 
 // Controller to get dealers by employee code
 exports.getDealerByEmployee = async (req, res) => {
-  const { code } = req.user;
+ const { code } = req.user;
 
-  try {
-    // Step 1: Fetch all hierarchy entries
-    const allEntries = await HierarchyEntries.find();
+ try {
+   // Step 1: Fetch all hierarchy entries
+   const allEntries = await HierarchyEntries.find();
 
-    // Step 2: Filter entries where employee code appears in any field
-    const matchedEntries = allEntries.filter((entry) => {
-      const entryObj = entry.toObject();
-      return Object.values(entryObj).includes(code);
-    });
+   // Step 2: Filter entries where employee code appears in any field
+   const matchedEntries = allEntries.filter((entry) => {
+     const entryObj = entry.toObject();
+     return Object.values(entryObj).includes(code);
+   });
 
-    if (matchedEntries.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "Employee not found in any hierarchy." });
-    }
+   if (matchedEntries.length === 0) {
+     return res
+       .status(404)
+       .json({ message: "Employee not found in any hierarchy." });
+   }
 
-    // Step 3: Collect all unique dealer codes from matching entries
-    const dealerCodesSet = new Set();
+   // Step 3: Collect all unique dealer codes from matching entries
+   const dealerCodesSet = new Set();
+   matchedEntries.forEach((entry) => {
+     if (entry.dealer) dealerCodesSet.add(entry.dealer);
+     if (entry.mdd) dealerCodesSet.add(entry.mdd); // optional
+   });
 
-    matchedEntries.forEach((entry) => {
-      if (entry.dealer) dealerCodesSet.add(entry.dealer);
-      if (entry.mdd) dealerCodesSet.add(entry.mdd);
-    });
+   const dealerCodes = Array.from(dealerCodesSet);
 
-    const dealerCodes = Array.from(dealerCodesSet);
+   if (dealerCodes.length === 0) {
+     return res
+       .status(404)
+       .json({ message: "No dealers found for this employee." });
+   }
 
-    if (dealerCodes.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "No dealers found for this employee." });
-    }
+   // Step 4: Fetch dealer details from User model for geotag status
+   const dealerDetails = await User.find({ code: { $in: dealerCodes } })
+     .select("code name position latitude longitude geotag_picture")
+     .lean();
 
-    // Step 4: Fetch dealer details
-    const dealerDetails = await ActorCode.find({ code: { $in: dealerCodes } });
+   const dealers = dealerDetails.map((dealer) => {
+     const hasGeo =
+       dealer.latitude != null &&
+       dealer.longitude != null &&
+       dealer.geotag_picture &&
+       dealer.geotag_picture.trim().toLowerCase() !== "not available";
 
-    const dealers = dealerDetails.map((dealer) => ({
-      code: dealer.code,
-      name: dealer.name,
-      position: dealer.position,
-    }));
+     return {
+       code: dealer.code,
+       name: dealer.name,
+       position: dealer.position || "Dealer",
+       latitude: dealer.latitude || "N/A",
+       longitude: dealer.longitude || "N/A",
+       image: dealer.geotag_picture || "N/A",
+       status: hasGeo ? "DONE" : "PENDING",
+     };
+   });
 
-    res.status(200).json({ dealers });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error." });
-  }
+   res.status(200).json({ dealers });
+ } catch (error) {
+   console.error("Error in getDealerByEmployee:", error);
+   res.status(500).json({ message: "Internal server error." });
+ }
 };
+
 
 // update geotag picture lat and long of dealer
 

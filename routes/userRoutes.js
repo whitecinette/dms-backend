@@ -2,7 +2,7 @@ const express = require("express");
 const { registerSuperAdmin, loginSuperAdmin, editAdminProfile,  deactivateUserBySuperAdmin, deleteUserByAdmins, deactivateUserByAdmin, activateAndVerifyUser, registerAdminForSuperAdmin, registerUserBySuperAdmin, registerUserByAdmin, loginAdmin, loginAdminOrSuperAdmin, getUsersForAdmins, editUserByAdmins, registerOrUpdateUsersFromActorCodes, updateBulkDealers, activateAllUsersInAllCases, getAllDealerAndMddForAdmin, updateBulkLatLongForAdmin, 
     updateUserLabelsFromCSV, createSecurityKey, updateBulkDealersFromCSV} = require("../controllers/admin/userController");
 const { superAdminAuth, adminOrSuperAdminAuth, adminAuth, userAuth } = require("../middlewares/authmiddlewares");
-const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile, forgetPasswordForApp, resetPasswordForApp, updatePasswordFromProfile } = require("../controllers/common/userController");
+const { loginUser, editProfileForUser, editUsers, getUsersDetails, getUsersByPositions, changeUserPassword, getProfile, forgetPasswordForApp, resetPasswordForApp, updatePasswordFromProfile, getAllHierarchyUsersByFirm } = require("../controllers/common/userController");
 const { loginUserForApp, registerUserForApp, fetchCreditLimit, loginMddWithFirebasePhone, handleRefreshToken } = require("../controllers/web/userController");
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
@@ -78,4 +78,5 @@ router.post("/admin/create-security-key", superAdminAuth, createSecurityKey);
 //Refresh token
 router.post("/user/Refresh-token", handleRefreshToken);
 router.put("/reset-pass-for-app", forgetPasswordForApp);
+router.get("/get-user-by-firm", getAllHierarchyUsersByFirm)
 module.exports = router;    
