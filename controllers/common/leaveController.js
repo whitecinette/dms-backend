@@ -36,6 +36,19 @@ exports.requestLeave = async (req, res) => {
      });
    }
 
+   // ❌ Restrict full-day leave for today after 3 PM
+   const nowIST = moment().tz("Asia/Kolkata");
+   const leaveStartDay = moment(from).tz("Asia/Kolkata");
+   const isLeaveForToday = nowIST.format('YYYY-MM-DD') === leaveStartDay.format('YYYY-MM-DD');
+
+   if (!isHalfDay && isLeaveForToday && nowIST.hour() >= 15) {
+     return res.status(400).json({
+       success: false,
+       message:
+         "You cannot request a full-day leave for today after 3:00 PM. You can apply for a half-day leave instead.",
+     });
+   }
+
    // ✅ Half-day logic
    if (isHalfDay) {
      if (from.toDateString() !== to.toDateString()) {
@@ -53,12 +66,8 @@ exports.requestLeave = async (req, res) => {
      }
 
      // ⏰ Validate timing for today's half-day
-     const nowIST = moment().tz("Asia/Kolkata");
-     const leaveDay = moment(from).tz("Asia/Kolkata");
-     const isToday = nowIST.format('YYYY-MM-DD') === leaveDay.format('YYYY-MM-DD');
      const currentHour = nowIST.hour();
-
-     if (isToday) {
+     if (isLeaveForToday) {
        if (
          (halfDaySession === 'morning' && currentHour >= 12) ||
          (halfDaySession === 'afternoon' && currentHour >= 17)
@@ -108,7 +117,7 @@ exports.requestLeave = async (req, res) => {
      halfDaySession: isHalfDay ? halfDaySession : undefined,
      status: "pending",
      attachmentUrl,
-     appliedAt: moment().tz("Asia/Kolkata").toDate(),
+     appliedAt: nowIST.toDate(),
    });
 
    const savedLeave = await newLeave.save();
