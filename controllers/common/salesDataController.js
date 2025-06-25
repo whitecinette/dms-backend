@@ -1028,14 +1028,17 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
       }
     }
 
-    console.log("Dealers for dashboard: ", dealerCodes);
-    // console.log("No. of dealers: ", dealerCodes.length);
+    // console.log("Dealers for dashboard: ", dealerCodes);
+    console.log("No. of dealers: ", dealerCodes.length);
 
     // Calculate LMTD date range
     let lmtdStartDate = new Date(startDate);
     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
     let lmtdEndDate = new Date(endDate);
     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+    console.log("Current: ", startDate, endDate);
+    console.log("Prev: ", lmtdStartDate, lmtdEndDate);
 
     let baseQuery = dealerCodes ? { buyer_code: { $in: dealerCodes } } : {};
 
