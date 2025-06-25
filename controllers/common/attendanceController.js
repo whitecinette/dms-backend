@@ -1077,6 +1077,7 @@ exports.editAttendanceByID = async (req, res) => {
   }
 };
 
+
 exports.downloadAllAttendance = async (req, res) => {
   try {
     const { role } = req.user;
@@ -1092,7 +1093,7 @@ exports.downloadAllAttendance = async (req, res) => {
 
     let firmPositions = [];
     if (firms.length) {
-      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      const firmData = await ActorTypesHierarchy.find({ _id: Conditions });
       if (!firmData.length) {
         return res.status(400).json({ message: "Invalid firm IDs." });
       }
@@ -1123,9 +1124,10 @@ exports.downloadAllAttendance = async (req, res) => {
       employeeFilter.tags = { $in: tagArray };
     }
 
+    // Fetch employees with siddha_code
     const employees = await User.find(
       employeeFilter,
-      "code name position tags"
+      "code name position tags siddha_code" // Added siddha_code
     ).lean();
 
     if (!employees.length) {
@@ -1135,11 +1137,13 @@ exports.downloadAllAttendance = async (req, res) => {
       });
     }
 
+    // Include siddha_code in employeeMap
     const employeeMap = employees.reduce((acc, emp) => {
       acc[emp.code.trim().toLowerCase()] = {
         name: emp.name,
         position: emp.position,
-        tags: emp.tags, // Ensure tags are stored in employeeMap
+        tags: emp.tags,
+        siddha_code: emp.siddha_code, // Added siddha_code
       };
       return acc;
     }, {});
@@ -1204,7 +1208,8 @@ exports.downloadAllAttendance = async (req, res) => {
             position: emp.position,
             status: "Absent",
             date: new Date(date),
-            tags: emp.tags, // Add tags for absent records
+            tags: emp.tags,
+            siddha_code: emp.siddha_code, // Added siddha_code
           });
         }
       });
@@ -1242,14 +1247,15 @@ exports.downloadAllAttendance = async (req, res) => {
               position: emp.position,
               status: "Absent",
               date: new Date(day),
-              tags: emp.tags, // Add tags for absent records
+              tags: emp.tags,
+              siddha_code: emp.siddha_code, // Added siddha_code
             });
           }
         }
       }
     }
 
-    // Attach name, position, and tags
+    // Attach name, position, tags, and siddha_code
     attendanceRecords = attendanceRecords.map((record) => {
       const normalizedCode = record.code.trim().toLowerCase();
       const employee = employeeMap[normalizedCode];
@@ -1258,7 +1264,8 @@ exports.downloadAllAttendance = async (req, res) => {
         ...record,
         name: employee?.name || "Unknown",
         position: employee?.position || "Unknown",
-        tags: record.tags || employee?.tags || [], // Use record.tags if available, else fallback to employee.tags
+        tags: record.tags || employee?.tags || [],
+        siddha_code: record.siddha_code || employee?.siddha_code || "N/A", // Added siddha_code
       };
     });
 
@@ -1266,7 +1273,7 @@ exports.downloadAllAttendance = async (req, res) => {
     if (search) {
       const regex = new RegExp(search, "i");
       attendanceRecords = attendanceRecords.filter(
-        (rec) => regex.test(rec.code) || regex.test(rec.name)
+        (rec) => regex.test(rec.code) || regex.test(rec.name) || regex.test(rec.siddha_code) // Include siddha_code in search
       );
     }
 
@@ -1302,6 +1309,7 @@ exports.downloadAllAttendance = async (req, res) => {
     const formattedAttendance = attendanceRecords.map((record) => ({
       Name: record.name || "Unknown",
       Code: record.code,
+      "Siddha Code": record.siddha_code || "N/A", // Added Siddha Code
       Position: record.position || "Unknown",
       Date: record.date
         ? new Date(record.date).toISOString().split("T")[0]
@@ -1327,6 +1335,7 @@ exports.downloadAllAttendance = async (req, res) => {
     const fields = [
       "Name",
       "Code",
+      "Siddha Code", // Added Siddha Code to fields
       "Position",
       "Date",
       "Punch In Time",
