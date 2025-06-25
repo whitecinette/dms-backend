@@ -630,7 +630,7 @@ exports.getAttendanceByDate = async (req, res) => {
   try {
     const { role } = req.user;
     const { date } = req.params;
-    const { firms = [] } = req.query; // Changed to array
+    const { firms = [], tag } = req.query; // Changed to array
 
     if (!date) {
       return res.status(400).json({ message: "Date is required." });
@@ -665,6 +665,12 @@ exports.getAttendanceByDate = async (req, res) => {
       employeeFilter.role = { $in: ["employee"] };
     } else {
       return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    if (tag) {
+      // tag can be a string (single tag) or array (multiple tags)
+      const tagArray = Array.isArray(tag) ? tag : [tag];
+      employeeFilter.tags = { $in: tagArray };
     }
 
     if (firmPositions.length > 0) {
@@ -746,7 +752,9 @@ exports.getLatestAttendance = async (req, res) => {
       search = "",
       status = "",
       firms = [],
+      tag,
     } = req.query;
+    
 
     let firmPositions = [];
     if (firms.length) {
@@ -774,6 +782,11 @@ exports.getLatestAttendance = async (req, res) => {
     if (firmPositions.length) {
       employeeFilter.position = { $in: firmPositions };
     }
+    if (tag) {
+      // tag can be a string (single tag) or array (multiple tags)
+      const tagArray = Array.isArray(tag) ? tag : [tag];
+      employeeFilter.tags = { $in: tagArray };
+    } 
 
     const employees = await User.find(
       employeeFilter,
@@ -1074,6 +1087,7 @@ exports.downloadAllAttendance = async (req, res) => {
       search = "",
       status = "",
       firms = [],
+      tag,
     } = req.query;
 
     let firmPositions = [];
@@ -1089,6 +1103,7 @@ exports.downloadAllAttendance = async (req, res) => {
         return positions;
       }, []);
     }
+
     let employeeFilter = { status: "active" };
     if (role === "super_admin" || role === "admin") {
       employeeFilter.role = { $in: ["admin", "employee", "hr"] };
@@ -1102,9 +1117,15 @@ exports.downloadAllAttendance = async (req, res) => {
       employeeFilter.position = { $in: firmPositions };
     }
 
+    // Add tag filter
+    if (tag) {
+      const tagArray = Array.isArray(tag) ? tag : [tag];
+      employeeFilter.tags = { $in: tagArray };
+    }
+
     const employees = await User.find(
       employeeFilter,
-      "code name position"
+      "code name position tags"
     ).lean();
 
     if (!employees.length) {
@@ -1118,6 +1139,7 @@ exports.downloadAllAttendance = async (req, res) => {
       acc[emp.code.trim().toLowerCase()] = {
         name: emp.name,
         position: emp.position,
+        tags: emp.tags, // Ensure tags are stored in employeeMap
       };
       return acc;
     }, {});
@@ -1182,6 +1204,7 @@ exports.downloadAllAttendance = async (req, res) => {
             position: emp.position,
             status: "Absent",
             date: new Date(date),
+            tags: emp.tags, // Add tags for absent records
           });
         }
       });
@@ -1219,39 +1242,23 @@ exports.downloadAllAttendance = async (req, res) => {
               position: emp.position,
               status: "Absent",
               date: new Date(day),
+              tags: emp.tags, // Add tags for absent records
             });
           }
         }
       }
     }
 
-    // Attach name, position, and calculate stats
+    // Attach name, position, and tags
     attendanceRecords = attendanceRecords.map((record) => {
       const normalizedCode = record.code.trim().toLowerCase();
       const employee = employeeMap[normalizedCode];
-
-      //  if (!employeeStats[normalizedCode]) {
-      //    employeeStats[normalizedCode] = {
-      //      totalDays: 0,
-      //      presentDays: 0,
-      //      absentDays: 0,
-      //      halfDays: 0,
-      //    };
-      //  }
-
-      //  employeeStats[normalizedCode].totalDays++;
-      //  if (record.status === "Present")
-      //    employeeStats[normalizedCode].presentDays++;
-      //  else if (record.status === "Absent")
-      //    employeeStats[normalizedCode].absentDays++;
-      //  else if (record.status === "Half Day")
-      //    employeeStats[normalizedCode].halfDays++;
 
       return {
         ...record,
         name: employee?.name || "Unknown",
         position: employee?.position || "Unknown",
-        //  monthlyStats: employeeStats[normalizedCode],
+        tags: record.tags || employee?.tags || [], // Use record.tags if available, else fallback to employee.tags
       };
     });
 
@@ -1286,7 +1293,6 @@ exports.downloadAllAttendance = async (req, res) => {
 
       if (dateA !== dateB) return dateA - dateB;
 
-      // Same date: sort by status priority
       const priorityA = statusPriority[a.status] || 0;
       const priorityB = statusPriority[b.status] || 0;
       return priorityB - priorityA;
@@ -1294,35 +1300,40 @@ exports.downloadAllAttendance = async (req, res) => {
 
     // Format data for CSV export
     const formattedAttendance = attendanceRecords.map((record) => ({
-      name: record.name || "Unknown",
-      code: record.code,
-      position: record.position || "Unknown",
-      date: record.date
+      Name: record.name || "Unknown",
+      Code: record.code,
+      Position: record.position || "Unknown",
+      Date: record.date
         ? new Date(record.date).toISOString().split("T")[0]
         : "N/A",
-      punchIn: record.punchIn
+      "Punch In Time": record.punchIn
         ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
             timeZone: "Asia/Kolkata",
           })
         : "N/A",
-      punchOut: record.punchOut
+      "Punch In Out": record.punchOut
         ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
             timeZone: "Asia/Kolkata",
           })
         : "N/A",
-      status: record.status,
-      workingHours: record.hoursWorked || "0",
+      Status: record.status,
+      "Working Hours": record.hoursWorked || "0",
+      Tags:
+        Array.isArray(record.tags) && record.tags.length
+          ? record.tags.join("; ")
+          : "N/A",
     }));
 
     const fields = [
-      "name",
-      "code",
-      "position",
-      "date",
-      "punchIn",
-      "punchOut",
-      "status",
-      "workingHours",
+      "Name",
+      "Code",
+      "Position",
+      "Date",
+      "Punch In Time",
+      "Punch In Out",
+      "Status",
+      "Working Hours",
+      "Tags",
     ];
     const parser = new Parser({ fields });
     const csv = parser.parse(formattedAttendance);
