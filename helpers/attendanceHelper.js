@@ -77,4 +77,22 @@ exports.handlePunchOutWithoutDealer = async ({
  });
 };
 
+
+exports.formatDate = (dateInput) => {
+ if (!dateInput) return "N/A";
+
+ // Convert string to Date only if it's not already a Date object
+ const dateObj = typeof dateInput === "string"
+   ? new Date(dateInput.slice(0, 10)) // "YYYY-MM-DD"
+   : new Date(dateInput);
+
+ if (isNaN(dateObj)) return "Invalid Date";
+
+ return dateObj.toLocaleDateString("en-IN", {
+   day: "numeric",
+   month: "short",
+   year: "numeric",
+ });
+};
+
 // module.exports = getDistance;

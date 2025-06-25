@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const leaveSchema = new mongoose.Schema({
- code: {
-  type: String,
-  required: true
-},
+  code: {
+    type: String,
+    required: true
+  },
   leaveType: {
     type: String,
     enum: ['casual', 'sick', 'earned', 'maternity', 'paternity', 'other'],
@@ -21,6 +21,15 @@ const leaveSchema = new mongoose.Schema({
   totalDays: {
     type: Number,
     required: true
+  },
+  isHalfDay: {
+    type: Boolean,
+    default: false
+  },
+  halfDaySession: {
+    type: String,
+    enum: ['morning', 'afternoon'],
+    required: function () { return this.isHalfDay; }
   },
   reason: {
     type: String,
@@ -66,6 +75,6 @@ const leaveSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
-},{ strict: false, timestamps: true });
+}, { strict: false, timestamps: true });
 
 module.exports = mongoose.model('Leave', leaveSchema);

@@ -1,106 +1,141 @@
 const Leave = require("../../model/Leave");
 const Notification = require("../../model/Notification");
+const moment = require('moment-timezone');
 const User = require("../../model/User"); // Assuming you have an Employee model
 const Attendance = require("../../model/Attendance"); // Assuming you have an Attendance model
-
-const formatDate = (dateInput) => {
-  // Get only the date part to avoid time zone shift
-  const datePart = dateInput?.slice(0, 10); // "YYYY-MM-DD"
-  if (!datePart) return "N/A";
-
-  const [year, month, day] = datePart.split("-");
-  const dateObj = new Date(year, month - 1, day); // month is 0-indexed
-
-  const formattedDate = dateObj.toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-
-  return formattedDate || "N/A";
-};
+const { formatDate } = require("../../helpers/attendanceHelper");
 
 exports.requestLeave = async (req, res) => {
-  try {
-    const { code } = req.user; // extracted from token
-    const { leaveType, fromDate, toDate, reason, attachmentUrl, isHalfDay } =
-      req.body;
+ try {
+   const { code } = req.user;
+   const {
+     leaveType,
+     fromDate,
+     toDate,
+     reason,
+     attachmentUrl,
+     isHalfDay = false,
+     halfDaySession,
+   } = req.body;
 
-    // Basic validation
-    if (!leaveType || !fromDate || !toDate || !reason) {
-      return res
-        .status(400)
-        .json({ success: false, message: "All fields are required" });
-    }
+   // Basic validation
+   if (!leaveType || !fromDate || !toDate || !reason) {
+     return res
+       .status(400)
+       .json({ success: false, message: "All fields are required" });
+   }
 
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
+   // Convert dates to IST midnight (5:30 AM UTC)
+   const from = new Date(new Date(fromDate).setHours(5, 30, 0, 0));
+   const to = new Date(new Date(toDate).setHours(5, 30, 0, 0));
 
-    if (from > to) {
-      return res
-        .status(400)
-        .json({ success: false, message: "From Date must be before To Date" });
-    }
+   if (from > to) {
+     return res.status(400).json({
+       success: false,
+       message: "From Date must be before To Date",
+     });
+   }
 
-    // Check for overlapping leave for the same user
-    const existingLeave = await Leave.findOne({
-      code,
-      $or: [
-        {
-          fromDate: { $lte: to },
-          toDate: { $gte: from },
-        },
-      ],
-      status: { $in: ["approved", "pending"] },
-    });
+   // ✅ Half-day logic
+   if (isHalfDay) {
+     if (from.toDateString() !== to.toDateString()) {
+       return res.status(400).json({
+         success: false,
+         message: "Half-day leave must have the same From and To date",
+       });
+     }
 
-    if (existingLeave) {
-      return res.status(409).json({
-        success: false,
-        message: `Leave already requested between ${existingLeave.fromDate.toDateString()} and ${existingLeave.toDate.toDateString()}`,
-      });
-    }
+     if (!['morning', 'afternoon'].includes(halfDaySession)) {
+       return res.status(400).json({
+         success: false,
+         message: "halfDaySession must be 'morning' or 'afternoon' for half-day leave",
+       });
+     }
 
-    // Calculate total leave days
-    const oneDay = 1000 * 60 * 60 * 24;
-    const totalDays = Math.ceil((to - from) / oneDay) + 1;
+     // ⏰ Validate timing for today's half-day
+     const nowIST = moment().tz("Asia/Kolkata");
+     const leaveDay = moment(from).tz("Asia/Kolkata");
+     const isToday = nowIST.format('YYYY-MM-DD') === leaveDay.format('YYYY-MM-DD');
+     const currentHour = nowIST.hour();
 
-    const newLeave = new Leave({
-      code,
-      leaveType,
-      fromDate: from,
-      toDate: to,
-      reason,
-      totalDays,
-      status: "pending",
-      attachmentUrl,
-    });
+     if (isToday) {
+       if (
+         (halfDaySession === 'morning' && currentHour >= 12) ||
+         (halfDaySession === 'afternoon' && currentHour >= 17)
+       ) {
+         return res.status(400).json({
+           success: false,
+           message: `You cannot apply for ${halfDaySession} session after ${
+             halfDaySession === 'morning' ? '12:00 PM' : '5:00 PM'
+           }.`,
+         });
+       }
+     }
+   }
 
-    const savedLeave = await newLeave.save();
+   // 🔁 Check for overlapping leave
+   const existingLeave = await Leave.findOne({
+     code,
+     $or: [
+       {
+         fromDate: { $lte: to },
+         toDate: { $gte: from },
+       },
+     ],
+     status: { $in: ["approved", "pending"] },
+   });
 
-    const startDate = fromDate;
-    const endDate = toDate;
+   if (existingLeave) {
+     return res.status(409).json({
+       success: false,
+       message: `Leave already requested between ${existingLeave.fromDate.toDateString()} and ${existingLeave.toDate.toDateString()}`,
+     });
+   }
 
-    const notification = {
-      title: "Leave Request",
-      message: `Employee ${code} requested leave from ${formatDate(
-        startDate
-      )} to ${formatDate(endDate)}`,
-      filters: [code, startDate, endDate],
-      targetRole: ["admin", "super_admin"],
-    };
-    await Notification.create(notification);
+   // 🧮 Calculate total leave days
+   const oneDay = 1000 * 60 * 60 * 24;
+   const totalDays = isHalfDay ? 0.5 : Math.ceil((to - from) / oneDay) + 1;
 
-    res.status(200).json({
-      success: true,
-      message: "Leave requested successfully",
-      leave: savedLeave,
-    });
-  } catch (error) {
-    console.error("Error requesting leave:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
-  }
+   // 📌 Save leave
+   const newLeave = new Leave({
+     code,
+     leaveType,
+     fromDate: from,
+     toDate: to,
+     reason,
+     totalDays,
+     isHalfDay,
+     halfDaySession: isHalfDay ? halfDaySession : undefined,
+     status: "pending",
+     attachmentUrl,
+     appliedAt: moment().tz("Asia/Kolkata").toDate(),
+   });
+
+   const savedLeave = await newLeave.save();
+
+   // 🔔 Optional notification
+   await Notification.create({
+     title: "Leave Request",
+     message: `Employee ${code} requested ${isHalfDay ? 'half-day' : 'leave'} from ${formatDate(from)} to ${formatDate(to)}`,
+     filters: [code, fromDate, toDate],
+     targetRole: ["admin", "super_admin"],
+   });
+
+   return res.status(200).json({
+     success: true,
+     message: "Leave requested successfully",
+     leave: savedLeave,
+   });
+ } catch (error) {
+   console.error("Error requesting leave:", error);
+   return res.status(500).json({
+     success: false,
+     message: "Internal Server Error",
+   });
+ }
 };
+
+
 
 exports.getRequestLeaveForEmp = async (req, res) => {
   try {
