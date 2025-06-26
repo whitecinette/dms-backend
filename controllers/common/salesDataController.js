@@ -643,8 +643,14 @@ exports.getSalesReportForUser = async (req, res) => {
     }
 
     const convertToIST = (date) => new Date(new Date(date).getTime() + 5.5 * 60 * 60 * 1000);
-    const startDate = convertToIST(start_date);
-    const endDate = convertToIST(end_date);
+    // const startDate = convertToIST(start_date);
+    // const endDate = convertToIST(end_date);
+    const startDate = new Date(start_date);
+    startDate.setUTCHours(0, 0, 0, 0);
+
+    const endDate = new Date(end_date);
+    endDate.setUTCHours(0, 0, 0, 0);
+
     const lmtdStartDate = new Date(startDate);
     const lmtdEndDate = new Date(endDate);
     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
@@ -1255,13 +1261,18 @@ exports.getSalesReportProductWise = async (req, res) => {
       return res.status(400).json({ success: false, message: "Start date, end date, code, and segment are required." });
     }
 
-    const convertToIST = (date) => {
-      let d = new Date(date);
-      return new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-    };
+    // const convertToIST = (date) => {
+    //   let d = new Date(date);
+    //   return new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+    // };
 
-    const startDate = convertToIST(new Date(start_date));
-    const endDate = convertToIST(new Date(end_date));
+    // const startDate = convertToIST(new Date(start_date));
+    // const endDate = convertToIST(new Date(end_date));
+    const startDate = new Date(start_date);
+    startDate.setUTCHours(0, 0, 0, 0);
+
+    const endDate = new Date(end_date);
+    endDate.setUTCHours(0, 0, 0, 0);
     const todayDate = new Date().getDate();
 
     const actor = await ActorCode.findOne({ code });
@@ -1384,7 +1395,7 @@ exports.getSalesReportProductWise = async (req, res) => {
       "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0
     }));
 
-    const headers = ["Product", "Target", "MTD", "LMTD", "Pending", "ADS", "Req. ADS", "% Growth", "FTD", "% Contribution"];
+    const headers = ["Segment/Channel", "Target", "MTD", "LMTD", "Pending", "ADS", "Req. ADS", "% Growth", "FTD", "% Contribution"];
     res.status(200).json({ headers, data: reportData });
 
   } catch (error) {
