@@ -20,9 +20,10 @@ exports.requestLeave = async (req, res) => {
 
    // Basic validation
    if (!leaveType || !fromDate || !toDate || !reason) {
-     return res
-       .status(400)
-       .json({ success: false, message: "All fields are required" });
+     return res.status(400).json({
+       success: false,
+       message: "All fields are required",
+     });
    }
 
    // Convert dates to IST midnight (5:30 AM UTC)
@@ -36,17 +37,37 @@ exports.requestLeave = async (req, res) => {
      });
    }
 
-   // ❌ Restrict full-day leave for today after 3 PM
    const nowIST = moment().tz("Asia/Kolkata");
    const leaveStartDay = moment(from).tz("Asia/Kolkata");
    const isLeaveForToday = nowIST.format('YYYY-MM-DD') === leaveStartDay.format('YYYY-MM-DD');
 
+   // ❌ Restrict full-day leave for today after 3 PM
    if (!isHalfDay && isLeaveForToday && nowIST.hour() >= 15) {
      return res.status(400).json({
        success: false,
        message:
          "You cannot request a full-day leave for today after 3:00 PM. You can apply for a half-day leave instead.",
      });
+   }
+
+   // ✅ Check attendance for today if applying leave for today
+   if (isLeaveForToday) {
+     const startOfToday = nowIST.clone().startOf('day').toDate();
+     const endOfToday = nowIST.clone().endOf('day').toDate();
+
+     const attendanceRecord = await Attendance.findOne({
+       code,
+       date: { $gte: startOfToday, $lte: endOfToday },
+       status: "Present", // modify if you use a different present status
+     });
+
+     if (attendanceRecord) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already marked attendance today. Leave request is not allowed.",
+      });
+    }
+    
    }
 
    // ✅ Half-day logic
@@ -143,7 +164,6 @@ exports.requestLeave = async (req, res) => {
    });
  }
 };
-
 
 
 exports.getRequestLeaveForEmp = async (req, res) => {
