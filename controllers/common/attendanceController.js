@@ -13,8 +13,10 @@ const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 // punch in
 exports.punchIn = async (req, res) => {
   try {
+    console.log("Punch in here")
     const { latitude, longitude } = req.body;
     const { code } = req.user;
+    console.log("Lats and logs: ", latitude, longitude);
 
     if (!code)
       return res
