@@ -121,6 +121,8 @@ exports.punchIn = async (req, res) => {
         )} meters away. Please move closer to a hierarchy member and try again.`,
       });
     }
+
+    console.log("Nearest Dealer: ", nearestUser);
     // store image as name and time
     const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
     const publicId = `${code}_${timestamp}`;
