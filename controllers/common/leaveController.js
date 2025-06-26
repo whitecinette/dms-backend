@@ -147,7 +147,11 @@ exports.requestLeave = async (req, res) => {
    await Notification.create({
      title: "Leave Request",
      message: `Employee ${code} requested ${isHalfDay ? 'half-day' : 'leave'} from ${formatDate(from)} to ${formatDate(to)}`,
-     filters: [code, fromDate, toDate],
+     filters: [
+        code,
+        fromDate ? new Date(fromDate).toISOString().split("T")[0] : "",
+        toDate ? new Date(toDate).toISOString().split("T")[0] : "",
+      ],
      targetRole: ["admin", "super_admin"],
    });
 

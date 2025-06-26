@@ -244,8 +244,7 @@ exports.editActorCode = async (req, res) => {
       !req.body.name ||
       !req.body.position ||
       !req.body.role ||
-      !req.body.status ||
-      !req.body.parent_code
+      !req.body.status
     ) {
       return res.status(400).json({ message: "All fields are required." });
     }

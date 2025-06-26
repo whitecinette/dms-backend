@@ -722,7 +722,7 @@ exports.getAttendanceByDate = async (req, res) => {
       else if (status === "Present") attendanceCount.present++;
       else if (status === "Pending") attendanceCount.pending++;
       else if (status === "Absent") attendanceCount.absent++;
-      else if (status === "Rejected" || status === "Approved") {
+      else if (status === "Leave") {
         attendanceCount.leave++;
       }
     });
