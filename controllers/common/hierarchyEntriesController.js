@@ -368,9 +368,15 @@ exports.getSubordinatesForUser = async (req, res) => {
       }
     }
 
-    const convertToIST = (date) => new Date(new Date(date).getTime() + 5.5 * 60 * 60 * 1000);
-    const startDate = convertToIST(start_date);
-    const endDate = convertToIST(end_date);
+    // const convertToIST = (date) => new Date(new Date(date).getTime() + 5.5 * 60 * 60 * 1000);
+    // const startDate = convertToIST(start_date);
+    // const endDate = convertToIST(end_date);
+        const startDate = new Date(start_date);
+        startDate.setUTCHours(0, 0, 0, 0);
+
+        const endDate = new Date(end_date);
+        endDate.setUTCHours(0, 0, 0, 0);
+        const todayDate = new Date().getDate();
     const lmtdStartDate = new Date(startDate); lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
     const lmtdEndDate = new Date(endDate); lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
 

@@ -11,12 +11,175 @@ const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 
 // punch in
+// exports.punchIn = async (req, res) => {
+//   try {
+//     console.log("Punch in here")
+//     const { latitude, longitude } = req.body;
+//     const { code } = req.user;
+//     console.log("Lats and logs: ", latitude, longitude);
+
+//     if (!code)
+//       return res
+//         .status(400)
+//         .json({ message: "User code is missing in token." });
+//     if (!req.file) {
+//       return res.status(200).json({
+//         warning: true,
+//         message: "Please capture an image.",
+//       });
+//     }
+
+//     const formattedDate = moment().format("YYYY-MM-DD");
+//     const punchInTime = moment().format("YYYY-MM-DD HH:mm:ss");
+
+//     const existingAttendance = await Attendance.findOne({
+//       code,
+//       date: formattedDate,
+//     });
+//     if (existingAttendance) {
+//       return res.status(200).json({
+//         message: "You have already punched in for today.",
+//         attendance: existingAttendance,
+//       });
+//     }
+
+//     // Dynamic hierarchy handling
+//     const userHierarchies = await HierarchyEntries.find({
+//       $or: Object.keys(HierarchyEntries.schema.obj)
+//         .filter((key) => !["_id", "__v", "hierarchy_name"].includes(key))
+//         .map((key) => ({ [key]: code })),
+//     });
+
+//     const allCodesSet = new Set();
+
+//     userHierarchies.forEach((hierarchy) => {
+//       Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
+//         if (!["_id", "__v", "hierarchy_name"].includes(key)) {
+//           if (Array.isArray(value)) {
+//             value.forEach((v) => v && allCodesSet.add(v));
+//           } else if (value) {
+//             allCodesSet.add(value);
+//           }
+//         }
+//       });
+//     });
+
+//     const allCodes = Array.from(allCodesSet);
+
+//     if (!allCodes.length) {
+//       return res
+//         .status(404)
+//         .json({ message: "No related employees found in the hierarchy." });
+//     }
+
+//     const relatedUsers = await User.aggregate([
+//       {
+//         $match: {
+//           code: { $in: allCodes },
+//           latitude: { $type: "decimal" },
+//           longitude: { $type: "decimal" },
+//         },
+//       },
+//       { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
+//     ]);
+
+//     if (!relatedUsers.length) {
+//       return res
+//         .status(404)
+//         .json({ message: "No related users with location data found." });
+//     }
+
+//     const userLat = parseFloat(latitude);
+//     const userLon = parseFloat(longitude);
+
+//     let nearestUser = null;
+//     let minDistance = Infinity;
+
+//     relatedUsers.forEach((relUser) => {
+//       console.log("Rel user and code: ", relUser, code);
+//       const relLat = parseFloat(relUser.latitude);
+//       const relLon = parseFloat(relUser.longitude);
+
+//       if (isNaN(relLat) || isNaN(relLon)) return;
+
+//       const distance = attendanceHelpers.getDistance(
+//         userLat,
+//         userLon,
+//         relLat,
+//         relLon
+//       );
+//       if (distance < minDistance) {
+//         minDistance = distance;
+//         nearestUser = relUser;
+//       }
+//     });
+
+//     if (!nearestUser || minDistance > 100) {
+//       return res.status(200).json({
+//         warning: true,
+//         message: `You are too far  — approx ${minDistance.toFixed(
+//           2
+//         )} meters away. Please move closer to a hierarchy member and try again.`,
+//       });
+//     }
+
+//     console.log("Nearest Dealerr: ", nearestUser);
+//     // store image as name and time
+//     const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+//     const publicId = `${code}_${timestamp}`;
+
+//     // Upload to Cloudinary
+//     const result = await cloudinary.uploader.upload(req.file.path, {
+//       folder: "gpunchInImage",
+//       public_id: publicId,
+//       transformation: [
+//         { width: 800, height: 800, crop: "limit" },
+//         { quality: "auto" },
+//         { fetch_format: "auto" },
+//       ],
+//     });
+
+//     // delete temp file
+//     try {
+//       if (req.file?.path) {
+//         await fsPromises.unlink(req.file.path);
+//         console.log("Temp file deleted:", req.file.path);
+//       }
+//     } catch (err) {
+//       console.error("Failed to delete temp file:", err);
+//     }
+
+//     const attendance = new Attendance({
+//       code,
+//       date: formattedDate,
+//       punchIn: punchInTime,
+//       status: "Present",
+//       punchInLatitude: latitude,
+//       punchInLongitude: longitude,
+//       punchInImage: result.secure_url,
+//       punchInCode: nearestUser.code,
+//       punchInName: nearestUser.name,
+//     });
+
+//     await attendance.save();
+//     res
+//       .status(201)
+//       .json({ message: "Punch-in recorded successfully", attendance });
+//   } catch (error) {
+//     console.error("Error during punch-in:", error);
+//     res
+//       .status(500)
+//       .json({ message: "Error recording punch in. please try again later" });
+//   }
+// };
+
 exports.punchIn = async (req, res) => {
   try {
-    console.log("Punch in here")
+    console.log("Punch in here");
     const { latitude, longitude } = req.body;
     const { code } = req.user;
     console.log("Lats and logs: ", latitude, longitude);
+    console.log("User code:", code);
 
     if (!code)
       return res
@@ -43,28 +206,44 @@ exports.punchIn = async (req, res) => {
       });
     }
 
-    // Dynamic hierarchy handling
+    // Fetch valid fields from ActorTypesHierarchy
+    const actorTypes = await ActorTypesHierarchy.find().lean();
+    const fieldsToQuery = [
+      ...new Set(
+        actorTypes
+          .flatMap((entry) => (entry.hierarchy ? entry.hierarchy.map((role) => role.toLowerCase()) : []))
+          .filter((role) => role)
+      ),
+    ];
+    console.log("Queried fields from ActorTypesHierarchy:", fieldsToQuery);
+
+    // Fetch HierarchyEntries containing the user's code in any field
+    const orQuery = fieldsToQuery.map((key) => ({
+      [key]: { $in: [code] },
+    }));
+    console.log("Generated $or query:", orQuery);
+
     const userHierarchies = await HierarchyEntries.find({
-      $or: Object.keys(HierarchyEntries.schema.obj)
-        .filter((key) => !["_id", "__v", "hierarchy_name"].includes(key))
-        .map((key) => ({ [key]: code })),
-    });
+      $or: orQuery,
+    }).lean();
+    console.log("Hierarchy count:", userHierarchies.length);
+    if (userHierarchies.length !== 67) {
+      console.log("Sample userHierarchies:", userHierarchies.slice(0, 5));
+    }
 
-    const allCodesSet = new Set();
-
-    userHierarchies.forEach((hierarchy) => {
-      Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
-        if (!["_id", "__v", "hierarchy_name"].includes(key)) {
-          if (Array.isArray(value)) {
-            value.forEach((v) => v && allCodesSet.add(v));
-          } else if (value) {
-            allCodesSet.add(value);
-          }
-        }
-      });
-    });
-
-    const allCodes = Array.from(allCodesSet);
+    // Extract all unique codes from hierarchy entries
+    const allCodes = [
+      ...new Set(
+        userHierarchies.flatMap((hierarchy) =>
+          fieldsToQuery
+            .flatMap((key) => {
+              const value = hierarchy[key];
+              return Array.isArray(value) ? value : [value];
+            })
+            .filter((v) => v && v !== code)
+        )
+      ),
+    ];
 
     if (!allCodes.length) {
       return res
@@ -82,6 +261,8 @@ exports.punchIn = async (req, res) => {
       },
       { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
     ]);
+    // console.log("Related Users (details):", relatedUsers);
+    console.log("Related user count:", relatedUsers.length);
 
     if (!relatedUsers.length) {
       return res
@@ -94,9 +275,9 @@ exports.punchIn = async (req, res) => {
 
     let nearestUser = null;
     let minDistance = Infinity;
+    let ptnUser
 
     relatedUsers.forEach((relUser) => {
-      console.log("Rel user and code: ", relUser, code);
       const relLat = parseFloat(relUser.latitude);
       const relLon = parseFloat(relUser.longitude);
 
@@ -112,23 +293,25 @@ exports.punchIn = async (req, res) => {
         minDistance = distance;
         nearestUser = relUser;
       }
+      ptnUser= relUser
+
     });
+    console.log("Ptn user: ", ptnUser, minDistance)
 
     if (!nearestUser || minDistance > 100) {
       return res.status(200).json({
         warning: true,
-        message: `You are too far  — approx ${minDistance.toFixed(
+        message: `You are too far — approx ${minDistance.toFixed(
           2
         )} meters away. Please move closer to a hierarchy member and try again.`,
       });
     }
 
-    console.log("Nearest Dealerr: ", nearestUser);
-    // store image as name and time
-    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
-    const publicId = `${code}_${timestamp}`;
+    console.log("Nearest User:", nearestUser);
 
     // Upload to Cloudinary
+    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+    const publicId = `${code}_${timestamp}`;
     const result = await cloudinary.uploader.upload(req.file.path, {
       folder: "gpunchInImage",
       public_id: publicId,
@@ -139,7 +322,7 @@ exports.punchIn = async (req, res) => {
       ],
     });
 
-    // delete temp file
+    // Delete temp file
     try {
       if (req.file?.path) {
         await fsPromises.unlink(req.file.path);
@@ -169,7 +352,7 @@ exports.punchIn = async (req, res) => {
     console.error("Error during punch-in:", error);
     res
       .status(500)
-      .json({ message: "Error recording punch in. please try again later" });
+      .json({ message: "Error recording punch in. Please try again later" });
   }
 };
 
