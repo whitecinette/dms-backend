@@ -96,7 +96,7 @@ exports.punchIn = async (req, res) => {
     let minDistance = Infinity;
 
     relatedUsers.forEach((relUser) => {
-      console.log("Rel user: ", relUser);
+      console.log("Rel user and code: ", relUser, code);
       const relLat = parseFloat(relUser.latitude);
       const relLon = parseFloat(relUser.longitude);
 
