@@ -96,6 +96,7 @@ exports.punchIn = async (req, res) => {
     let minDistance = Infinity;
 
     relatedUsers.forEach((relUser) => {
+      console.log("Rel user: ", relUser);
       const relLat = parseFloat(relUser.latitude);
       const relLon = parseFloat(relUser.longitude);
 
@@ -122,7 +123,7 @@ exports.punchIn = async (req, res) => {
       });
     }
 
-    console.log("Nearest Dealer: ", nearestUser);
+    console.log("Nearest Dealerr: ", nearestUser);
     // store image as name and time
     const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
     const publicId = `${code}_${timestamp}`;
