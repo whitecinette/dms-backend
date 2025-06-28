@@ -211,7 +211,11 @@ exports.punchIn = async (req, res) => {
     const fieldsToQuery = [
       ...new Set(
         actorTypes
-          .flatMap((entry) => (entry.hierarchy ? entry.hierarchy.map((role) => role.toLowerCase()) : []))
+          .flatMap((entry) =>
+            entry.hierarchy
+              ? entry.hierarchy.map((role) => role.toLowerCase())
+              : []
+          )
           .filter((role) => role)
       ),
     ];
@@ -245,6 +249,9 @@ exports.punchIn = async (req, res) => {
       ),
     ];
 
+    console.log("all code: ", allCodes);
+    console.log("all code length: ", allCodes.length);
+
     if (!allCodes.length) {
       return res
         .status(404)
@@ -259,10 +266,14 @@ exports.punchIn = async (req, res) => {
           longitude: { $type: "decimal" },
         },
       },
-      { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
+      {
+        $project: { code: 1, name: 1, position: 1, latitude: 1, longitude: 1 },
+      },
     ]);
     // console.log("Related Users (details):", relatedUsers);
     console.log("Related user count:", relatedUsers.length);
+    const dealers = relatedUsers.filter((user) => user.position === "dealer");
+    console.log("Dealer count:", dealers.length);
 
     if (!relatedUsers.length) {
       return res
@@ -275,8 +286,7 @@ exports.punchIn = async (req, res) => {
 
     let nearestUser = null;
     let minDistance = Infinity;
-    let ptnUser
-
+    let ptnUser;
     relatedUsers.forEach((relUser) => {
       const relLat = parseFloat(relUser.latitude);
       const relLon = parseFloat(relUser.longitude);
@@ -289,14 +299,29 @@ exports.punchIn = async (req, res) => {
         relLat,
         relLon
       );
+      if (distance == null) {
+        console.log(`Null distance for ${relUser.code}:`, {
+          userLat,
+          userLon,
+          relLat,
+          relLon,
+        });
+        return;
+      }
+
+      console.log(
+        `Distance to ${relUser.code} (${relUser.position}): ${distance.toFixed(
+          2
+        )} km`
+      );
+
       if (distance < minDistance) {
         minDistance = distance;
         nearestUser = relUser;
       }
-      ptnUser= relUser
-
+      ptnUser = nearestUser;
     });
-    console.log("Ptn user: ", ptnUser, minDistance)
+    console.log("Ptn user: ", ptnUser, minDistance);
 
     if (!nearestUser || minDistance > 100) {
       return res.status(200).json({
@@ -942,7 +967,6 @@ exports.getLatestAttendance = async (req, res) => {
       firms = [],
       tag,
     } = req.query;
-    
 
     let firmPositions = [];
     if (firms.length) {
@@ -974,7 +998,7 @@ exports.getLatestAttendance = async (req, res) => {
       // tag can be a string (single tag) or array (multiple tags)
       const tagArray = Array.isArray(tag) ? tag : [tag];
       employeeFilter.tags = { $in: tagArray };
-    } 
+    }
 
     const employees = await User.find(
       employeeFilter,
@@ -1265,7 +1289,6 @@ exports.editAttendanceByID = async (req, res) => {
   }
 };
 
-
 exports.downloadAllAttendance = async (req, res) => {
   try {
     const { role } = req.user;
@@ -1461,7 +1484,10 @@ exports.downloadAllAttendance = async (req, res) => {
     if (search) {
       const regex = new RegExp(search, "i");
       attendanceRecords = attendanceRecords.filter(
-        (rec) => regex.test(rec.code) || regex.test(rec.name) || regex.test(rec.siddha_code) // Include siddha_code in search
+        (rec) =>
+          regex.test(rec.code) ||
+          regex.test(rec.name) ||
+          regex.test(rec.siddha_code) // Include siddha_code in search
       );
     }
 

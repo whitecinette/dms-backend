@@ -2,17 +2,75 @@ const cloudinary = require('cloudinary').v2;
 const fs = require("fs");
 const moment = require("moment-timezone");
 
+// exports.getDistance = (lat1, lon1, lat2, lon2) => {
+//  const toRad = (value) => (value * Math.PI) / 180;
+//  const R = 6371; // Radius of Earth in km
+//  const dLat = toRad(lat2 - lat1);
+//  const dLon = toRad(lon2 - lon1);
+//  const a =
+//      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+//      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+//      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+//  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//  return R * c * 1000; // Distance in meters
+// };
+
 exports.getDistance = (lat1, lon1, lat2, lon2) => {
- const toRad = (value) => (value * Math.PI) / 180;
- const R = 6371; // Radius of Earth in km
- const dLat = toRad(lat2 - lat1);
- const dLon = toRad(lon2 - lon1);
- const a =
-     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-     Math.sin(dLon / 2) * Math.sin(dLon / 2);
- const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
- return R * c * 1000; // Distance in meters
+  // Helper to parse coordinates (handles numbers, strings, or $numberDecimal objects)
+  const parseCoordinate = (coord) => {
+    if (coord == null) return null;
+    if (typeof coord === 'number') return coord;
+    if (typeof coord === 'string') return parseFloat(coord);
+    if (typeof coord === 'object' && coord.$numberDecimal) {
+      return parseFloat(coord.$numberDecimal);
+    }
+    return null;
+  };
+
+  // Parse inputs
+  const lat1Num = parseCoordinate(lat1);
+  const lon1Num = parseCoordinate(lon1);
+  const lat2Num = parseCoordinate(lat2);
+  const lon2Num = parseCoordinate(lon2);
+
+  // Check for invalid or missing coordinates
+  if ([lat1Num, lon1Num, lat2Num, lon2Num].some((val) => val == null || isNaN(val))) {
+    console.warn("Invalid coordinates in getDistance:", { lat1, lon1, lat2, lon2 });
+    return null; // Match Flutter's behavior when currentLocation is null
+  }
+
+  // Validate ranges
+  if (lat1Num < -90 || lat1Num > 90 || lat2Num < -90 || lat2Num > 90) {
+    console.warn("Latitude out of range:", { lat1: lat1Num, lat2: lat2Num });
+    return null;
+  }
+  if (lon1Num < -180 || lon1Num > 180 || lon2Num < -180 || lon2Num > 180) {
+    console.warn("Longitude out of range:", { lon1: lon1Num, lon2: lon2Num });
+    return null;
+  }
+
+  // Handle identical points
+  if (lat1Num === lat2Num && lon1Num === lon2Num) {
+    return 0; // Same point, return 0 km
+  }
+
+  const toRad = (value) => (value * Math.PI) / 180;
+  const R = 6371; // Radius of Earth in km
+
+  const dLat = toRad(lat2Num - lat1Num);
+  const dLon = toRad(lon2Num - lon1Num);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1Num)) * Math.cos(toRad(lat2Num)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  
+  // Clamp a to [0, 1] to avoid numerical errors
+  const aClamped = Math.min(Math.max(a, 0), 1);
+  const c = 2 * Math.atan2(Math.sqrt(aClamped), Math.sqrt(1 - aClamped));
+  const distance = R * c; // Distance in kilometers
+
+  // Round to 2 decimal places to match Flutter's precision
+  return Math.round(distance * 100) / 100;
 };
 
 // ✅ Helper for no-dealer punch-out
