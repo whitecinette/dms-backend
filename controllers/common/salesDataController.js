@@ -3,10 +3,11 @@ const Product = require("../../model/Product");
 const Target = require("../../model/Target");
 const Entity = require("../../model/Entity");
 const ActorCode = require("../../model/ActorCode");
-const HeirarchyEntries = require("../../model/HierarchyEntries");
+const HierarchyEntries = require("../../model/HierarchyEntries");
 const moment = require("moment");
 const { getDashboardOverview } = require("../../helpers/salesHelpers");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
+const User = require("../../model/User")
 const { Parser } = require('json2csv');
 
 exports.getSalesReportByCode = async (req, res) => {
@@ -46,7 +47,7 @@ exports.getSalesReportByCode = async (req, res) => {
       dealerCodes = null; // No filtering needed
     } else if (role === "employee" && position) {
       // Fetch dealers assigned to this position
-      const hierarchyEntries = await HeirarchyEntries.find({
+      const hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         [position]: code, // Match the position dynamically
       });
@@ -199,7 +200,7 @@ exports.getSalesReportByCode = async (req, res) => {
 //       dealerCodes = null; // No filtering needed
 //     } else if (role === "employee" && position) {
 //       // Fetch dealers assigned to this position
-//       const hierarchyEntries = await HeirarchyEntries.find({
+//       const hierarchyEntries = await HierarchyEntries.find({
 //         hierarchy_name: "default_sales_flow",
 //         [position]: code, // Match the position dynamically
 //       });
@@ -346,7 +347,7 @@ exports.getDashboardSalesMetricsByCode = async (req, res) => {
       dealerCodes = null; // Fetch all data
     } else if (role === "employee" && position) {
       // Fetch dealers assigned to this position
-      const hierarchyEntries = await HeirarchyEntries.find({
+      const hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         [position]: code,
       });
@@ -449,7 +450,7 @@ exports.getDashboardSalesMetricsByCode = async (req, res) => {
 //       dealerCodes = null; // Fetch all data
 //     } else if (role === "employee" && position) {
 //       // Fetch dealers assigned to this position
-//       const hierarchyEntries = await HeirarchyEntries.find({
+//       const hierarchyEntries = await HierarchyEntries.find({
 //         hierarchy_name: "default_sales_flow",
 //         [position]: code,
 //       });
@@ -580,7 +581,7 @@ exports.getSalesWithHierarchyCSV = async (req, res) => {
     const hierarchyPositions = hierarchyConfig.hierarchy; // e.g., ['smd', 'asm', 'mdd', 'tse', 'dealer']
 
     // Step 3: Fetch all hierarchy entries for default_sales_flow
-    const hierarchyEntries = await HeirarchyEntries.find({ hierarchy_name: "default_sales_flow" });
+    const hierarchyEntries = await HierarchyEntries.find({ hierarchy_name: "default_sales_flow" });
 
     // Build a map of dealer => hierarchy
     const dealerHierarchyMap = {};
@@ -671,7 +672,7 @@ exports.getSalesReportForUser = async (req, res) => {
       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
 
-      const hierarchyEntries = await HeirarchyEntries.find({
+      const hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         $or: orFilters,
       });
@@ -686,12 +687,12 @@ exports.getSalesReportForUser = async (req, res) => {
       dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
       } else {
         if (["admin", "mdd", "super_admin"].includes(role)) {
-          const hierarchyEntries = await HeirarchyEntries.find({
+          const hierarchyEntries = await HierarchyEntries.find({
             hierarchy_name: "default_sales_flow"
           });
           dealerCodes = [...new Set(hierarchyEntries.map(entry => entry.dealer))];
         } else if (role === "employee" && position) {
-          const hierarchyEntries = await HeirarchyEntries.find({
+          const hierarchyEntries = await HierarchyEntries.find({
             hierarchy_name: "default_sales_flow",
             [position]: code,
           });
@@ -845,8 +846,8 @@ exports.getSalesReportForUser = async (req, res) => {
 //       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
 //       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
     
-//       // Step 3: Query HeirarchyEntries for all matching subords
-//       const hierarchyEntries = await HeirarchyEntries.find({
+//       // Step 3: Query HierarchyEntries for all matching subords
+//       const hierarchyEntries = await HierarchyEntries.find({
 //         hierarchy_name: "default_sales_flow",
 //         $or: orFilters
 //       });
@@ -867,7 +868,7 @@ exports.getSalesReportForUser = async (req, res) => {
 //       if (["admin", "super_admin"].includes(role)) {
 //         dealerCodes = null; // Means: fetch all dealers (no restriction)
 //       } else if (role === "employee" && position) {
-//         const hierarchyEntries = await HeirarchyEntries.find({
+//         const hierarchyEntries = await HierarchyEntries.find({
 //           hierarchy_name: "default_sales_flow",
 //           [position]: code,
 //         });
@@ -942,9 +943,169 @@ exports.getSalesReportForUser = async (req, res) => {
 //   }
 // };
 
+// exports.getDashboardSalesMetricsForUser = async (req, res) => {
+//   try {
+//     // console.log("19 reach...");
+//     let { code } = req.user;
+//     let { filter_type, start_date, end_date, subordinate_codes } = req.body;
+//     console.log("Filters: ", filter_type, start_date, end_date, subordinate_codes, code);
+//     filter_type = filter_type || "value"; // Default to 'value'
+
+//     console.log("Subords: ", subordinate_codes);
+
+//     if (!code || !start_date || !end_date) {
+      
+//       return res.status(400).json({ success: false, message: "Code, start_date, and end_date are required." });
+//     }
+//     // const convertToIST = (date) => {
+//     //   let d = new Date(date);
+//     //   return new Date(d.getTime() + (5.5 * 60 * 60 * 1000)); // Convert UTC to IST
+//     // };
+    
+//     // const startDate = convertToIST(new Date(start_date));
+//     // const endDate = convertToIST(new Date(end_date));
+    
+//     const startDate = new Date(start_date);
+//     startDate.setUTCHours(0, 0, 0, 0);
+
+//     const endDate = new Date(end_date);
+//     endDate.setUTCHours(0, 0, 0, 0);
+
+
+//     // console.log("whoa whoa");
+
+//     const actor = await ActorCode.findOne({ code });
+//     if (!actor) {
+//       return res.status(404).json({ success: false, message: "Actor not found for the provided code!" });
+//     }
+
+//     const { role, position } = actor;
+//     // console.log("Actor: ", actor);
+//     let dealerCodes = [];
+
+//     // Case: Subordinates are provided
+//     if (subordinate_codes && subordinate_codes.length > 0) {
+//       let allDealers = [];
+    
+//       // Step 1: Fetch dynamic positions from ActorTypesHierarchies
+//       const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+//       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
+//         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
+//       }
+    
+//       // Step 2: Remove 'dealer' and create dynamic $or filter
+//       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
+//       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
+    
+//       // Step 3: Query HierarchyEntries for all matching subords
+//       const hierarchyEntries = await HierarchyEntries.find({
+//         hierarchy_name: "default_sales_flow",
+//         $or: orFilters
+//       });
+    
+//       const dealersFromHierarchy = hierarchyEntries.map(entry => entry.dealer);
+    
+//       // Step 4: Include subords who are directly dealers
+//       const directDealers = await ActorCode.find({
+//         code: { $in: subordinate_codes },
+//         position: "dealer"
+//       }).distinct("code");
+    
+//       // Step 5: Combine & deduplicate
+//       dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
+//     }
+//      else {
+//       // No subords selected
+//       if (["admin", "super_admin"].includes(role)) {
+//         console.log("ADMMM")
+//       const hierarchyEntries = await HierarchyEntries.find({
+//         hierarchy_name: "default_sales_flow"
+//       });
+
+//       dealerCodes = hierarchyEntries.map(entry => entry.dealer);
+//     } else if (role === "employee" && position) {
+//         const hierarchyEntries = await HierarchyEntries.find({
+//           hierarchy_name: "default_sales_flow",
+//           [position]: code,
+//         });
+
+//         dealerCodes = hierarchyEntries.map(entry => entry.dealer);
+//       } else {
+//         return res.status(403).json({ success: false, message: "Unauthorized role." });
+//       }
+//     }
+
+//     // console.log("Dealers for dashboard: ", dealerCodes);
+//     console.log("No. of dealers: ", dealerCodes.length);
+
+//     // Calculate LMTD date range
+//     let lmtdStartDate = new Date(startDate);
+//     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//     let lmtdEndDate = new Date(endDate);
+//     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     console.log("Current: ", startDate, endDate);
+//     console.log("Prev: ", lmtdStartDate, lmtdEndDate);
+
+//     let baseQuery = dealerCodes ? { buyer_code: { $in: dealerCodes } } : {};
+
+//     // Aggregation helpers
+//     const getTotal = async (salesType, dateRange) => {
+//       return await SalesData.aggregate([
+//         {
+//           $match: {
+//             ...baseQuery,
+//             sales_type: salesType,
+//             date: { $gte: dateRange.start, $lte: dateRange.end }
+//           }
+//         },
+//         {
+//           $group: {
+//             _id: null,
+//             total: {
+//               $sum: {
+//                 $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`
+//               }
+//             }
+//           }
+//         }
+//       ]);
+//     };
+
+//     const mtdSellOut = await getTotal("Sell Out", { start: startDate, end: endDate });
+//     const lmtdSellOut = await getTotal("Sell Out", { start: lmtdStartDate, end: lmtdEndDate });
+
+//     const mtdSellIn = await getTotal({ $in: ["Sell In", "Sell Thru2"] }, { start: startDate, end: endDate });
+//     const lmtdSellIn = await getTotal({ $in: ["Sell In", "Sell Thru2"] }, { start: lmtdStartDate, end: lmtdEndDate });
+
+//     const calculateGrowth = (current, last) => (last !== 0 ? ((current - last) / last) * 100 : 0);
+
+//     const response = {
+//       lmtd_sell_out: lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0,
+//       mtd_sell_out: mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
+//       lmtd_sell_in: lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0,
+//       mtd_sell_in: mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
+//       sell_out_growth: calculateGrowth(
+//         mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
+//         lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0
+//       ).toFixed(2),
+//       sell_in_growth: calculateGrowth(
+//         mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
+//         lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0
+//       ).toFixed(2),
+//     };
+
+//     res.status(200).json({ success: true, data: response });
+//     console.log("Res: ", response)
+//   } catch (error) {
+//     console.error("Error in getDashboardSalesMetrics:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
+
+
 exports.getDashboardSalesMetricsForUser = async (req, res) => {
   try {
-    // console.log("19 reach...");
     let { code } = req.user;
     let { filter_type, start_date, end_date, subordinate_codes } = req.body;
     console.log("Filters: ", filter_type, start_date, end_date, subordinate_codes, code);
@@ -953,25 +1114,14 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     console.log("Subords: ", subordinate_codes);
 
     if (!code || !start_date || !end_date) {
-      
       return res.status(400).json({ success: false, message: "Code, start_date, and end_date are required." });
     }
-    // const convertToIST = (date) => {
-    //   let d = new Date(date);
-    //   return new Date(d.getTime() + (5.5 * 60 * 60 * 1000)); // Convert UTC to IST
-    // };
-    
-    // const startDate = convertToIST(new Date(start_date));
-    // const endDate = convertToIST(new Date(end_date));
-    
+
     const startDate = new Date(start_date);
     startDate.setUTCHours(0, 0, 0, 0);
 
     const endDate = new Date(end_date);
     endDate.setUTCHours(0, 0, 0, 0);
-
-
-    // console.log("whoa whoa");
 
     const actor = await ActorCode.findOne({ code });
     if (!actor) {
@@ -979,62 +1129,71 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     }
 
     const { role, position } = actor;
-    // console.log("Actor: ", actor);
     let dealerCodes = [];
 
     // Case: Subordinates are provided
     if (subordinate_codes && subordinate_codes.length > 0) {
       let allDealers = [];
-    
-      // Step 1: Fetch dynamic positions from ActorTypesHierarchies
+
+      // Step 1: Fetch dynamic positions from ActorTypesHierarchy
       const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
       }
-    
-      // Step 2: Remove 'dealer' and create dynamic $or filter
+
+      // Step 2: Handle dealer_category (labels) from User collection
+      const dealerCategories = await User.find(
+        { role: "dealer", labels: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+
+      // Step 3: Remove 'dealer' and create dynamic $or filter for hierarchy positions
       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
-    
-      // Step 3: Query HeirarchyEntries for all matching subords
-      const hierarchyEntries = await HeirarchyEntries.find({
+
+      // Step 4: Query HierarchyEntries for all matching subordinates
+      const hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         $or: orFilters
       });
-    
-      const dealersFromHierarchy = hierarchyEntries.map(entry => entry.dealer);
-    
-      // Step 4: Include subords who are directly dealers
+
+      const dealersFromHierarchy = hierarchyEntries
+        .filter(entry => entry.dealer)
+        .map(entry => entry.dealer);
+
+      // Step 5: Include subordinates who are directly dealers
       const directDealers = await ActorCode.find({
         code: { $in: subordinate_codes },
         position: "dealer"
       }).distinct("code");
-    
-      // Step 5: Combine & deduplicate
-      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
-    }
-     else {
-      // No subords selected
-      if (["admin", "super_admin"].includes(role)) {
-        console.log("ADMMM")
-      const hierarchyEntries = await HeirarchyEntries.find({
-        hierarchy_name: "default_sales_flow"
-      });
 
-      dealerCodes = hierarchyEntries.map(entry => entry.dealer);
-    } else if (role === "employee" && position) {
-        const hierarchyEntries = await HeirarchyEntries.find({
+      // Step 6: Combine and deduplicate dealer codes
+      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers, ...dealerCategories])];
+    } else {
+      // No subordinates selected
+      if (["admin", "super_admin"].includes(role)) {
+        console.log("ADMMM");
+        const hierarchyEntries = await HierarchyEntries.find({
+          hierarchy_name: "default_sales_flow"
+        });
+
+        dealerCodes = hierarchyEntries
+          .filter(entry => entry.dealer)
+          .map(entry => entry.dealer);
+      } else if (role === "employee" && position) {
+        const hierarchyEntries = await HierarchyEntries.find({
           hierarchy_name: "default_sales_flow",
           [position]: code,
         });
 
-        dealerCodes = hierarchyEntries.map(entry => entry.dealer);
+        dealerCodes = hierarchyEntries
+          .filter(entry => entry.dealer)
+          .map(entry => entry.dealer);
       } else {
         return res.status(403).json({ success: false, message: "Unauthorized role." });
       }
     }
 
-    // console.log("Dealers for dashboard: ", dealerCodes);
     console.log("No. of dealers: ", dealerCodes.length);
 
     // Calculate LMTD date range
@@ -1046,7 +1205,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     console.log("Current: ", startDate, endDate);
     console.log("Prev: ", lmtdStartDate, lmtdEndDate);
 
-    let baseQuery = dealerCodes ? { buyer_code: { $in: dealerCodes } } : {};
+    let baseQuery = dealerCodes.length > 0 ? { buyer_code: { $in: dealerCodes } } : {};
 
     // Aggregation helpers
     const getTotal = async (salesType, dateRange) => {
@@ -1095,7 +1254,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     };
 
     res.status(200).json({ success: true, data: response });
-    console.log("Res: ", response)
+    console.log("Res: ", response);
   } catch (error) {
     console.error("Error in getDashboardSalesMetrics:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
@@ -1138,7 +1297,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
 //       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
 
-//       const hierarchyEntries = await HeirarchyEntries.find({
+//       const hierarchyEntries = await HierarchyEntries.find({
 //         hierarchy_name: "default_sales_flow",
 //         $or: orFilters,
 //       });
@@ -1153,12 +1312,12 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //       dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
 //     } else {
 //       if (["admin", "mdd", "super_admin"].includes(role)) {
-//         const hierarchyEntries = await HeirarchyEntries.find({
+//         const hierarchyEntries = await HierarchyEntries.find({
 //           hierarchy_name: "default_sales_flow"
 //         });
 //         dealerCodes = [...new Set(hierarchyEntries.map(entry => entry.dealer))];
 //       } else if (role === "employee" && position) {
-//         const hierarchyEntries = await HeirarchyEntries.find({
+//         const hierarchyEntries = await HierarchyEntries.find({
 //           hierarchy_name: "default_sales_flow",
 //           [position]: code,
 //         });
@@ -1292,7 +1451,7 @@ exports.getSalesReportProductWise = async (req, res) => {
       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
 
-      const hierarchyEntries = await HeirarchyEntries.find({
+      const hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         $or: orFilters,
       });
@@ -1307,12 +1466,12 @@ exports.getSalesReportProductWise = async (req, res) => {
       dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
     } else {
       if (["admin", "mdd", "super_admin"].includes(role)) {
-        const hierarchyEntries = await HeirarchyEntries.find({
+        const hierarchyEntries = await HierarchyEntries.find({
           hierarchy_name: "default_sales_flow"
         });
         dealerCodes = [...new Set(hierarchyEntries.map(entry => entry.dealer))];
       } else if (role === "employee" && position) {
-        const hierarchyEntries = await HeirarchyEntries.find({
+        const hierarchyEntries = await HierarchyEntries.find({
           hierarchy_name: "default_sales_flow",
           [position]: code,
         });
