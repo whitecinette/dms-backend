@@ -323,7 +323,7 @@ exports.punchIn = async (req, res) => {
     });
     console.log("Ptn user: ", ptnUser, minDistance.toFixed(2), "Meters");
 
-    if (!nearestUser || minDistance > 100) {
+    if (!nearestUser || minDistance > 200) {
       return res.status(200).json({
         warning: true,
         message: `You are too far — approx ${minDistance.toFixed(
@@ -367,6 +367,7 @@ exports.punchIn = async (req, res) => {
       punchInImage: result.secure_url,
       punchInCode: nearestUser.code,
       punchInName: nearestUser.name,
+      distance: parseFloat(minDistance.toFixed(2)),
     });
 
     await attendance.save();
