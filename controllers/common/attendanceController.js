@@ -321,7 +321,7 @@ exports.punchIn = async (req, res) => {
       }
       ptnUser = nearestUser;
     });
-    console.log("Ptn user: ", ptnUser, minDistance);
+    console.log("Ptn user: ", ptnUser, minDistance.toFixed(2), "Meters");
 
     if (!nearestUser || minDistance > 100) {
       return res.status(200).json({
