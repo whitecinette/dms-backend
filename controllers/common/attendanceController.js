@@ -1600,288 +1600,628 @@ exports.editAttendanceByID = async (req, res) => {
   }
 };
 
+// exports.downloadAllAttendance = async (req, res) => {
+//   try {
+//     const { role } = req.user;
+//     const {
+//       date,
+//       month,
+//       year = new Date().getFullYear(),
+//       search = "",
+//       status = "",
+//       firms = [],
+//       tag,
+//     } = req.query;
+
+//     let firmPositions = [];
+//     if (firms.length) {
+//       const firmData = await ActorTypesHierarchy.find({ _id: Conditions });
+//       if (!firmData.length) {
+//         return res.status(400).json({ message: "Invalid firm IDs." });
+//       }
+//       firmPositions = firmData.reduce((positions, firm) => {
+//         if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+//           positions.push(...firm.hierarchy);
+//         }
+//         return positions;
+//       }, []);
+//     }
+
+//     let employeeFilter = { status: "active" };
+//     if (role === "super_admin" || role === "admin") {
+//       employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+//     } else if (role === "hr") {
+//       employeeFilter.role = { $in: ["employee"] };
+//     } else {
+//       return res.status(403).json({ message: "Unauthorized" });
+//     }
+
+//     if (firmPositions.length) {
+//       employeeFilter.position = { $in: firmPositions };
+//     }
+
+//     // Add tag filter
+//     if (tag) {
+//       const tagArray = Array.isArray(tag) ? tag : [tag];
+//       employeeFilter.tags = { $in: tagArray };
+//     }
+
+//     // Fetch employees with siddha_code
+//     const employees = await User.find(
+//       employeeFilter,
+//       "code name position tags siddha_code" // Added siddha_code
+//     ).lean();
+
+//     if (!employees.length) {
+//       return res.status(200).json({
+//         message: "No employees found",
+//         data: [],
+//       });
+//     }
+
+//     // Include siddha_code in employeeMap
+//     const employeeMap = employees.reduce((acc, emp) => {
+//       acc[emp.code.trim().toLowerCase()] = {
+//         name: emp.name,
+//         position: emp.position,
+//         tags: emp.tags,
+//         siddha_code: emp.siddha_code, // Added siddha_code
+//       };
+//       return acc;
+//     }, {});
+
+//     const employeeCodes = employees.map((emp) => emp.code);
+//     let attendanceRecords = [];
+//     let dateFilter = {};
+
+//     // Handle date filtering
+//     if (date) {
+//       const startOfDay = new Date(date);
+//       startOfDay.setHours(0, 0, 0, 0);
+//       const endOfDay = new Date(date);
+//       endOfDay.setHours(23, 59, 59, 999);
+//       dateFilter = { $gte: startOfDay, $lte: endOfDay };
+//     } else if (month && year) {
+//       const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+//       const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+//       dateFilter = { $gte: start, $lte: end };
+//     }
+
+//     // Fetch attendance records
+//     const rawRecords = await Attendance.find({
+//       ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+//       code: { $in: employeeCodes },
+//     })
+//       .sort({ date: 1, punchIn: -1 })
+//       .lean();
+
+//     const attendanceMap = new Map();
+
+//     for (const record of rawRecords) {
+//       const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
+//         .toISOString()
+//         .slice(0, 10)}`;
+
+//       if (!attendanceMap.has(key)) {
+//         attendanceMap.set(key, record);
+//       } else {
+//         const existing = attendanceMap.get(key);
+//         const priority = { Present: 3, "Half Day": 2, Absent: 1 };
+
+//         if ((priority[record.status] || 0) > (priority[existing.status] || 0)) {
+//           attendanceMap.set(key, record);
+//         }
+//       }
+//     }
+
+//     attendanceRecords = Array.from(attendanceMap.values());
+
+//     // If a specific date is given (single day), handle absentees
+//     if (date) {
+//       const presentCodes = new Set(
+//         attendanceRecords.map((r) => r.code.trim().toLowerCase())
+//       );
+//       employees.forEach((emp) => {
+//         const empCode = emp.code.trim().toLowerCase();
+//         if (!presentCodes.has(empCode)) {
+//           attendanceRecords.push({
+//             code: emp.code,
+//             name: emp.name,
+//             position: emp.position,
+//             status: "Absent",
+//             date: new Date(date),
+//             tags: emp.tags,
+//             siddha_code: emp.siddha_code, // Added siddha_code
+//           });
+//         }
+//       });
+//     }
+
+//     // If month view, fill absent data for each day and employee
+//     if (!date && month && year) {
+//       const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+//       const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+
+//       const allDays = [];
+//       let d = new Date(startDate);
+//       while (d <= endDate) {
+//         allDays.push(new Date(d));
+//         d.setDate(d.getDate() + 1);
+//       }
+
+//       const dateMap = new Map(
+//         attendanceRecords.map((record) => [
+//           `${record.code.trim().toLowerCase()}-${new Date(record.date)
+//             .toISOString()
+//             .slice(0, 10)}`,
+//           record,
+//         ])
+//       );
+
+//       for (const emp of employees) {
+//         const empCode = emp.code.trim().toLowerCase();
+//         for (const day of allDays) {
+//           const key = `${empCode}-${day.toISOString().slice(0, 10)}`;
+//           if (!dateMap.has(key)) {
+//             attendanceRecords.push({
+//               code: emp.code,
+//               name: emp.name,
+//               position: emp.position,
+//               status: "Absent",
+//               date: new Date(day),
+//               tags: emp.tags,
+//               siddha_code: emp.siddha_code, // Added siddha_code
+//             });
+//           }
+//         }
+//       }
+//     }
+
+//     // Attach name, position, tags, and siddha_code
+//     attendanceRecords = attendanceRecords.map((record) => {
+//       const normalizedCode = record.code.trim().toLowerCase();
+//       const employee = employeeMap[normalizedCode];
+
+//       return {
+//         ...record,
+//         name: employee?.name || "Unknown",
+//         position: employee?.position || "Unknown",
+//         tags: record.tags || employee?.tags || [],
+//         siddha_code: record.siddha_code || employee?.siddha_code || "N/A", // Added siddha_code
+//       };
+//     });
+
+//     // Filter by search
+//     if (search) {
+//       const regex = new RegExp(search, "i");
+//       attendanceRecords = attendanceRecords.filter(
+//         (rec) =>
+//           regex.test(rec.code) ||
+//           regex.test(rec.name) ||
+//           regex.test(rec.siddha_code) // Include siddha_code in search
+//       );
+//     }
+
+//     // Filter by status
+//     if (status) {
+//       attendanceRecords = attendanceRecords.filter(
+//         (rec) => rec.status === status
+//       );
+//     }
+
+//     // Custom status priority
+//     const statusPriority = {
+//       Present: 6,
+//       Pending: 5,
+//       "Half Day": 4,
+//       Leave: 3,
+//       Absent: 1,
+//     };
+
+//     // Sort by date ASC, and within each date, by status priority DESC
+//     attendanceRecords.sort((a, b) => {
+//       const dateA = new Date(a.date).setHours(0, 0, 0, 0);
+//       const dateB = new Date(b.date).setHours(0, 0, 0, 0);
+
+//       if (dateA !== dateB) return dateA - dateB;
+
+//       const priorityA = statusPriority[a.status] || 0;
+//       const priorityB = statusPriority[b.status] || 0;
+//       return priorityB - priorityA;
+//     });
+
+//     // Format data for CSV export
+//     const formattedAttendance = attendanceRecords.map((record) => ({
+//       Name: record.name || "Unknown",
+//       Code: record.code,
+//       "Siddha Code": record.siddha_code || "N/A", // Added Siddha Code
+//       Position: record.position || "Unknown",
+//       Date: record.date
+//         ? new Date(record.date).toISOString().split("T")[0]
+//         : "N/A",
+//       "Punch In Time": record.punchIn
+//         ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
+//             timeZone: "Asia/Kolkata",
+//           })
+//         : "N/A",
+//       "Punch In Out": record.punchOut
+//         ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
+//             timeZone: "Asia/Kolkata",
+//           })
+//         : "N/A",
+//       Status: record.status,
+//       "Working Hours": record.hoursWorked || "0",
+//       Tags:
+//         Array.isArray(record.tags) && record.tags.length
+//           ? record.tags.join("; ")
+//           : "N/A",
+//     }));
+
+//     const fields = [
+//       "Name",
+//       "Code",
+//       "Siddha Code", // Added Siddha Code to fields
+//       "Position",
+//       "Date",
+//       "Punch In Time",
+//       "Punch In Out",
+//       "Status",
+//       "Working Hours",
+//       "Tags",
+//     ];
+//     const parser = new Parser({ fields });
+//     const csv = parser.parse(formattedAttendance);
+
+//     res.header("Content-Type", "text/csv");
+//     res.attachment("attendance_data.csv");
+//     return res.send(csv);
+//   } catch (error) {
+//     console.error("Error downloading attendance data:", error);
+//     res.status(500).json({
+//       message: "Error downloading attendance data",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// nameeraaa
 exports.downloadAllAttendance = async (req, res) => {
-  try {
-    const { role } = req.user;
-    const {
-      date,
-      month,
-      year = new Date().getFullYear(),
-      search = "",
-      status = "",
-      firms = [],
-      tag,
-    } = req.query;
+ try {
+   const { role } = req.user;
+   const {
+     firmCodes,
+     date,
+     month,
+     year = new Date().getFullYear(),
+     search = "",
+     status = "",
+     firms = [],
+     tag,
+   } = req.query;
 
-    let firmPositions = [];
-    if (firms.length) {
-      const firmData = await ActorTypesHierarchy.find({ _id: Conditions });
-      if (!firmData.length) {
-        return res.status(400).json({ message: "Invalid firm IDs." });
-      }
-      firmPositions = firmData.reduce((positions, firm) => {
-        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
-          positions.push(...firm.hierarchy);
-        }
-        return positions;
-      }, []);
-    }
+   // 1️⃣ Validate firmCodes if provided
+   let userCodes = [];
+   let totalEligibleUsers = 0;
+   if (firmCodes) {
+     if (!firmCodes) {
+       return res
+         .status(400)
+         .json({ message: "firmCodes are required in query when provided." });
+     }
 
-    let employeeFilter = { status: "active" };
-    if (role === "super_admin" || role === "admin") {
-      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
-    } else if (role === "hr") {
-      employeeFilter.role = { $in: ["employee"] };
-    } else {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+     const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
+     if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
+       return res
+         .status(400)
+         .json({ message: "firmCodes must be a comma-separated list." });
+     }
 
-    if (firmPositions.length) {
-      employeeFilter.position = { $in: firmPositions };
-    }
+     // 2️⃣ Find metadata entries where attendance is true
+     const metaDataUsers = await MetaData.find({
+       firm_code: { $in: firmCodesArray },
+       attendance: true,
+     });
 
-    // Add tag filter
-    if (tag) {
-      const tagArray = Array.isArray(tag) ? tag : [tag];
-      employeeFilter.tags = { $in: tagArray };
-    }
+     userCodes = metaDataUsers.map((meta) => meta.code);
+     totalEligibleUsers = userCodes.length;
 
-    // Fetch employees with siddha_code
-    const employees = await User.find(
-      employeeFilter,
-      "code name position tags siddha_code" // Added siddha_code
-    ).lean();
+     if (totalEligibleUsers === 0) {
+       return res.status(200).json({
+         message: "No users with attendance:true found.",
+         data: [],
+       });
+     }
+   }
 
-    if (!employees.length) {
-      return res.status(200).json({
-        message: "No employees found",
-        data: [],
-      });
-    }
+   // 3️⃣ Handle firm hierarchy and role-based filtering
+   let firmPositions = [];
+   if (firms.length) {
+     const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+     if (!firmData.length) {
+       return res.status(400).json({ message: "Invalid firm IDs." });
+     }
+     firmPositions = firmData.reduce((positions, firm) => {
+       if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+         positions.push(...firm.hierarchy);
+       }
+       return positions;
+     }, []);
+   }
 
-    // Include siddha_code in employeeMap
-    const employeeMap = employees.reduce((acc, emp) => {
-      acc[emp.code.trim().toLowerCase()] = {
-        name: emp.name,
-        position: emp.position,
-        tags: emp.tags,
-        siddha_code: emp.siddha_code, // Added siddha_code
-      };
-      return acc;
-    }, {});
+   let employeeFilter = { status: "active" };
+   if (role === "super_admin" || role === "admin") {
+     employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+   } else if (role === "hr") {
+     employeeFilter.role = { $in: ["employee"] };
+   } else {
+     return res.status(403).json({ message: "Unauthorized" });
+   }
 
-    const employeeCodes = employees.map((emp) => emp.code);
-    let attendanceRecords = [];
-    let dateFilter = {};
+   if (firmPositions.length) {
+     employeeFilter.position = { $in: firmPositions };
+   }
 
-    // Handle date filtering
-    if (date) {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      dateFilter = { $gte: startOfDay, $lte: endOfDay };
-    } else if (month && year) {
-      const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-      const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
-      dateFilter = { $gte: start, $lte: end };
-    }
+   // Add tag filter
+   if (tag) {
+     const tagArray = Array.isArray(tag) ? tag : [tag];
+     employeeFilter.tags = { $in: tagArray };
+   }
 
-    // Fetch attendance records
-    const rawRecords = await Attendance.find({
-      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
-      code: { $in: employeeCodes },
-    })
-      .sort({ date: 1, punchIn: -1 })
-      .lean();
+   // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
+   if (firmCodes) {
+     employeeFilter.code = { $in: userCodes };
+   }
 
-    const attendanceMap = new Map();
+   // 5️⃣ Fetch employees with siddha_code
+   const employees = await User.find(
+     employeeFilter,
+     "code name position tags siddha_code"
+   ).lean();
 
-    for (const record of rawRecords) {
-      const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
-        .toISOString()
-        .slice(0, 10)}`;
+   // 6️⃣ Log codes present in MetaData but not in active employees
+   if (firmCodes) {
+     const employeeCodes = employees.map((emp) => emp.code.trim().toLowerCase());
+     const missingCodes = userCodes.filter(
+       (code) => !employeeCodes.includes(code.trim().toLowerCase())
+     );
+     if (missingCodes.length > 0) {
+       console.log(
+         `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(", ")}`
+       );
+     } else {
+       console.log("All MetaData codes found in active employees.");
+     }
+   }
 
-      if (!attendanceMap.has(key)) {
-        attendanceMap.set(key, record);
-      } else {
-        const existing = attendanceMap.get(key);
-        const priority = { Present: 3, "Half Day": 2, Absent: 1 };
+   if (!employees.length) {
+     return res.status(200).json({
+       message: "No employees found",
+       data: [],
+     });
+   }
 
-        if ((priority[record.status] || 0) > (priority[existing.status] || 0)) {
-          attendanceMap.set(key, record);
-        }
-      }
-    }
+   // 7️⃣ Include siddha_code in employeeMap
+   const employeeMap = employees.reduce((acc, emp) => {
+     acc[emp.code.trim().toLowerCase()] = {
+       name: emp.name,
+       position: emp.position,
+       tags: emp.tags,
+       siddha_code: emp.siddha_code,
+     };
+     return acc;
+   }, {});
 
-    attendanceRecords = Array.from(attendanceMap.values());
+   const employeeCodes = employees.map((emp) => emp.code);
+   let attendanceRecords = [];
+   let dateFilter = {};
 
-    // If a specific date is given (single day), handle absentees
-    if (date) {
-      const presentCodes = new Set(
-        attendanceRecords.map((r) => r.code.trim().toLowerCase())
-      );
-      employees.forEach((emp) => {
-        const empCode = emp.code.trim().toLowerCase();
-        if (!presentCodes.has(empCode)) {
-          attendanceRecords.push({
-            code: emp.code,
-            name: emp.name,
-            position: emp.position,
-            status: "Absent",
-            date: new Date(date),
-            tags: emp.tags,
-            siddha_code: emp.siddha_code, // Added siddha_code
-          });
-        }
-      });
-    }
+   // 8️⃣ Handle date filtering
+   if (date) {
+     const startOfDay = new Date(date);
+     startOfDay.setHours(0, 0, 0, 0);
+     const endOfDay = new Date(date);
+     endOfDay.setHours(23, 59, 59, 999);
+     dateFilter = { $gte: startOfDay, $lte: endOfDay };
+   } else if (month && year) {
+     const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+     const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+     dateFilter = { $gte: start, $lte: end };
+   }
 
-    // If month view, fill absent data for each day and employee
-    if (!date && month && year) {
-      const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-      const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+   // 9️⃣ Fetch attendance records
+   const rawRecords = await Attendance.find({
+     ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+     code: { $in: employeeCodes },
+   })
+     .sort({ date: 1, punchIn: -1 })
+     .lean();
 
-      const allDays = [];
-      let d = new Date(startDate);
-      while (d <= endDate) {
-        allDays.push(new Date(d));
-        d.setDate(d.getDate() + 1);
-      }
+   const attendanceMap = new Map();
+   const statusPriority = {
+     Present: 6,
+     Pending: 5,
+     "Half Day": 4,
+     Leave: 3,
+     Absent: 1,
+   };
 
-      const dateMap = new Map(
-        attendanceRecords.map((record) => [
-          `${record.code.trim().toLowerCase()}-${new Date(record.date)
-            .toISOString()
-            .slice(0, 10)}`,
-          record,
-        ])
-      );
+   for (const record of rawRecords) {
+     const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
+       .toISOString()
+       .slice(0, 10)}`;
 
-      for (const emp of employees) {
-        const empCode = emp.code.trim().toLowerCase();
-        for (const day of allDays) {
-          const key = `${empCode}-${day.toISOString().slice(0, 10)}`;
-          if (!dateMap.has(key)) {
-            attendanceRecords.push({
-              code: emp.code,
-              name: emp.name,
-              position: emp.position,
-              status: "Absent",
-              date: new Date(day),
-              tags: emp.tags,
-              siddha_code: emp.siddha_code, // Added siddha_code
-            });
-          }
-        }
-      }
-    }
+     if (!attendanceMap.has(key)) {
+       attendanceMap.set(key, record);
+     } else {
+       const existing = attendanceMap.get(key);
+       if (
+         (statusPriority[record.status] || 0) >
+         (statusPriority[existing.status] || 0)
+       ) {
+         attendanceMap.set(key, record);
+       }
+     }
+   }
 
-    // Attach name, position, tags, and siddha_code
-    attendanceRecords = attendanceRecords.map((record) => {
-      const normalizedCode = record.code.trim().toLowerCase();
-      const employee = employeeMap[normalizedCode];
+   attendanceRecords = Array.from(attendanceMap.values());
 
-      return {
-        ...record,
-        name: employee?.name || "Unknown",
-        position: employee?.position || "Unknown",
-        tags: record.tags || employee?.tags || [],
-        siddha_code: record.siddha_code || employee?.siddha_code || "N/A", // Added siddha_code
-      };
-    });
+   // 10️⃣ If a specific date is given (single day), handle absentees
+   if (date) {
+     const presentCodes = new Set(
+       attendanceRecords.map((r) => r.code.trim().toLowerCase())
+     );
+     employees.forEach((emp) => {
+       const empCode = emp.code.trim().toLowerCase();
+       if (!presentCodes.has(empCode)) {
+         attendanceRecords.push({
+           code: emp.code,
+           name: emp.name,
+           position: emp.position,
+           status: "Absent",
+           date: new Date(date),
+           tags: emp.tags,
+           siddha_code: emp.siddha_code,
+         });
+       }
+     });
+   }
 
-    // Filter by search
-    if (search) {
-      const regex = new RegExp(search, "i");
-      attendanceRecords = attendanceRecords.filter(
-        (rec) =>
-          regex.test(rec.code) ||
-          regex.test(rec.name) ||
-          regex.test(rec.siddha_code) // Include siddha_code in search
-      );
-    }
+   // 11️⃣ If month view, fill absent data for each day and employee
+   if (!date && month && year) {
+     const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+     const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
-    // Filter by status
-    if (status) {
-      attendanceRecords = attendanceRecords.filter(
-        (rec) => rec.status === status
-      );
-    }
+     const allDays = [];
+     let d = new Date(startDate);
+     while (d <= endDate) {
+       allDays.push(new Date(d));
+       d.setDate(d.getDate() + 1);
+     }
 
-    // Custom status priority
-    const statusPriority = {
-      Present: 6,
-      Pending: 5,
-      "Half Day": 4,
-      Leave: 3,
-      Absent: 1,
-    };
+     const dateMap = new Map(
+       attendanceRecords.map((record) => [
+         `${record.code.trim().toLowerCase()}-${new Date(record.date)
+           .toISOString()
+           .slice(0, 10)}`,
+         record,
+       ])
+     );
 
-    // Sort by date ASC, and within each date, by status priority DESC
-    attendanceRecords.sort((a, b) => {
-      const dateA = new Date(a.date).setHours(0, 0, 0, 0);
-      const dateB = new Date(b.date).setHours(0, 0, 0, 0);
+     for (const emp of employees) {
+       const empCode = emp.code.trim().toLowerCase();
+       for (const day of allDays) {
+         const key = `${empCode}-${day.toISOString().slice(0, 10)}`;
+         if (!dateMap.has(key)) {
+           attendanceRecords.push({
+             code: emp.code,
+             name: emp.name,
+             position: emp.position,
+             status: "Absent",
+             date: new Date(day),
+             tags: emp.tags,
+             siddha_code: emp.siddha_code,
+           });
+         }
+       }
+     }
+   }
 
-      if (dateA !== dateB) return dateA - dateB;
+   // 12️⃣ Attach name, position, tags, and siddha_code
+   attendanceRecords = attendanceRecords.map((record) => {
+     const normalizedCode = record.code.trim().toLowerCase();
+     const employee = employeeMap[normalizedCode];
 
-      const priorityA = statusPriority[a.status] || 0;
-      const priorityB = statusPriority[b.status] || 0;
-      return priorityB - priorityA;
-    });
+     return {
+       ...record,
+       name: employee?.name || "Unknown",
+       position: employee?.position || "Unknown",
+       tags: record.tags || employee?.tags || [],
+       siddha_code: record.siddha_code || employee?.siddha_code || "N/A",
+     };
+   });
 
-    // Format data for CSV export
-    const formattedAttendance = attendanceRecords.map((record) => ({
-      Name: record.name || "Unknown",
-      Code: record.code,
-      "Siddha Code": record.siddha_code || "N/A", // Added Siddha Code
-      Position: record.position || "Unknown",
-      Date: record.date
-        ? new Date(record.date).toISOString().split("T")[0]
-        : "N/A",
-      "Punch In Time": record.punchIn
-        ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
-            timeZone: "Asia/Kolkata",
-          })
-        : "N/A",
-      "Punch In Out": record.punchOut
-        ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
-            timeZone: "Asia/Kolkata",
-          })
-        : "N/A",
-      Status: record.status,
-      "Working Hours": record.hoursWorked || "0",
-      Tags:
-        Array.isArray(record.tags) && record.tags.length
-          ? record.tags.join("; ")
-          : "N/A",
-    }));
+   // 13️⃣ Filter by search
+   if (search) {
+     const regex = new RegExp(search, "i");
+     attendanceRecords = attendanceRecords.filter(
+       (rec) =>
+         regex.test(rec.code) ||
+         regex.test(rec.name) ||
+         regex.test(rec.siddha_code)
+     );
+   }
 
-    const fields = [
-      "Name",
-      "Code",
-      "Siddha Code", // Added Siddha Code to fields
-      "Position",
-      "Date",
-      "Punch In Time",
-      "Punch In Out",
-      "Status",
-      "Working Hours",
-      "Tags",
-    ];
-    const parser = new Parser({ fields });
-    const csv = parser.parse(formattedAttendance);
+   // 14️⃣ Filter by status
+   if (status) {
+     attendanceRecords = attendanceRecords.filter(
+       (rec) => rec.status === status
+     );
+   }
 
-    res.header("Content-Type", "text/csv");
-    res.attachment("attendance_data.csv");
-    return res.send(csv);
-  } catch (error) {
-    console.error("Error downloading attendance data:", error);
-    res.status(500).json({
-      message: "Error downloading attendance data",
-      error: error.message,
-    });
-  }
+   // 15️⃣ Sort by date ASC, and within each date, by status priority DESC
+   attendanceRecords.sort((a, b) => {
+     const dateA = new Date(a.date).setHours(0, 0, 0, 0);
+     const dateB = new Date(b.date).setHours(0, 0, 0, 0);
+
+     if (dateA !== dateB) return dateA - dateB;
+
+     const priorityA = statusPriority[a.status] || 0;
+     const priorityB = statusPriority[b.status] || 0;
+     return priorityB - priorityA;
+   });
+
+   // 16️⃣ Format data for CSV export
+   const formattedAttendance = attendanceRecords.map((record) => ({
+     Name: record.name || "Unknown",
+     Code: record.code,
+     "Siddha Code": record.siddha_code || "N/A",
+     Position: record.position || "Unknown",
+     Date: record.date
+       ? new Date(record.date).toISOString().split("T")[0]
+       : "N/A",
+     "Punch In Time": record.punchIn
+       ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
+           timeZone: "Asia/Kolkata",
+         })
+       : "N/A",
+     "Punch In Out": record.punchOut
+       ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
+           timeZone: "Asia/Kolkata",
+         })
+       : "N/A",
+     Status: record.status,
+     "Working Hours": record.hoursWorked || "0",
+     Tags:
+       Array.isArray(record.tags) && record.tags.length
+         ? record.tags.join("; ")
+         : "N/A",
+   }));
+
+   const fields = [
+     "Name",
+     "Code",
+     "Siddha Code",
+     "Position",
+     "Date",
+     "Punch In Time",
+     "Punch In Out",
+     "Status",
+     "Working Hours",
+     "Tags",
+   ];
+   const parser = new Parser({ fields });
+   const csv = parser.parse(formattedAttendance);
+
+   res.header("Content-Type", "text/csv");
+   res.attachment("attendance_data.csv");
+   return res.send(csv);
+ } catch (error) {
+   console.error("Error downloading attendance data:", error);
+   res.status(500).json({
+     message: "Error downloading attendance data",
+     error: error.message,
+   });
+ }
 };
 
 exports.deleteAttendanceByID = async (req, res) => {
