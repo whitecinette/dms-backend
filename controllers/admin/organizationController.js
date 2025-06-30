@@ -3,9 +3,9 @@ const Organization = require("../../model/Organization");
 
 exports.createOrganization = async (req, res) => {
   try {
-    const { name, description, metadata } = req.body;
+    const { code, name, description, metadata } = req.body;
 
-    const org = new Organization({ name, description, metadata });
+    const org = new Organization({ name, description, metadata, code });
     await org.save();
 
     return res.status(201).json({

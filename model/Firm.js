@@ -9,6 +9,11 @@ const firmSchema = new mongoose.Schema(
     unique: true,
     default: uuidv4,
   },
+  code: {
+   type: String,
+   required: true,
+   unique: true
+ }, 
   name: {
     type: String,
     required: true,
@@ -52,28 +57,23 @@ const firmSchema = new mongoose.Schema(
     type: String,
     default: "",
   },
-  orgId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Organization",
-    required: true,
-  },
+  orgName: {
+   type: String,
+   required: true, // or false if optional
+ },
   // You can assign one or multiple hierarchy types
   flowTypes: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ActorTypesHierarchy",
-    },
-  ],
+   {
+     type: String,
+     trim: true,
+     required: true,
+   },
+ ], 
   branding: {
     logoUrl: String,
     primaryColor: String,
     secondaryColor: String,
-  },
-  config: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    default: undefined,
-  },
+  },           
 },
 {
   timestamps: true,
