@@ -536,14 +536,14 @@ exports.getSubordinatesForUser = async (req, res) => {
         },
       },
     ]);
-    console.log("mtdSales: ", mtdSales);
-    console.log("lmtdSales: ", lmtdSales);
+    // console.log("mtdSales: ", mtdSales);
+    // console.log("lmtdSales: ", lmtdSales);
 
     const mtdMap = Object.fromEntries(mtdSales.map((e) => [e._id, e.total]));
     const lmtdMap = Object.fromEntries(lmtdSales.map((e) => [e._id, e.total]));
 
-    console.log("mtdMap: ", mtdMap);
-    console.log("lmtdMap: ", lmtdMap);
+    // console.log("mtdMap: ", mtdMap);
+    // console.log("lmtdMap: ", lmtdMap);
 
     const calculateGrowth = (current, last) =>
       last !== 0 ? ((current - last) / last) * 100 : 0;
@@ -569,18 +569,18 @@ exports.getSubordinatesForUser = async (req, res) => {
 
     const profileDealers = await User.find(
       { role: "dealer" },
-      { code: 1, taluka: 1, district: 1, zone: 1, labels: 1 }
+      { code: 1, taluka: 1, district: 1, town: 1, labels: 1 }
     );
 
     const fieldGroups = {
       taluka: {},
       district: {},
-      zone: {},
+      town: {},
       dealer_category: {},
     };
 
     profileDealers.forEach((dealer) => {
-      for (const key of ["taluka", "district", "zone"]) {
+      for (const key of ["taluka", "district", "town"]) {
         const val = dealer[key];
         if (val)
           (fieldGroups[key][val] = fieldGroups[key][val] || []).push(
@@ -620,7 +620,7 @@ exports.getSubordinatesForUser = async (req, res) => {
         ...subordinatePositions,
         "taluka",
         "district",
-        "zone",
+        "town",
         "dealer_category",
       ]),
     ];

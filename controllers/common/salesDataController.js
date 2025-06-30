@@ -684,7 +684,29 @@ exports.getSalesReportForUser = async (req, res) => {
         position: "dealer"
       }).distinct("code");
 
-      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
+      const dealerCategories = await User.find(
+        { role: "dealer", labels: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+      
+      const dealerTown = await User.find(
+        { role: "dealer", town: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+
+      const dealerDistrict = await User.find(
+        { role: "dealer", district: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+      
+      const dealerTaluka = await User.find(
+        { role: "dealer", taluka: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+
+      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers, ...dealerCategories, ...dealerTown, ...dealerDistrict, ...dealerTaluka])];
+
+      // dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
       } else {
         if (["admin", "mdd", "super_admin"].includes(role)) {
           const hierarchyEntries = await HierarchyEntries.find({
@@ -1141,9 +1163,24 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
       }
 
-      // Step 2: Handle dealer_category (labels) from User collection
+      // Step 2: Handle dealer_category (labels) from User collection, town, district, and taluka 
       const dealerCategories = await User.find(
         { role: "dealer", labels: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+      
+      const dealerTown = await User.find(
+        { role: "dealer", town: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+
+      const dealerDistrict = await User.find(
+        { role: "dealer", district: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+      
+      const dealerTaluka = await User.find(
+        { role: "dealer", taluka: { $in: subordinate_codes } },
         { code: 1 }
       ).distinct("code");
 
@@ -1168,7 +1205,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
       }).distinct("code");
 
       // Step 6: Combine and deduplicate dealer codes
-      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers, ...dealerCategories])];
+      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers, ...dealerCategories, ...dealerTown, ...dealerDistrict, ...dealerTaluka])];
     } else {
       // No subordinates selected
       if (["admin", "super_admin"].includes(role)) {
@@ -1416,6 +1453,8 @@ exports.getSalesReportProductWise = async (req, res) => {
     let { start_date, end_date, filter_type, segment, subordinate_codes } = req.body;
     filter_type = filter_type || "value";
 
+    console.log("table ma sa: ", subordinate_codes)
+
     if (!start_date || !end_date || !code || !segment) {
       return res.status(400).json({ success: false, message: "Start date, end date, code, and segment are required." });
     }
@@ -1463,7 +1502,29 @@ exports.getSalesReportProductWise = async (req, res) => {
         position: "dealer"
       }).distinct("code");
 
-      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
+      const dealerCategories = await User.find(
+        { role: "dealer", labels: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+      
+      const dealerTown = await User.find(
+        { role: "dealer", town: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+
+      const dealerDistrict = await User.find(
+        { role: "dealer", district: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+      
+      const dealerTaluka = await User.find(
+        { role: "dealer", taluka: { $in: subordinate_codes } },
+        { code: 1 }
+      ).distinct("code");
+
+      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers, ...dealerCategories, ...dealerTown, ...dealerDistrict, ...dealerTaluka])];
+
+      // dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers])];
     } else {
       if (["admin", "mdd", "super_admin"].includes(role)) {
         const hierarchyEntries = await HierarchyEntries.find({
