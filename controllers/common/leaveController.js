@@ -4,6 +4,12 @@ const moment = require("moment-timezone");
 const User = require("../../model/User"); // Assuming you have an Employee model
 const Attendance = require("../../model/Attendance"); // Assuming you have an Attendance model
 const { formatDate } = require("../../helpers/attendanceHelper");
+// 🔁 Utility function to convert UTC → IST date only
+function getISTDateOnly(utcDate) {
+ const istOffset = 5.5 * 60 * 60 * 1000;
+ const ist = new Date(utcDate.getTime() + istOffset);
+ return new Date(ist.getFullYear(), ist.getMonth(), ist.getDate());
+}
 
 exports.requestLeave = async (req, res) => {
   try {
@@ -415,3 +421,57 @@ exports.editLeaveApplication = async (req, res) => {
     });
   }
 };
+
+exports.cancelLeaveForUser = async (req, res) => {
+ try {
+   const userCode = req.user.code;
+   const { leaveId } = req.params;
+   const { cancelReason } = req.body;
+
+   if (!leaveId) return res.status(400).json({ message: "Leave ID is required" });
+   if (!cancelReason || cancelReason.trim() === "")
+     return res.status(400).json({ message: "Cancel reason is required" });
+
+   const leave = await Leave.findOne({ _id: leaveId, code: userCode });
+   if (!leave) return res.status(404).json({ message: "Leave not found or unauthorized" });
+   if (leave.status === "cancelled")
+     return res.status(400).json({ message: "Leave is already cancelled" });
+   if (leave.status !== "pending")
+     return res.status(400).json({ message: "Only pending leave can be cancelled" });
+
+   // ✅ Get today's date in IST
+   const nowUTC = new Date();
+   const nowIST = new Date(nowUTC.getTime() + 5.5 * 60 * 60 * 1000);
+   const todayIST = new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate());
+
+   // ✅ Get leave date (fromDate) in IST
+   const leaveISTDate = getISTDateOnly(new Date(leave.fromDate));
+
+   // ✅ Compare IST dates
+   if (leaveISTDate.getTime() !== todayIST.getTime()) {
+     return res.status(400).json({
+       message: "Only today's leave can be cancelled. Past/future leave not allowed.",
+     });
+   }
+
+   // ✅ Check cutoff: 3 PM IST = 9:30 AM UTC
+   const cutoffUTC = new Date(Date.UTC(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate(), 9, 30));
+   if (nowUTC > cutoffUTC) {
+     return res.status(400).json({ message: "Leave can be cancelled only before 3 PM IST." });
+   }
+
+   // ✅ Perform cancellation
+   leave.status = "cancelled";
+   leave.cancelReason = cancelReason;
+   leave.cancelledAt = nowUTC;
+   leave.updatedAt = nowUTC;
+   await leave.save();
+
+   res.status(200).json({ message: "Leave cancelled successfully", leave });
+
+ } catch (error) {
+   console.error("Cancel Leave Error:", error);
+   res.status(500).json({ message: "Server error while cancelling leave" });
+ }
+};
+
