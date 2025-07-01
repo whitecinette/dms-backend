@@ -1,174 +1,177 @@
 const Leave = require("../../model/Leave");
 const Notification = require("../../model/Notification");
-const moment = require('moment-timezone');
+const moment = require("moment-timezone");
 const User = require("../../model/User"); // Assuming you have an Employee model
 const Attendance = require("../../model/Attendance"); // Assuming you have an Attendance model
 const { formatDate } = require("../../helpers/attendanceHelper");
 
 exports.requestLeave = async (req, res) => {
- try {
-   const { code } = req.user;
-   const {
-     leaveType,
-     fromDate,
-     toDate,
-     reason,
-     attachmentUrl,
-     isHalfDay = false,
-     halfDaySession,
-   } = req.body;
+  try {
+    const { code } = req.user;
+    const {
+      leaveType,
+      fromDate,
+      toDate,
+      reason,
+      attachmentUrl,
+      isHalfDay = false,
+      halfDaySession,
+    } = req.body;
 
-   // Basic validation
-   if (!leaveType || !fromDate || !toDate || !reason) {
-     return res.status(400).json({
-       success: false,
-       message: "All fields are required",
-     });
-   }
-
-   // Convert dates to IST midnight (5:30 AM UTC)
-   const from = new Date(new Date(fromDate).setHours(5, 30, 0, 0));
-   const to = new Date(new Date(toDate).setHours(5, 30, 0, 0));
-
-   if (from > to) {
-     return res.status(400).json({
-       success: false,
-       message: "From Date must be before To Date",
-     });
-   }
-
-   const nowIST = moment().tz("Asia/Kolkata");
-   const leaveStartDay = moment(from).tz("Asia/Kolkata");
-   const isLeaveForToday = nowIST.format('YYYY-MM-DD') === leaveStartDay.format('YYYY-MM-DD');
-
-   // ❌ Restrict full-day leave for today after 3 PM
-   if (!isHalfDay && isLeaveForToday && nowIST.hour() >= 15) {
-     return res.status(400).json({
-       success: false,
-       message:
-         "You cannot request a full-day leave for today after 3:00 PM. You can apply for a half-day leave instead.",
-     });
-   }
-
-   // ✅ Check attendance for today if applying leave for today
-   if (isLeaveForToday) {
-     const startOfToday = nowIST.clone().startOf('day').toDate();
-     const endOfToday = nowIST.clone().endOf('day').toDate();
-
-     const attendanceRecord = await Attendance.findOne({
-       code,
-       date: { $gte: startOfToday, $lte: endOfToday },
-       status: "Present", // modify if you use a different present status
-     });
-
-     if (attendanceRecord) {
+    // Basic validation
+    if (!leaveType || !fromDate || !toDate || !reason) {
       return res.status(400).json({
         success: false,
-        message: "You have already marked attendance today. Leave request is not allowed.",
+        message: "All fields are required",
       });
     }
-    
-   }
 
-   // ✅ Half-day logic
-   if (isHalfDay) {
-     if (from.toDateString() !== to.toDateString()) {
-       return res.status(400).json({
-         success: false,
-         message: "Half-day leave must have the same From and To date",
-       });
-     }
+    // Convert dates to IST midnight (5:30 AM UTC)
+    const from = new Date(new Date(fromDate).setHours(5, 30, 0, 0));
+    const to = new Date(new Date(toDate).setHours(5, 30, 0, 0));
 
-     if (!['morning', 'afternoon'].includes(halfDaySession)) {
-       return res.status(400).json({
-         success: false,
-         message: "halfDaySession must be 'morning' or 'afternoon' for half-day leave",
-       });
-     }
+    if (from > to) {
+      return res.status(400).json({
+        success: false,
+        message: "From Date must be before To Date",
+      });
+    }
 
-     // ⏰ Validate timing for today's half-day
-     const currentHour = nowIST.hour();
-     if (isLeaveForToday) {
-       if (
-         (halfDaySession === 'morning' && currentHour >= 12) ||
-         (halfDaySession === 'afternoon' && currentHour >= 17)
-       ) {
-         return res.status(400).json({
-           success: false,
-           message: `You cannot apply for ${halfDaySession} session after ${
-             halfDaySession === 'morning' ? '12:00 PM' : '5:00 PM'
-           }.`,
-         });
-       }
-     }
-   }
+    const nowIST = moment().tz("Asia/Kolkata");
+    const leaveStartDay = moment(from).tz("Asia/Kolkata");
+    const isLeaveForToday =
+      nowIST.format("YYYY-MM-DD") === leaveStartDay.format("YYYY-MM-DD");
 
-   // 🔁 Check for overlapping leave
-   const existingLeave = await Leave.findOne({
-     code,
-     $or: [
-       {
-         fromDate: { $lte: to },
-         toDate: { $gte: from },
-       },
-     ],
-     status: { $in: ["approved", "pending"] },
-   });
+    // ❌ Restrict full-day leave for today after 3 PM
+    if (!isHalfDay && isLeaveForToday && nowIST.hour() >= 15) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "You cannot request a full-day leave for today after 3:00 PM. You can apply for a half-day leave instead.",
+      });
+    }
 
-   if (existingLeave) {
-     return res.status(409).json({
-       success: false,
-       message: `Leave already requested between ${existingLeave.fromDate.toDateString()} and ${existingLeave.toDate.toDateString()}`,
-     });
-   }
+    // ✅ Check attendance for today if applying leave for today
+    if (isLeaveForToday) {
+      const startOfToday = nowIST.clone().startOf("day").toDate();
+      const endOfToday = nowIST.clone().endOf("day").toDate();
 
-   // 🧮 Calculate total leave days
-   const oneDay = 1000 * 60 * 60 * 24;
-   const totalDays = isHalfDay ? 0.5 : Math.ceil((to - from) / oneDay) + 1;
+      const attendanceRecord = await Attendance.findOne({
+        code,
+        date: { $gte: startOfToday, $lte: endOfToday },
+        status: "Present", // modify if you use a different present status
+      });
 
-   // 📌 Save leave
-   const newLeave = new Leave({
-     code,
-     leaveType,
-     fromDate: from,
-     toDate: to,
-     reason,
-     totalDays,
-     isHalfDay,
-     halfDaySession: isHalfDay ? halfDaySession : undefined,
-     status: "pending",
-     attachmentUrl,
-     appliedAt: nowIST.toDate(),
-   });
+      if (attendanceRecord) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You have already marked attendance today. Leave request is not allowed.",
+        });
+      }
+    }
 
-   const savedLeave = await newLeave.save();
+    // ✅ Half-day logic
+    if (isHalfDay) {
+      if (from.toDateString() !== to.toDateString()) {
+        return res.status(400).json({
+          success: false,
+          message: "Half-day leave must have the same From and To date",
+        });
+      }
 
-   // 🔔 Optional notification
-   await Notification.create({
-     title: "Leave Request",
-     message: `Employee ${code} requested ${isHalfDay ? 'half-day' : 'leave'} from ${formatDate(from)} to ${formatDate(to)}`,
-     filters: [
+      if (!["morning", "afternoon"].includes(halfDaySession)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "halfDaySession must be 'morning' or 'afternoon' for half-day leave",
+        });
+      }
+
+      // ⏰ Validate timing for today's half-day
+      const currentHour = nowIST.hour();
+      if (isLeaveForToday) {
+        if (
+          (halfDaySession === "morning" && currentHour >= 12) ||
+          (halfDaySession === "afternoon" && currentHour >= 17)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: `You cannot apply for ${halfDaySession} session after ${
+              halfDaySession === "morning" ? "12:00 PM" : "5:00 PM"
+            }.`,
+          });
+        }
+      }
+    }
+
+    // 🔁 Check for overlapping leave
+    const existingLeave = await Leave.findOne({
+      code,
+      $or: [
+        {
+          fromDate: { $lte: to },
+          toDate: { $gte: from },
+        },
+      ],
+      status: { $in: ["approved", "pending"] },
+    });
+
+    if (existingLeave) {
+      return res.status(409).json({
+        success: false,
+        message: `Leave already requested between ${existingLeave.fromDate.toDateString()} and ${existingLeave.toDate.toDateString()}`,
+      });
+    }
+
+    // 🧮 Calculate total leave days
+    const oneDay = 1000 * 60 * 60 * 24;
+    const totalDays = isHalfDay ? 0.5 : Math.ceil((to - from) / oneDay) + 1;
+
+    // 📌 Save leave
+    const newLeave = new Leave({
+      code,
+      leaveType,
+      fromDate: from,
+      toDate: to,
+      reason,
+      totalDays,
+      isHalfDay,
+      halfDaySession: isHalfDay ? halfDaySession : undefined,
+      status: "pending",
+      attachmentUrl,
+      appliedAt: nowIST.toDate(),
+    });
+
+    const savedLeave = await newLeave.save();
+
+    // 🔔 Optional notification
+    await Notification.create({
+      title: "Leave Request",
+      message: `Employee ${code} requested ${
+        isHalfDay ? "half-day" : "leave"
+      } from ${formatDate(from)} to ${formatDate(to)}`,
+      filters: [
         code,
         fromDate ? new Date(fromDate).toISOString().split("T")[0] : "",
         toDate ? new Date(toDate).toISOString().split("T")[0] : "",
       ],
-     targetRole: ["admin", "super_admin"],
-   });
+      targetRole: ["admin", "super_admin"],
+    });
 
-   return res.status(200).json({
-     success: true,
-     message: "Leave requested successfully",
-     leave: savedLeave,
-   });
- } catch (error) {
-   console.error("Error requesting leave:", error);
-   return res.status(500).json({
-     success: false,
-     message: "Internal Server Error",
-   });
- }
+    return res.status(200).json({
+      success: true,
+      message: "Leave requested successfully",
+      leave: savedLeave,
+    });
+  } catch (error) {
+    console.error("Error requesting leave:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
 };
-
 
 exports.getRequestLeaveForEmp = async (req, res) => {
   try {
@@ -243,8 +246,13 @@ exports.getLeaveApplications = async (req, res) => {
       query.leaveType = type;
     }
     if (fromDate && toDate) {
-      query.fromDate = { $gte: new Date(fromDate), $lte: new Date(toDate) };
-      query.toDate = { $gte: new Date(fromDate), $lte: new Date(toDate) };
+      const startDate = new Date(fromDate);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(toDate);
+      endDate.setHours(23, 59, 59, 999);
+
+      query.fromDate = { $gte: startDate, $lte: endDate };
+      query.toDate = { $gte: startDate, $lte: endDate };
     }
 
     // Get total count for pagination

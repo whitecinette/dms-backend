@@ -308,12 +308,46 @@ exports.getExtractionStatus = async (req, res) => {
         mdd = []
       } = req.body;
   
-      const start = startDate
-        ? new Date(startDate)
-        : moment().startOf("month").toDate();
-      const end = endDate
-        ? new Date(endDate)
-        : moment().endOf("month").toDate();
+      // const start = startDate
+      //   ? new Date(startDate)
+      //   : moment().startOf("month").toDate();
+      // const end = endDate
+      //   ? new Date(endDate)
+      //   : moment().endOf("month").toDate();
+
+          // Helper: Parse a date string like "2025-07-01" as IST and return UTC Date
+        function parseISTDateTime(dateStr, isEndOfDay = false) {
+          const [year, month, day] = dateStr.split('T')[0].split('-').map(Number);
+          const timeParts = isEndOfDay ? [23, 59, 59, 999] : [0, 0, 0, 0];
+
+          // Create IST time as if it's local (no time zone offset yet)
+          const istDate = new Date(Date.UTC(year, month - 1, day, ...timeParts));
+          const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+          // Convert IST to UTC by subtracting offset
+          return new Date(istDate.getTime() - IST_OFFSET_MS);
+        }
+
+        // Parse start and end dates properly
+        let start, end;
+        if (startDate) {
+          start = parseISTDateTime(startDate, false); // Start of day IST
+        } else {
+          const now = new Date();
+          const y = now.getUTCFullYear();
+          const m = now.getUTCMonth() + 1;
+          start = parseISTDateTime(`${y}-${String(m).padStart(2, '0')}-01`, false);
+        }
+
+        if (endDate) {
+          end = parseISTDateTime(endDate, true); // End of day IST
+        } else {
+          const now = new Date();
+          const y = now.getUTCFullYear();
+          const m = now.getUTCMonth() + 1;
+          const lastDay = new Date(y, m, 0).getDate(); // last day of month
+          end = parseISTDateTime(`${y}-${String(m).padStart(2, '0')}-${lastDay}`, true);
+        }
   
       // Step 1: Get relevant hierarchy entries
       const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
@@ -875,9 +909,41 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     const { startDate, endDate, segment, brand, metric = 'volume' } = req.query;
 
     // Step 1: Build match dates
-    const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const end = endDate ? new Date(endDate) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
+    // const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    // const end = endDate ? new Date(endDate) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
+   // Helper: Parse a date string like "2025-07-01" as IST and return UTC Date
+    function parseISTDateTime(dateStr, isEndOfDay = false) {
+      const [year, month, day] = dateStr.split('T')[0].split('-').map(Number);
+      const timeParts = isEndOfDay ? [23, 59, 59, 999] : [0, 0, 0, 0];
 
+      // Create IST time as if it's local (no time zone offset yet)
+      const istDate = new Date(Date.UTC(year, month - 1, day, ...timeParts));
+      const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+      // Convert IST to UTC by subtracting offset
+      return new Date(istDate.getTime() - IST_OFFSET_MS);
+    }
+
+    // Parse start and end dates properly
+    let start, end;
+    if (startDate) {
+      start = parseISTDateTime(startDate, false); // Start of day IST
+    } else {
+      const now = new Date();
+      const y = now.getUTCFullYear();
+      const m = now.getUTCMonth() + 1;
+      start = parseISTDateTime(`${y}-${String(m).padStart(2, '0')}-01`, false);
+    }
+
+    if (endDate) {
+      end = parseISTDateTime(endDate, true); // End of day IST
+    } else {
+      const now = new Date();
+      const y = now.getUTCFullYear();
+      const m = now.getUTCMonth() + 1;
+      const lastDay = new Date(y, m, 0).getDate(); // last day of month
+      end = parseISTDateTime(`${y}-${String(m).padStart(2, '0')}-${lastDay}`, true);
+    }
     // Step 2: Get all matching dealers from hierarchy
     const hierarchyFilters = {};
     hierarchyLevels.forEach(level => {
@@ -885,6 +951,8 @@ exports.getExtractionReportForAdmin = async (req, res) => {
         hierarchyFilters[level] = req.query[level];
       }
     });
+
+    // console.log("hierarchy: ", hierarchyFilters)
 
     const matchingDealersSet = new Set();
     if (Object.keys(hierarchyFilters).length > 0) {
@@ -903,7 +971,10 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     const matchStage = {
       createdAt: { $gte: start, $lte: end }
     };
-    if (segment) matchStage.segment = segment;
+    // if (segment) matchStage.segment = segment;
+    if(segment){
+    matchStage.segment = segment.replace(/[<>\+kK\s]/g, '');
+    }
     if (brand) matchStage.brand = brand;
     if (dealerFilter.length > 0) {
       matchStage.dealer = { $in: dealerFilter };
@@ -1025,7 +1096,8 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 
     return res.status(200).json({
       metricUsed: metric,
-      data: response
+      data: response,
+      segment: priceClassMap,
     });
 
   } catch (error) {
