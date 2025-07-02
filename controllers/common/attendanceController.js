@@ -263,9 +263,9 @@ exports.punchIn = async (req, res) => {
       {
         $match: {
           code: { $in: allCodes },
-          latitude: { $type: "decimal" },
-          longitude: { $type: "decimal" },
-        },
+          latitude: { $type: ["double", "decimal"] },
+          longitude: { $type: ["double", "decimal"] },
+        }
       },
       {
         $project: { code: 1, name: 1, position: 1, latitude: 1, longitude: 1 },
