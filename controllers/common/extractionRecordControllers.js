@@ -985,8 +985,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       8: "100k+",
     };
 
-    // Step 4: Aggregation for Samsung from Sales挪
-
+    // Step 4: Aggregation for Samsung from SalesData
     const samsungMatchStage = {
       date: { $gte: start, $lte: end },
       sales_type: "Sell Out",
@@ -1275,41 +1274,38 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       return row;
     });
 
-    console.log("Final Response:", JSON.stringify(response, null, 2));
+    console.log("Final Response (before total row):", JSON.stringify(response, null, 2));
 
-    // Step 8: Grand Total Row
-    const grandTotalRow = { "Price Class": "Total", "Rank of Samsung": null };
+    // Step 8: Add Total Row
+    const totalRow = { "Price Class": "Total", "Rank of Samsung": null };
     brands.concat("Others").forEach((b) => {
-      grandTotalRow[b] = response.reduce(
+      totalRow[b] = response.reduce(
         (sum, row) => sum + (parseFloat(row[b]) || 0),
         0
       );
     });
-    grandTotalRow["Total"] = brands
+    totalRow["Total"] = brands
       .concat("Others")
-      .reduce((sum, b) => sum + grandTotalRow[b], 0);
+      .reduce((sum, b) => sum + totalRow[b], 0);
 
-    // Calculate Samsung rank for grand total
-    const sortedTotalBrands = Object.entries(grandTotalRow)
+    // Calculate Samsung rank for total row
+    const sortedTotalBrands = Object.entries(totalRow)
       .filter(([key]) => brands.includes(key) || key === "Others")
       .sort(([, a], [, b]) => b - a);
-    const samsungTotalIndex = sortedTotalBrands.findIndex(
-      ([b]) => b === "Samsung"
-    );
-    grandTotalRow["Rank of Samsung"] =
-      samsungTotalIndex >= 0 ? samsungTotalIndex + 1 : null;
+    const samsungTotalIndex = sortedTotalBrands.findIndex(([b]) => b === "Samsung");
+    totalRow["Rank of Samsung"] = samsungTotalIndex >= 0 ? samsungTotalIndex + 1 : null;
 
-    if (view === "share" && grandTotalRow["Total"] > 0) {
+    if (view === "share" && totalRow["Total"] > 0) {
       brands.concat("Others").forEach((b) => {
-        grandTotalRow[b] = (
-          (grandTotalRow[b] / grandTotalRow["Total"]) *
-          100
-        ).toFixed(2);
+        totalRow[b] = ((totalRow[b] / totalRow["Total"]) * 100).toFixed(2) + "%";
       });
-      grandTotalRow["Total"] = "100.00";
+      totalRow["Total"] = "100.00";
     }
 
-    console.log("Grand Total Row:", JSON.stringify(grandTotalRow, null, 2));
+    response.push(totalRow);
+
+    console.log("Total Row:", JSON.stringify(totalRow, null, 2));
+    console.log("Final Response (with total row):", JSON.stringify(response, null, 2));
 
     return res.status(200).json({
       metricUsed: metric,
