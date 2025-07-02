@@ -10,6 +10,7 @@ const fsPromises = require("fs/promises");
 const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 const MetaData = require("../../model/MetaData");
+const { DateTime } = require("luxon");
 
 // punch in
 // exports.punchIn = async (req, res) => {
@@ -265,7 +266,7 @@ exports.punchIn = async (req, res) => {
           code: { $in: allCodes },
           latitude: { $type: ["double", "decimal"] },
           longitude: { $type: ["double", "decimal"] },
-        }
+        },
       },
       {
         $project: { code: 1, name: 1, position: 1, latitude: 1, longitude: 1 },
@@ -1239,314 +1240,320 @@ exports.getAttendanceByDate = async (req, res) => {
 //   }
 // };
 
-
-
-
 // nameeraaaa
 exports.getLatestAttendance = async (req, res) => {
- try {
-   const { role } = req.user;
-   const {
-     firmCodes,
-     date,
-     month,
-     year = new Date().getFullYear(),
-     page = 1,
-     limit = 10,
-     search = "",
-     status = "",
-     firms = [],
-     tag,
-   } = req.query;
+  try {
+    const { role } = req.user;
+    const {
+      firmCodes,
+      date,
+      month,
+      year = new Date().getFullYear(),
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      firms = [],
+      tag,
+    } = req.query;
 
-   // 1️⃣ Validate firmCodes if provided
-   let userCodes = [];
-   let totalEligibleUsers = 0;
-   if (firmCodes) {
-     if (!firmCodes) {
-       return res
-         .status(400)
-         .json({ message: "firmCodes are required in query when provided." });
-     }
+    // 1️⃣ Validate firmCodes if provided
+    let userCodes = [];
+    let totalEligibleUsers = 0;
+    if (firmCodes) {
+      if (!firmCodes) {
+        return res
+          .status(400)
+          .json({ message: "firmCodes are required in query when provided." });
+      }
 
-     const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
-     if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
-       return res
-         .status(400)
-         .json({ message: "firmCodes must be a comma-separated list." });
-     }
+      const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
+      if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "firmCodes must be a comma-separated list." });
+      }
 
-     // 2️⃣ Find metadata entries where attendance is true
-     const metaDataUsers = await MetaData.find({
-       firm_code: { $in: firmCodesArray },
-       attendance: true,
-     });
+      // 2️⃣ Find metadata entries where attendance is true
+      const metaDataUsers = await MetaData.find({
+        firm_code: { $in: firmCodesArray },
+        attendance: true,
+      });
 
-     userCodes = metaDataUsers.map((meta) => meta.code);
-     totalEligibleUsers = userCodes.length;
+      userCodes = metaDataUsers.map((meta) => meta.code);
+      totalEligibleUsers = userCodes.length;
 
-     if (totalEligibleUsers === 0) {
-       return res.status(200).json({
-         message: "No users with attendance:true found.",
-         totalEligibleUsers,
-         currentPage: Number(page),
-         totalRecords: 0,
-         totalPages: 0,
-         data: [],
-       });
-     }
-   }
-
-   // 3️⃣ Handle firm hierarchy and role-based filtering
-   let firmPositions = [];
-   if (firms.length) {
-     const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
-     if (!firmData.length) {
-       return res.status(400).json({ message: "Invalid firm IDs." });
-     }
-
-     firmPositions = firmData.reduce((positions, firm) => {
-       if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
-         positions.push(...firm.hierarchy);
-       }
-       return positions;
-     }, []);
-   }
-
-   let employeeFilter = { status: "active" };
-   if (role === "super_admin" || role === "admin") {
-     employeeFilter.role = { $in: ["admin", "employee", "hr"] };
-   } else if (role === "hr") {
-     employeeFilter.role = { $in: ["employee"] };
-   } else {
-     return res.status(403).json({ message: "Unauthorized" });
-   }
-
-   if (firmPositions.length) {
-     employeeFilter.position = { $in: firmPositions };
-   }
-   if (tag) {
-     const tagArray = Array.isArray(tag) ? tag : [tag];
-     employeeFilter.tags = { $in: tagArray };
-   }
-
-   // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
-   if (firmCodes) {
-     employeeFilter.code = { $in: userCodes };
-   }
-
-   // 5️⃣ Fetch employees
-   const employees = await User.find(employeeFilter, "code name position").lean();
-   // console.log(`Total active employees found: ${employees.length}`);
-   // Log codes present in MetaData but not in active employees
-   if (firmCodes) {
-    const employeeCodes = employees.map((emp) => emp.code.trim().toLowerCase());
-    const missingCodes = userCodes.filter(
-      (code) => !employeeCodes.includes(code.trim().toLowerCase())
-    );
-    if (missingCodes.length > 0) {
-      console.log(
-        `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(", ")}`
-      );
-    } else {
-      console.log("All MetaData codes found in active employees.");
+      if (totalEligibleUsers === 0) {
+        return res.status(200).json({
+          message: "No users with attendance:true found.",
+          totalEligibleUsers,
+          currentPage: Number(page),
+          totalRecords: 0,
+          totalPages: 0,
+          data: [],
+        });
+      }
     }
+
+    // 3️⃣ Handle firm hierarchy and role-based filtering
+    let firmPositions = [];
+    if (firms.length) {
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      if (!firmData.length) {
+        return res.status(400).json({ message: "Invalid firm IDs." });
+      }
+
+      firmPositions = firmData.reduce((positions, firm) => {
+        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+          positions.push(...firm.hierarchy);
+        }
+        return positions;
+      }, []);
+    }
+
+    let employeeFilter = { status: "active" };
+    if (role === "super_admin" || role === "admin") {
+      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+    } else if (role === "hr") {
+      employeeFilter.role = { $in: ["employee"] };
+    } else {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    if (firmPositions.length) {
+      employeeFilter.position = { $in: firmPositions };
+    }
+    if (tag) {
+      const tagArray = Array.isArray(tag) ? tag : [tag];
+      employeeFilter.tags = { $in: tagArray };
+    }
+
+    // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
+    if (firmCodes) {
+      employeeFilter.code = { $in: userCodes };
+    }
+
+    // 5️⃣ Fetch employees
+    const employees = await User.find(
+      employeeFilter,
+      "code name position"
+    ).lean();
+    // console.log(`Total active employees found: ${employees.length}`);
+    // Log codes present in MetaData but not in active employees
+    if (firmCodes) {
+      const employeeCodes = employees.map((emp) =>
+        emp.code.trim().toLowerCase()
+      );
+      const missingCodes = userCodes.filter(
+        (code) => !employeeCodes.includes(code.trim().toLowerCase())
+      );
+      if (missingCodes.length > 0) {
+        console.log(
+          `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(
+            ", "
+          )}`
+        );
+      } else {
+        console.log("All MetaData codes found in active employees.");
+      }
+    }
+    if (!employees.length) {
+      return res.status(200).json({
+        message: "No employees found",
+        totalEligibleUsers,
+        currentPage: Number(page),
+        totalRecords: 0,
+        totalPages: 0,
+        data: [],
+      });
+    }
+
+    // 6️⃣ Create employee map
+    const employeeMap = employees.reduce((acc, emp) => {
+      acc[emp.code.trim().toLowerCase()] = {
+        name: emp.name || emp.code,
+        position: emp.position || "Unknown",
+      };
+      return acc;
+    }, {});
+
+    // 7️⃣ Apply search filter
+    let filteredCodes = employees
+      .map((emp) => emp.code)
+      .filter((code) => {
+        const normalizedCode = code.trim().toLowerCase();
+        const name = employeeMap[normalizedCode]?.name?.toLowerCase() || "";
+        const regex = new RegExp(search, "i");
+        return regex.test(normalizedCode) || regex.test(name);
+      });
+
+    if (firmCodes && filteredCodes.length === 0) {
+      return res.status(200).json({
+        message: "No users match the search criteria.",
+        totalEligibleUsers,
+        currentPage: Number(page),
+        totalRecords: 0,
+        totalPages: 0,
+        data: [],
+      });
+    }
+
+    // 8️⃣ Build date filter
+    let dateFilter = {};
+    if (date) {
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      dateFilter = { $gte: startOfDay, $lte: endOfDay };
+    } else if (month && year) {
+      const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+      const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+      dateFilter = { $gte: start, $lte: end };
+    }
+
+    // 9️⃣ Fetch attendance records
+    const rawRecords = await Attendance.find({
+      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+      code: { $in: filteredCodes },
+    })
+      .sort({ date: 1, punchIn: -1 })
+      .lean();
+
+    // 10️⃣ Deduplicate records by code and date, prioritizing higher status
+    const attendanceMap = new Map();
+    const statusPriority = {
+      Present: 6,
+      Pending: 5,
+      "Half Day": 4,
+      Leave: 3,
+      Absent: 1,
+    };
+
+    for (const record of rawRecords) {
+      const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
+        .toISOString()
+        .slice(0, 10)}`;
+      if (!attendanceMap.has(key)) {
+        attendanceMap.set(key, record);
+      } else {
+        const existing = attendanceMap.get(key);
+        if (
+          (statusPriority[record.status] || 0) >
+          (statusPriority[existing.status] || 0)
+        ) {
+          attendanceMap.set(key, record);
+        }
+      }
+    }
+
+    let attendanceRecords = Array.from(attendanceMap.values());
+
+    // 11️⃣ Handle absentees for single date
+    if (date) {
+      const presentCodes = new Set(
+        attendanceRecords.map((r) => r.code.trim().toLowerCase())
+      );
+      filteredCodes.forEach((code) => {
+        const normalizedCode = code.trim().toLowerCase();
+        if (!presentCodes.has(normalizedCode)) {
+          attendanceRecords.push({
+            code,
+            name: employeeMap[normalizedCode]?.name || code,
+            position: employeeMap[normalizedCode]?.position || "Unknown",
+            status: "Absent",
+            date: new Date(date),
+          });
+        }
+      });
+    }
+
+    // 12️⃣ Handle absentees for month view
+    if (!date && month && year) {
+      const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+      const allDays = [];
+      let d = new Date(startDate);
+      while (d <= endDate) {
+        allDays.push(new Date(d));
+        d.setDate(d.getDate() + 1);
+      }
+
+      const dateMap = new Map(
+        attendanceRecords.map((record) => [
+          `${record.code.trim().toLowerCase()}-${new Date(record.date)
+            .toISOString()
+            .slice(0, 10)}`,
+          record,
+        ])
+      );
+
+      for (const code of filteredCodes) {
+        const normalizedCode = code.trim().toLowerCase();
+        for (const day of allDays) {
+          const key = `${normalizedCode}-${day.toISOString().slice(0, 10)}`;
+          if (!dateMap.has(key)) {
+            attendanceRecords.push({
+              code,
+              name: employeeMap[normalizedCode]?.name || code,
+              position: employeeMap[normalizedCode]?.position || "Unknown",
+              status: "Absent",
+              date: new Date(day),
+            });
+          }
+        }
+      }
+    }
+
+    // 13️⃣ Attach name and position
+    attendanceRecords = attendanceRecords.map((record) => {
+      const normalizedCode = record.code.trim().toLowerCase();
+      const employee = employeeMap[normalizedCode];
+      return {
+        ...record,
+        name: employee?.name || record.code,
+        position: employee?.position || "Unknown",
+      };
+    });
+
+    // 14️⃣ Apply status filter
+    if (status) {
+      attendanceRecords = attendanceRecords.filter(
+        (rec) => rec.status === status
+      );
+    }
+
+    // 15️⃣ Sort by date ASC and status priority DESC
+    attendanceRecords.sort((a, b) => {
+      const dateA = new Date(a.date).setHours(0, 0, 0, 0);
+      const dateB = new Date(b.date).setHours(0, 0, 0, 0);
+      if (dateA !== dateB) return dateA - dateB;
+      const priorityA = statusPriority[a.status] || 0;
+      const priorityB = statusPriority[b.status] || 0;
+      return priorityB - priorityA;
+    });
+
+    // 16️⃣ Pagination
+    const totalRecords = attendanceRecords.length;
+    const totalPages = Math.ceil(totalRecords / limit);
+    const paginated = attendanceRecords.slice((page - 1) * limit, page * limit);
+
+    // 17️⃣ Return response
+    res.status(200).json({
+      message: "Attendance summary fetched successfully",
+      totalEligibleUsers: firmCodes ? totalEligibleUsers : employees.length,
+      currentPage: Number(page),
+      totalRecords,
+      totalPages,
+      data: paginated,
+    });
+  } catch (error) {
+    console.error("Error fetching attendance summary:", error);
+    res.status(500).json({
+      message: "Error fetching attendance summary",
+      error: error.message,
+    });
   }
-   if (!employees.length) {
-     return res.status(200).json({
-       message: "No employees found",
-       totalEligibleUsers,
-       currentPage: Number(page),
-       totalRecords: 0,
-       totalPages: 0,
-       data: [],
-     });
-   }
-
-   // 6️⃣ Create employee map
-   const employeeMap = employees.reduce((acc, emp) => {
-     acc[emp.code.trim().toLowerCase()] = {
-       name: emp.name || emp.code,
-       position: emp.position || "Unknown",
-     };
-     return acc;
-   }, {});
-
-   // 7️⃣ Apply search filter
-   let filteredCodes = employees.map((emp) => emp.code).filter((code) => {
-     const normalizedCode = code.trim().toLowerCase();
-     const name = employeeMap[normalizedCode]?.name?.toLowerCase() || "";
-     const regex = new RegExp(search, "i");
-     return regex.test(normalizedCode) || regex.test(name);
-   });
-
-   if (firmCodes && filteredCodes.length === 0) {
-     return res.status(200).json({
-       message: "No users match the search criteria.",
-       totalEligibleUsers,
-       currentPage: Number(page),
-       totalRecords: 0,
-       totalPages: 0,
-       data: [],
-     });
-   }
-
-   // 8️⃣ Build date filter
-   let dateFilter = {};
-   if (date) {
-     const startOfDay = new Date(date);
-     startOfDay.setHours(0, 0, 0, 0);
-     const endOfDay = new Date(date);
-     endOfDay.setHours(23, 59, 59, 999);
-     dateFilter = { $gte: startOfDay, $lte: endOfDay };
-   } else if (month && year) {
-     const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-     const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
-     dateFilter = { $gte: start, $lte: end };
-   }
-
-   // 9️⃣ Fetch attendance records
-   const rawRecords = await Attendance.find({
-     ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
-     code: { $in: filteredCodes },
-   })
-     .sort({ date: 1, punchIn: -1 })
-     .lean();
-
-   // 10️⃣ Deduplicate records by code and date, prioritizing higher status
-   const attendanceMap = new Map();
-   const statusPriority = {
-     Present: 6,
-     Pending: 5,
-     "Half Day": 4,
-     Leave: 3,
-     Absent: 1,
-   };
-
-   for (const record of rawRecords) {
-     const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
-       .toISOString()
-       .slice(0, 10)}`;
-     if (!attendanceMap.has(key)) {
-       attendanceMap.set(key, record);
-     } else {
-       const existing = attendanceMap.get(key);
-       if (
-         (statusPriority[record.status] || 0) >
-         (statusPriority[existing.status] || 0)
-       ) {
-         attendanceMap.set(key, record);
-       }
-     }
-   }
-
-   let attendanceRecords = Array.from(attendanceMap.values());
-
-   // 11️⃣ Handle absentees for single date
-   if (date) {
-     const presentCodes = new Set(
-       attendanceRecords.map((r) => r.code.trim().toLowerCase())
-     );
-     filteredCodes.forEach((code) => {
-       const normalizedCode = code.trim().toLowerCase();
-       if (!presentCodes.has(normalizedCode)) {
-         attendanceRecords.push({
-           code,
-           name: employeeMap[normalizedCode]?.name || code,
-           position: employeeMap[normalizedCode]?.position || "Unknown",
-           status: "Absent",
-           date: new Date(date),
-         });
-       }
-     });
-   }
-
-   // 12️⃣ Handle absentees for month view
-   if (!date && month && year) {
-     const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-     const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
-     const allDays = [];
-     let d = new Date(startDate);
-     while (d <= endDate) {
-       allDays.push(new Date(d));
-       d.setDate(d.getDate() + 1);
-     }
-
-     const dateMap = new Map(
-       attendanceRecords.map((record) => [
-         `${record.code.trim().toLowerCase()}-${new Date(record.date)
-           .toISOString()
-           .slice(0, 10)}`,
-         record,
-       ])
-     );
-
-     for (const code of filteredCodes) {
-       const normalizedCode = code.trim().toLowerCase();
-       for (const day of allDays) {
-         const key = `${normalizedCode}-${day.toISOString().slice(0, 10)}`;
-         if (!dateMap.has(key)) {
-           attendanceRecords.push({
-             code,
-             name: employeeMap[normalizedCode]?.name || code,
-             position: employeeMap[normalizedCode]?.position || "Unknown",
-             status: "Absent",
-             date: new Date(day),
-           });
-         }
-       }
-     }
-   }
-
-   // 13️⃣ Attach name and position
-   attendanceRecords = attendanceRecords.map((record) => {
-     const normalizedCode = record.code.trim().toLowerCase();
-     const employee = employeeMap[normalizedCode];
-     return {
-       ...record,
-       name: employee?.name || record.code,
-       position: employee?.position || "Unknown",
-     };
-   });
-
-   // 14️⃣ Apply status filter
-   if (status) {
-     attendanceRecords = attendanceRecords.filter(
-       (rec) => rec.status === status
-     );
-   }
-
-   // 15️⃣ Sort by date ASC and status priority DESC
-   attendanceRecords.sort((a, b) => {
-     const dateA = new Date(a.date).setHours(0, 0, 0, 0);
-     const dateB = new Date(b.date).setHours(0, 0, 0, 0);
-     if (dateA !== dateB) return dateA - dateB;
-     const priorityA = statusPriority[a.status] || 0;
-     const priorityB = statusPriority[b.status] || 0;
-     return priorityB - priorityA;
-   });
-
-   // 16️⃣ Pagination
-   const totalRecords = attendanceRecords.length;
-   const totalPages = Math.ceil(totalRecords / limit);
-   const paginated = attendanceRecords.slice((page - 1) * limit, page * limit);
-
-   // 17️⃣ Return response
-   res.status(200).json({
-     message: "Attendance summary fetched successfully",
-     totalEligibleUsers: firmCodes ? totalEligibleUsers : employees.length,
-     currentPage: Number(page),
-     totalRecords,
-     totalPages,
-     data: paginated,
-   });
- } catch (error) {
-   console.error("Error fetching attendance summary:", error);
-   res.status(500).json({
-     message: "Error fetching attendance summary",
-     error: error.message,
-   });
- }
 };
 exports.editAttendanceByID = async (req, res) => {
   try {
@@ -1886,342 +1893,346 @@ exports.editAttendanceByID = async (req, res) => {
 
 // nameeraaa
 exports.downloadAllAttendance = async (req, res) => {
- try {
-   const { role } = req.user;
-   const {
-     firmCodes,
-     date,
-     month,
-     year = new Date().getFullYear(),
-     search = "",
-     status = "",
-     firms = [],
-     tag,
-   } = req.query;
+  try {
+    const { role } = req.user;
+    const {
+      firmCodes,
+      date,
+      month,
+      year = new Date().getFullYear(),
+      search = "",
+      status = "",
+      firms = [],
+      tag,
+    } = req.query;
 
-   // 1️⃣ Validate firmCodes if provided
-   let userCodes = [];
-   let totalEligibleUsers = 0;
-   if (firmCodes) {
-     if (!firmCodes) {
-       return res
-         .status(400)
-         .json({ message: "firmCodes are required in query when provided." });
-     }
+    // 1️⃣ Validate firmCodes if provided
+    let userCodes = [];
+    let totalEligibleUsers = 0;
+    if (firmCodes) {
+      if (!firmCodes) {
+        return res
+          .status(400)
+          .json({ message: "firmCodes are required in query when provided." });
+      }
 
-     const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
-     if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
-       return res
-         .status(400)
-         .json({ message: "firmCodes must be a comma-separated list." });
-     }
+      const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
+      if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "firmCodes must be a comma-separated list." });
+      }
 
-     // 2️⃣ Find metadata entries where attendance is true
-     const metaDataUsers = await MetaData.find({
-       firm_code: { $in: firmCodesArray },
-       attendance: true,
-     });
+      // 2️⃣ Find metadata entries where attendance is true
+      const metaDataUsers = await MetaData.find({
+        firm_code: { $in: firmCodesArray },
+        attendance: true,
+      });
 
-     userCodes = metaDataUsers.map((meta) => meta.code);
-     totalEligibleUsers = userCodes.length;
+      userCodes = metaDataUsers.map((meta) => meta.code);
+      totalEligibleUsers = userCodes.length;
 
-     if (totalEligibleUsers === 0) {
-       return res.status(200).json({
-         message: "No users with attendance:true found.",
-         data: [],
-       });
-     }
-   }
+      if (totalEligibleUsers === 0) {
+        return res.status(200).json({
+          message: "No users with attendance:true found.",
+          data: [],
+        });
+      }
+    }
 
-   // 3️⃣ Handle firm hierarchy and role-based filtering
-   let firmPositions = [];
-   if (firms.length) {
-     const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
-     if (!firmData.length) {
-       return res.status(400).json({ message: "Invalid firm IDs." });
-     }
-     firmPositions = firmData.reduce((positions, firm) => {
-       if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
-         positions.push(...firm.hierarchy);
-       }
-       return positions;
-     }, []);
-   }
+    // 3️⃣ Handle firm hierarchy and role-based filtering
+    let firmPositions = [];
+    if (firms.length) {
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      if (!firmData.length) {
+        return res.status(400).json({ message: "Invalid firm IDs." });
+      }
+      firmPositions = firmData.reduce((positions, firm) => {
+        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+          positions.push(...firm.hierarchy);
+        }
+        return positions;
+      }, []);
+    }
 
-   let employeeFilter = { status: "active" };
-   if (role === "super_admin" || role === "admin") {
-     employeeFilter.role = { $in: ["admin", "employee", "hr"] };
-   } else if (role === "hr") {
-     employeeFilter.role = { $in: ["employee"] };
-   } else {
-     return res.status(403).json({ message: "Unauthorized" });
-   }
+    let employeeFilter = { status: "active" };
+    if (role === "super_admin" || role === "admin") {
+      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+    } else if (role === "hr") {
+      employeeFilter.role = { $in: ["employee"] };
+    } else {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
 
-   if (firmPositions.length) {
-     employeeFilter.position = { $in: firmPositions };
-   }
+    if (firmPositions.length) {
+      employeeFilter.position = { $in: firmPositions };
+    }
 
-   // Add tag filter
-   if (tag) {
-     const tagArray = Array.isArray(tag) ? tag : [tag];
-     employeeFilter.tags = { $in: tagArray };
-   }
+    // Add tag filter
+    if (tag) {
+      const tagArray = Array.isArray(tag) ? tag : [tag];
+      employeeFilter.tags = { $in: tagArray };
+    }
 
-   // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
-   if (firmCodes) {
-     employeeFilter.code = { $in: userCodes };
-   }
+    // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
+    if (firmCodes) {
+      employeeFilter.code = { $in: userCodes };
+    }
 
-   // 5️⃣ Fetch employees with siddha_code
-   const employees = await User.find(
-     employeeFilter,
-     "code name position tags siddha_code"
-   ).lean();
+    // 5️⃣ Fetch employees with siddha_code
+    const employees = await User.find(
+      employeeFilter,
+      "code name position tags siddha_code"
+    ).lean();
 
-   // 6️⃣ Log codes present in MetaData but not in active employees
-   if (firmCodes) {
-     const employeeCodes = employees.map((emp) => emp.code.trim().toLowerCase());
-     const missingCodes = userCodes.filter(
-       (code) => !employeeCodes.includes(code.trim().toLowerCase())
-     );
-     if (missingCodes.length > 0) {
-       console.log(
-         `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(", ")}`
-       );
-     } else {
-       console.log("All MetaData codes found in active employees.");
-     }
-   }
+    // 6️⃣ Log codes present in MetaData but not in active employees
+    if (firmCodes) {
+      const employeeCodes = employees.map((emp) =>
+        emp.code.trim().toLowerCase()
+      );
+      const missingCodes = userCodes.filter(
+        (code) => !employeeCodes.includes(code.trim().toLowerCase())
+      );
+      if (missingCodes.length > 0) {
+        console.log(
+          `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(
+            ", "
+          )}`
+        );
+      } else {
+        console.log("All MetaData codes found in active employees.");
+      }
+    }
 
-   if (!employees.length) {
-     return res.status(200).json({
-       message: "No employees found",
-       data: [],
-     });
-   }
+    if (!employees.length) {
+      return res.status(200).json({
+        message: "No employees found",
+        data: [],
+      });
+    }
 
-   // 7️⃣ Include siddha_code in employeeMap
-   const employeeMap = employees.reduce((acc, emp) => {
-     acc[emp.code.trim().toLowerCase()] = {
-       name: emp.name,
-       position: emp.position,
-       tags: emp.tags,
-       siddha_code: emp.siddha_code,
-     };
-     return acc;
-   }, {});
+    // 7️⃣ Include siddha_code in employeeMap
+    const employeeMap = employees.reduce((acc, emp) => {
+      acc[emp.code.trim().toLowerCase()] = {
+        name: emp.name,
+        position: emp.position,
+        tags: emp.tags,
+        siddha_code: emp.siddha_code,
+      };
+      return acc;
+    }, {});
 
-   const employeeCodes = employees.map((emp) => emp.code);
-   let attendanceRecords = [];
-   let dateFilter = {};
+    const employeeCodes = employees.map((emp) => emp.code);
+    let attendanceRecords = [];
+    let dateFilter = {};
 
-   // 8️⃣ Handle date filtering
-   if (date) {
-     const startOfDay = new Date(date);
-     startOfDay.setHours(0, 0, 0, 0);
-     const endOfDay = new Date(date);
-     endOfDay.setHours(23, 59, 59, 999);
-     dateFilter = { $gte: startOfDay, $lte: endOfDay };
-   } else if (month && year) {
-     const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-     const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
-     dateFilter = { $gte: start, $lte: end };
-   }
+    // 8️⃣ Handle date filtering
+    if (date) {
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      dateFilter = { $gte: startOfDay, $lte: endOfDay };
+    } else if (month && year) {
+      const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+      const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+      dateFilter = { $gte: start, $lte: end };
+    }
 
-   // 9️⃣ Fetch attendance records
-   const rawRecords = await Attendance.find({
-     ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
-     code: { $in: employeeCodes },
-   })
-     .sort({ date: 1, punchIn: -1 })
-     .lean();
+    // 9️⃣ Fetch attendance records
+    const rawRecords = await Attendance.find({
+      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+      code: { $in: employeeCodes },
+    })
+      .sort({ date: 1, punchIn: -1 })
+      .lean();
 
-   const attendanceMap = new Map();
-   const statusPriority = {
-     Present: 6,
-     Pending: 5,
-     "Half Day": 4,
-     Leave: 3,
-     Absent: 1,
-   };
+    const attendanceMap = new Map();
+    const statusPriority = {
+      Present: 6,
+      Pending: 5,
+      "Half Day": 4,
+      Leave: 3,
+      Absent: 1,
+    };
 
-   for (const record of rawRecords) {
-     const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
-       .toISOString()
-       .slice(0, 10)}`;
+    for (const record of rawRecords) {
+      const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
+        .toISOString()
+        .slice(0, 10)}`;
 
-     if (!attendanceMap.has(key)) {
-       attendanceMap.set(key, record);
-     } else {
-       const existing = attendanceMap.get(key);
-       if (
-         (statusPriority[record.status] || 0) >
-         (statusPriority[existing.status] || 0)
-       ) {
-         attendanceMap.set(key, record);
-       }
-     }
-   }
+      if (!attendanceMap.has(key)) {
+        attendanceMap.set(key, record);
+      } else {
+        const existing = attendanceMap.get(key);
+        if (
+          (statusPriority[record.status] || 0) >
+          (statusPriority[existing.status] || 0)
+        ) {
+          attendanceMap.set(key, record);
+        }
+      }
+    }
 
-   attendanceRecords = Array.from(attendanceMap.values());
+    attendanceRecords = Array.from(attendanceMap.values());
 
-   // 10️⃣ If a specific date is given (single day), handle absentees
-   if (date) {
-     const presentCodes = new Set(
-       attendanceRecords.map((r) => r.code.trim().toLowerCase())
-     );
-     employees.forEach((emp) => {
-       const empCode = emp.code.trim().toLowerCase();
-       if (!presentCodes.has(empCode)) {
-         attendanceRecords.push({
-           code: emp.code,
-           name: emp.name,
-           position: emp.position,
-           status: "Absent",
-           date: new Date(date),
-           tags: emp.tags,
-           siddha_code: emp.siddha_code,
-         });
-       }
-     });
-   }
+    // 10️⃣ If a specific date is given (single day), handle absentees
+    if (date) {
+      const presentCodes = new Set(
+        attendanceRecords.map((r) => r.code.trim().toLowerCase())
+      );
+      employees.forEach((emp) => {
+        const empCode = emp.code.trim().toLowerCase();
+        if (!presentCodes.has(empCode)) {
+          attendanceRecords.push({
+            code: emp.code,
+            name: emp.name,
+            position: emp.position,
+            status: "Absent",
+            date: new Date(date),
+            tags: emp.tags,
+            siddha_code: emp.siddha_code,
+          });
+        }
+      });
+    }
 
-   // 11️⃣ If month view, fill absent data for each day and employee
-   if (!date && month && year) {
-     const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-     const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+    // 11️⃣ If month view, fill absent data for each day and employee
+    if (!date && month && year) {
+      const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
-     const allDays = [];
-     let d = new Date(startDate);
-     while (d <= endDate) {
-       allDays.push(new Date(d));
-       d.setDate(d.getDate() + 1);
-     }
+      const allDays = [];
+      let d = new Date(startDate);
+      while (d <= endDate) {
+        allDays.push(new Date(d));
+        d.setDate(d.getDate() + 1);
+      }
 
-     const dateMap = new Map(
-       attendanceRecords.map((record) => [
-         `${record.code.trim().toLowerCase()}-${new Date(record.date)
-           .toISOString()
-           .slice(0, 10)}`,
-         record,
-       ])
-     );
+      const dateMap = new Map(
+        attendanceRecords.map((record) => [
+          `${record.code.trim().toLowerCase()}-${new Date(record.date)
+            .toISOString()
+            .slice(0, 10)}`,
+          record,
+        ])
+      );
 
-     for (const emp of employees) {
-       const empCode = emp.code.trim().toLowerCase();
-       for (const day of allDays) {
-         const key = `${empCode}-${day.toISOString().slice(0, 10)}`;
-         if (!dateMap.has(key)) {
-           attendanceRecords.push({
-             code: emp.code,
-             name: emp.name,
-             position: emp.position,
-             status: "Absent",
-             date: new Date(day),
-             tags: emp.tags,
-             siddha_code: emp.siddha_code,
-           });
-         }
-       }
-     }
-   }
+      for (const emp of employees) {
+        const empCode = emp.code.trim().toLowerCase();
+        for (const day of allDays) {
+          const key = `${empCode}-${day.toISOString().slice(0, 10)}`;
+          if (!dateMap.has(key)) {
+            attendanceRecords.push({
+              code: emp.code,
+              name: emp.name,
+              position: emp.position,
+              status: "Absent",
+              date: new Date(day),
+              tags: emp.tags,
+              siddha_code: emp.siddha_code,
+            });
+          }
+        }
+      }
+    }
 
-   // 12️⃣ Attach name, position, tags, and siddha_code
-   attendanceRecords = attendanceRecords.map((record) => {
-     const normalizedCode = record.code.trim().toLowerCase();
-     const employee = employeeMap[normalizedCode];
+    // 12️⃣ Attach name, position, tags, and siddha_code
+    attendanceRecords = attendanceRecords.map((record) => {
+      const normalizedCode = record.code.trim().toLowerCase();
+      const employee = employeeMap[normalizedCode];
 
-     return {
-       ...record,
-       name: employee?.name || "Unknown",
-       position: employee?.position || "Unknown",
-       tags: record.tags || employee?.tags || [],
-       siddha_code: record.siddha_code || employee?.siddha_code || "N/A",
-     };
-   });
+      return {
+        ...record,
+        name: employee?.name || "Unknown",
+        position: employee?.position || "Unknown",
+        tags: record.tags || employee?.tags || [],
+        siddha_code: record.siddha_code || employee?.siddha_code || "N/A",
+      };
+    });
 
-   // 13️⃣ Filter by search
-   if (search) {
-     const regex = new RegExp(search, "i");
-     attendanceRecords = attendanceRecords.filter(
-       (rec) =>
-         regex.test(rec.code) ||
-         regex.test(rec.name) ||
-         regex.test(rec.siddha_code)
-     );
-   }
+    // 13️⃣ Filter by search
+    if (search) {
+      const regex = new RegExp(search, "i");
+      attendanceRecords = attendanceRecords.filter(
+        (rec) =>
+          regex.test(rec.code) ||
+          regex.test(rec.name) ||
+          regex.test(rec.siddha_code)
+      );
+    }
 
-   // 14️⃣ Filter by status
-   if (status) {
-     attendanceRecords = attendanceRecords.filter(
-       (rec) => rec.status === status
-     );
-   }
+    // 14️⃣ Filter by status
+    if (status) {
+      attendanceRecords = attendanceRecords.filter(
+        (rec) => rec.status === status
+      );
+    }
 
-   // 15️⃣ Sort by date ASC, and within each date, by status priority DESC
-   attendanceRecords.sort((a, b) => {
-     const dateA = new Date(a.date).setHours(0, 0, 0, 0);
-     const dateB = new Date(b.date).setHours(0, 0, 0, 0);
+    // 15️⃣ Sort by date ASC, and within each date, by status priority DESC
+    attendanceRecords.sort((a, b) => {
+      const dateA = new Date(a.date).setHours(0, 0, 0, 0);
+      const dateB = new Date(b.date).setHours(0, 0, 0, 0);
 
-     if (dateA !== dateB) return dateA - dateB;
+      if (dateA !== dateB) return dateA - dateB;
 
-     const priorityA = statusPriority[a.status] || 0;
-     const priorityB = statusPriority[b.status] || 0;
-     return priorityB - priorityA;
-   });
+      const priorityA = statusPriority[a.status] || 0;
+      const priorityB = statusPriority[b.status] || 0;
+      return priorityB - priorityA;
+    });
 
-   // 16️⃣ Format data for CSV export
-   const formattedAttendance = attendanceRecords.map((record) => ({
-     Name: record.name || "Unknown",
-     Code: record.code,
-     "Siddha Code": record.siddha_code || "N/A",
-     Position: record.position || "Unknown",
-     Date: record.date
-       ? new Date(record.date).toISOString().split("T")[0]
-       : "N/A",
-     "Punch In Time": record.punchIn
-       ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
-           timeZone: "Asia/Kolkata",
-         })
-       : "N/A",
-     "Punch In Out": record.punchOut
-       ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
-           timeZone: "Asia/Kolkata",
-         })
-       : "N/A",
-     Status: record.status,
-     "Working Hours": record.hoursWorked || "0",
-     Tags:
-       Array.isArray(record.tags) && record.tags.length
-         ? record.tags.join("; ")
-         : "N/A",
-   }));
+    // 16️⃣ Format data for CSV export
+    const formattedAttendance = attendanceRecords.map((record) => ({
+      Name: record.name || "Unknown",
+      Code: record.code,
+      "Siddha Code": record.siddha_code || "N/A",
+      Position: record.position || "Unknown",
+      Date: record.date
+        ? new Date(record.date).toISOString().split("T")[0]
+        : "N/A",
+      "Punch In Time": record.punchIn
+        ? new Date(record.punchIn).toLocaleTimeString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : "N/A",
+      "Punch In Out": record.punchOut
+        ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : "N/A",
+      Status: record.status,
+      "Working Hours": record.hoursWorked || "0",
+      Tags:
+        Array.isArray(record.tags) && record.tags.length
+          ? record.tags.join("; ")
+          : "N/A",
+    }));
 
-   const fields = [
-     "Name",
-     "Code",
-     "Siddha Code",
-     "Position",
-     "Date",
-     "Punch In Time",
-     "Punch In Out",
-     "Status",
-     "Working Hours",
-     "Tags",
-   ];
-   const parser = new Parser({ fields });
-   const csv = parser.parse(formattedAttendance);
+    const fields = [
+      "Name",
+      "Code",
+      "Siddha Code",
+      "Position",
+      "Date",
+      "Punch In Time",
+      "Punch In Out",
+      "Status",
+      "Working Hours",
+      "Tags",
+    ];
+    const parser = new Parser({ fields });
+    const csv = parser.parse(formattedAttendance);
 
-   res.header("Content-Type", "text/csv");
-   res.attachment("attendance_data.csv");
-   return res.send(csv);
- } catch (error) {
-   console.error("Error downloading attendance data:", error);
-   res.status(500).json({
-     message: "Error downloading attendance data",
-     error: error.message,
-   });
- }
+    res.header("Content-Type", "text/csv");
+    res.attachment("attendance_data.csv");
+    return res.send(csv);
+  } catch (error) {
+    console.error("Error downloading attendance data:", error);
+    res.status(500).json({
+      message: "Error downloading attendance data",
+      error: error.message,
+    });
+  }
 };
 
 exports.deleteAttendanceByID = async (req, res) => {
@@ -2348,7 +2359,11 @@ exports.addAttendanceByAdmin = async (req, res) => {
       if (existingAttendance) {
         return res.status(400).json({ message: "Attendance already exists" });
       }
-      punchInDate = new Date(`${date}T${punchIn}`);
+      punchInDate = DateTime.fromISO(`${date}T${punchIn}`, {
+        zone: "Asia/Kolkata",
+      })
+        .toUTC()
+        .toJSDate();
     }
 
     // Handle punch-out
@@ -2377,7 +2392,11 @@ exports.addAttendanceByAdmin = async (req, res) => {
         punchInDate = existingAttendance.punchIn;
       }
 
-      punchOutDate = new Date(`${date}T${punchOut}`);
+      punchOutDate = DateTime.fromISO(`${date}T${punchOut}`, {
+        zone: "Asia/Kolkata",
+      })
+        .toUTC()
+        .toJSDate();
 
       // Handle night shift (if punch-out time is earlier than punch-in, assume next day)
       if (punchOutDate <= punchInDate) {
