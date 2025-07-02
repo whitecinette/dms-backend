@@ -1,154 +1,157 @@
-const axios = require('axios');
-const ExtractionRecord = require('../../model/ExtractionRecord');
-const Product = require('../../model/Product'); // Adjust path as needed
-const User = require('../../model/User');
+const axios = require("axios");
+const ExtractionRecord = require("../../model/ExtractionRecord");
+const Product = require("../../model/Product"); // Adjust path as needed
+const User = require("../../model/User");
 const moment = require("moment");
-const HierarchyEntries = require('../../model/HierarchyEntries');
+const HierarchyEntries = require("../../model/HierarchyEntries");
 const { Parser } = require("json2csv");
 const ActorCode = require("../../model/ActorCode");
-const SalesData = require('../../model/SalesData');
+const SalesData = require("../../model/SalesData");
 const XLSX = require("xlsx");
 
 const { BACKEND_URL } = process.env;
 
 exports.addExtractionRecord = async (req, res) => {
-    try {
-        console.log("Reaching extraction record API");
-        const { products, dealerCode, code } = req.body;
-        // const { code } = req; // Employee Code
+  try {
+    console.log("Reaching extraction record API");
+    const { products, dealerCode, code } = req.body;
+    // const { code } = req; // Employee Code
 
-        if (!products || !dealerCode || !code) {
-            return res.status(400).json({
-                error: 'Please provide all required fields: products (array), dealerCode, and employee code.'
-            });
-        }
-
-        if (!Array.isArray(products) || products.length === 0) {
-            return res.status(400).json({
-                error: 'The products field should be a non-empty array.'
-            });
-        }
-
-        let extractionRecords = [];
-        let modelCodeMap = new Map();
-
-        for (const productData of products) {
-            const { productId, quantity } = productData;
-
-            if (!productId || !quantity) {
-                return res.status(400).json({
-                    error: 'Each product must have productId and quantity.'
-                });
-            }
-
-            // Fetch product details
-            const productResponse = await axios.get(`${BACKEND_URL}/product/by-id/${productId}`);
-            if (!productResponse.data.product) {
-                return res.status(404).json({ error: `Product not found with id: ${productId}` });
-            }
-
-            const product = productResponse.data.product;
-            const amount = product.price * quantity;
-            const model_code = product.model_code; // Assuming the product has a model_code field
-            const brand = product.brand;
-
-            // Ensure each model_code gets only one entry
-            if (modelCodeMap.has(model_code)) {
-                // Update existing quantity and amount
-                let existingRecord = modelCodeMap.get(model_code);
-                existingRecord.quantity += quantity;
-                existingRecord.amount += amount;
-            } else {
-                // Create new entry for this model_code
-                let newRecord = new ExtractionRecord ({
-                    productId,
-                    brand,
-                    dealerCode,
-                    quantity,
-                    uploadedBy: code,
-                    amount,
-                    model_code
-                });
-
-                modelCodeMap.set(model_code, newRecord);
-            }
-        }
-
-        // Save all records to the database
-        for (let record of modelCodeMap.values()) {
-            const savedRecord = await record.save();
-            extractionRecords.push(savedRecord);
-        }
-
-        return res.status(200).json({
-            message: 'Extraction Records added successfully.',
-            records: extractionRecords
-        });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ error: 'Internal Server Error!' });
+    if (!products || !dealerCode || !code) {
+      return res.status(400).json({
+        error:
+          "Please provide all required fields: products (array), dealerCode, and employee code.",
+      });
     }
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
+        error: "The products field should be a non-empty array.",
+      });
+    }
+
+    let extractionRecords = [];
+    let modelCodeMap = new Map();
+
+    for (const productData of products) {
+      const { productId, quantity } = productData;
+
+      if (!productId || !quantity) {
+        return res.status(400).json({
+          error: "Each product must have productId and quantity.",
+        });
+      }
+
+      // Fetch product details
+      const productResponse = await axios.get(
+        `${BACKEND_URL}/product/by-id/${productId}`
+      );
+      if (!productResponse.data.product) {
+        return res
+          .status(404)
+          .json({ error: `Product not found with id: ${productId}` });
+      }
+
+      const product = productResponse.data.product;
+      const amount = product.price * quantity;
+      const model_code = product.model_code; // Assuming the product has a model_code field
+      const brand = product.brand;
+
+      // Ensure each model_code gets only one entry
+      if (modelCodeMap.has(model_code)) {
+        // Update existing quantity and amount
+        let existingRecord = modelCodeMap.get(model_code);
+        existingRecord.quantity += quantity;
+        existingRecord.amount += amount;
+      } else {
+        // Create new entry for this model_code
+        let newRecord = new ExtractionRecord({
+          productId,
+          brand,
+          dealerCode,
+          quantity,
+          uploadedBy: code,
+          amount,
+          model_code,
+        });
+
+        modelCodeMap.set(model_code, newRecord);
+      }
+    }
+
+    // Save all records to the database
+    for (let record of modelCodeMap.values()) {
+      const savedRecord = await record.save();
+      extractionRecords.push(savedRecord);
+    }
+
+    return res.status(200).json({
+      message: "Extraction Records added successfully.",
+      records: extractionRecords,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Internal Server Error!" });
+  }
 };
 
 exports.getDealerDropdownForExtraction = async (req, res) => {
-    try {
-        // Fetch users where role is "dealer" and only select the "name" field
-        // const dealers = await User.find({ role: "dealer" }).select("name");
-        const dealers = await User.find({ role: "dealer" }).select("name -_id");
+  try {
+    // Fetch users where role is "dealer" and only select the "name" field
+    // const dealers = await User.find({ role: "dealer" }).select("name");
+    const dealers = await User.find({ role: "dealer" }).select("name -_id");
 
-        if (!dealers.length) {
-            return res.status(404).json({ message: "No dealers found." });
-        }
-
-        return res.status(200).json(dealers);
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ error: "Internal Server Error" });
+    if (!dealers.length) {
+      return res.status(404).json({ message: "No dealers found." });
     }
+
+    return res.status(200).json(dealers);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 
-
-// Rakshita 
+// Rakshita
 exports.addExtractionRecordsFromApp = async (req, res) => {
-    try {
-      const { code } = req.user; // Extracted from token (uploadedBy)
-      const { dealer, products } = req.body;
-  
-      if (!code || !dealer || !Array.isArray(products) || products.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing required fields: code, dealerCode, or products",
-        });
-      }
-  
-      const extractionEntries = products.map(product => ({
-        uploaded_by: code,
-        dealer: dealer,
-        brand: product.brand,
-        product_name: product.product_name,
-        product_code: product.product_code || "", // fallback if needed
-        price: product.price,
-        quantity: product.quantity,
-        amount: product.price * product.quantity,
-        segment: product.segment || "",
-        product_category: product.product_category || "",
-      }));
-  
-      await ExtractionRecord.insertMany(extractionEntries);
-  
-      res.status(201).json({
-        success: true,
-        message: "Extraction records saved successfully.",
-      });
-  
-    } catch (error) {
-      console.error("Error in addExtractionRecordsFromApp:", error);
-      res.status(500).json({
+  try {
+    const { code } = req.user; // Extracted from token (uploadedBy)
+    const { dealer, products } = req.body;
+
+    if (!code || !dealer || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
         success: false,
-        message: "Internal server error",
+        message: "Missing required fields: code, dealerCode, or products",
       });
     }
-  };
+
+    const extractionEntries = products.map((product) => ({
+      uploaded_by: code,
+      dealer: dealer,
+      brand: product.brand,
+      product_name: product.product_name,
+      product_code: product.product_code || "", // fallback if needed
+      price: product.price,
+      quantity: product.quantity,
+      amount: product.price * product.quantity,
+      segment: product.segment || "",
+      product_category: product.product_category || "",
+    }));
+
+    await ExtractionRecord.insertMany(extractionEntries);
+
+    res.status(201).json({
+      success: true,
+      message: "Extraction records saved successfully.",
+    });
+  } catch (error) {
+    console.error("Error in addExtractionRecordsFromApp:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 
 // exports.getCurrentMonthExtractionsForUser = async (req, res) => {
 // try {
@@ -216,57 +219,62 @@ exports.addExtractionRecordsFromApp = async (req, res) => {
 //     });
 // }
 // };
-   
+
 exports.getCurrentMonthExtractionsForUser = async (req, res) => {
-try {
+  try {
     console.log("Extrac get reached");
     const { code } = req.user;
 
     if (!code) {
-    return res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "User code not found in token.",
-    });
+      });
     }
 
     // Get start and end of current month in IST
     const now = new Date();
     const istOffset = 5.5 * 60 * 60 * 1000;
 
-    const startOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
-    const endOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59));
+    const startOfMonth = new Date(
+      Date.UTC(now.getFullYear(), now.getMonth(), 1)
+    );
+    const endOfMonth = new Date(
+      Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+    );
 
     const startIST = new Date(startOfMonth.getTime() + istOffset);
     const endIST = new Date(endOfMonth.getTime() + istOffset);
 
     // Fetch extraction records
     const records = await ExtractionRecord.find({
-    uploaded_by: code,
-    createdAt: { $gte: startIST, $lte: endIST }
+      uploaded_by: code,
+      createdAt: { $gte: startIST, $lte: endIST },
     }).sort({ createdAt: -1 });
 
     // Step 1: Get unique dealer codes from records
-    const dealerCodes = [...new Set(records.map(r => r.dealer).filter(Boolean))];
+    const dealerCodes = [
+      ...new Set(records.map((r) => r.dealer).filter(Boolean)),
+    ];
 
     // Step 2: Fetch dealer names from ActorCodes
     const dealerMap = {};
     const actors = await ActorCode.find({ code: { $in: dealerCodes } });
-    actors.forEach(actor => {
+    actors.forEach((actor) => {
       dealerMap[actor.code] = actor.name;
     });
 
-
     // Define table headers (for frontend)
     const tableHeaders = [
-    "dealer_code",
-    "dealer_name",
-    "product_name",
-    "product_code",
-    "product_category",
-    "price",
-    "quantity",
-    "total",
-    "segment"
+      "dealer_code",
+      "dealer_name",
+      "product_name",
+      "product_code",
+      "product_category",
+      "price",
+      "quantity",
+      "total",
+      "segment",
     ];
 
     // Convert records to table format
@@ -279,68 +287,58 @@ try {
       price: rec.price || 0,
       quantity: rec.quantity || 0,
       total: rec.amount || 0,
-      segment: rec.segment || ""
+      segment: rec.segment || "",
     }));
 
-
     res.status(200).json({
-    success: true,
-    headers: tableHeaders,
-    data: tableData,
+      success: true,
+      headers: tableHeaders,
+      data: tableData,
     });
-
-} catch (error) {
+  } catch (error) {
     console.error("Error in getCurrentMonthExtractionsForUser:", error);
     res.status(500).json({
-    success: false,
-    message: "Internal server error",
+      success: false,
+      message: "Internal server error",
     });
-}
+  }
 };
 
 exports.getExtractionStatus = async (req, res) => {
-    try {
-      const {
-        startDate,
-        endDate,
-        smd = [],
-        asm = [],
-        mdd = []
-      } = req.body;
-  
-      const start = startDate
-        ? new Date(startDate)
-        : moment().startOf("month").toDate();
-      const end = endDate
-        ? new Date(endDate)
-        : moment().endOf("month").toDate();
-  
-      // Step 1: Get relevant hierarchy entries
-      const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
-      if (smd.length > 0) hierarchyFilter.smd = { $in: smd };
-      if (asm.length > 0) hierarchyFilter.asm = { $in: asm };
-      if (mdd.length > 0) hierarchyFilter.mdd = { $in: mdd };
-  
-      const hierarchy = await HierarchyEntries.find(hierarchyFilter);
-  
-      const tseToDealers = {};
-  
-      for (let entry of hierarchy) {
-        const tseCode = entry.tse;
-        if (!tseToDealers[tseCode]) tseToDealers[tseCode] = new Set();
-        tseToDealers[tseCode].add(entry.dealer);
-      }
-  
-      const results = [];
-  
-      for (let tseCode in tseToDealers) {
-        const dealers = Array.from(tseToDealers[tseCode]);
-  
-        const doneDealers = await ExtractionRecord.distinct("dealer", {
-          dealer: { $in: dealers },
-          uploaded_by: tseCode,
-          createdAt: { $gte: start, $lte: end }
-        });
+  try {
+    const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.body;
+
+    const start = startDate
+      ? new Date(startDate)
+      : moment().startOf("month").toDate();
+    const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+
+    // Step 1: Get relevant hierarchy entries
+    const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+    if (smd.length > 0) hierarchyFilter.smd = { $in: smd };
+    if (asm.length > 0) hierarchyFilter.asm = { $in: asm };
+    if (mdd.length > 0) hierarchyFilter.mdd = { $in: mdd };
+
+    const hierarchy = await HierarchyEntries.find(hierarchyFilter);
+
+    const tseToDealers = {};
+
+    for (let entry of hierarchy) {
+      const tseCode = entry.tse;
+      if (!tseToDealers[tseCode]) tseToDealers[tseCode] = new Set();
+      tseToDealers[tseCode].add(entry.dealer);
+    }
+
+    const results = [];
+
+    for (let tseCode in tseToDealers) {
+      const dealers = Array.from(tseToDealers[tseCode]);
+
+      const doneDealers = await ExtractionRecord.distinct("dealer", {
+        dealer: { $in: dealers },
+        uploaded_by: tseCode,
+        createdAt: { $gte: start, $lte: end },
+      });
 
       // Fetch dealer details for all dealers associated with this TSE
       const dealerDetails = await User.find(
@@ -360,193 +358,194 @@ exports.getExtractionStatus = async (req, res) => {
           status: doneDealers.includes(dealerCode) ? "done" : "pending",
         };
       });
-  
-        const doneCount = doneDealers.length;
-        const totalCount = dealers.length;
-        const pendingCount = totalCount - doneCount;
-  
-        const donePercent = totalCount > 0 ? Math.round(((doneCount / totalCount) * 100)) : "0";
-        const pendingPercent = totalCount > 0 ? Math.round(((pendingCount / totalCount) * 100)) : "0";
-  
-        // Fetch name from User model
-        const user = await User.findOne({ code: tseCode });
-  
-        results.push({
-          name: user?.name || "N/A",
-          code: tseCode,
-          total: totalCount,
-          done: doneCount,
-          "Done Percent":`${donePercent}%`,
-          pending: pendingCount,
-          "Pending Percent":`${pendingPercent}%`,
-          allDealers
-        });
-      }
-  
-      res.status(200).json({ success: true, data: results });
-    } catch (error) {
-      console.error("Error in getExtractionStatus:", error);
-      res.status(500).json({ success: false, message: "Internal Server Error" });
+
+      const doneCount = doneDealers.length;
+      const totalCount = dealers.length;
+      const pendingCount = totalCount - doneCount;
+
+      const donePercent =
+        totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : "0";
+      const pendingPercent =
+        totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : "0";
+
+      // Fetch name from User model
+      const user = await User.findOne({ code: tseCode });
+
+      results.push({
+        name: user?.name || "N/A",
+        code: tseCode,
+        total: totalCount,
+        done: doneCount,
+        "Done Percent": `${donePercent}%`,
+        pending: pendingCount,
+        "Pending Percent": `${pendingPercent}%`,
+        allDealers,
+      });
     }
-  };
 
-  // exports.getExtractionRecords = async (req, res) => {
-  //   try {
-  //     const { startDate, endDate, uploadedBy } = req.body;
-  //     console.log("Request Body:", req.body);
-  
-  //     const filter = {};
-  
-  //     // Date range filter
-  //     if (startDate || endDate) {
-  //       filter.createdAt = {};
-  //       if (startDate) filter.createdAt.$gte = new Date(startDate);
-  //       if (endDate) filter.createdAt.$lte = new Date(endDate);
-  //     }
-  
-  //     // Uploaded By filter
-  //     if (uploadedBy) {
-  //       filter.uploaded_by = uploadedBy;
-  //     }
-  
-  //     // Aggregation: Get latest record for each unique dealer
-  //     const records = await ExtractionRecord.aggregate([
-  //       { $match: filter },
-  //       { $sort: { createdAt: -1 } },
-  //       {
-  //         $group: {
-  //           _id: "$dealer",
-  //           record: { $first: "$$ROOT" }
-  //         }
-  //       },
-  //       { $replaceWith: "$record" },
-  //       { $sort: { createdAt: -1 } }
-  //     ]);
-  
-  //     // Format for response
-  //     const formattedRecords = records.map(record => ({
-  //       "Dealer Code": record.dealer,
-  //       uploadedBy: record.uploaded_by,
-  //       Segment: record.segment,
-  //       Brand: record.brand,
-  //       "Product Name": record.product_name,
-  //       "Product Code": record.product_code,
-  //       Price: record.price,
-  //       Quantity: record.quantity,
-  //       Amount: record.amount,
-  //       Product_category: record.product_category,
-  //       "Date": record.createdAt
-  //     }));
-  
-  //     return res.status(200).json({
-  //       success: true,
-  //       data: formattedRecords,
-  //       total: formattedRecords.length
-  //     });
-  
-  //   } catch (error) {
-  //     console.error("Error in getExtractionRecords:", error);
-  //     return res.status(500).json({
-  //       success: false,
-  //       message: "Internal server error"
-  //     });
-  //   }
-  // };
-  
+    res.status(200).json({ success: true, data: results });
+  } catch (error) {
+    console.error("Error in getExtractionStatus:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
 
-  
-  
-  // exports.getExtractionRecordsForDownload = async (req, res) => {
-  //   try {
-  //     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
-  
-  //     // Step 1: Define default date range
-  //     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
-  //     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
-  
-  //     // Step 2: Build hierarchy filter
-  //     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
-  //     if (smd.length) hierarchyFilter.smd = { $in: smd };
-  //     if (asm.length) hierarchyFilter.asm = { $in: asm };
-  //     if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
-  
-  //     const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
-  //     if (!hierarchyEntries.length) {
-  //       return res.status(200).json({ message: "No records found", data: [], total: 0 });
-  //     }
-  
-  //     // Step 3: Group dealers by TSE
-  //     const tseToDealersMap = {};
-  //     hierarchyEntries.forEach(({ tse, dealer }) => {
-  //       if (!tseToDealersMap[tse]) tseToDealersMap[tse] = new Set();
-  //       tseToDealersMap[tse].add(dealer);
-  //     });
-  
-  //     const tseCodes = Object.keys(tseToDealersMap);
-  
-  //     // Step 4: Get all users once
-  //     const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
-  //     const userMap = users.reduce((acc, user) => {
-  //       acc[user.code] = user.name;
-  //       return acc;
-  //     }, {});
-  
-  //     // Step 5: Fetch extraction records
-  //     const allRecords = [];
-  
-  //     for (const tseCode of tseCodes) {
-  //       const dealers = Array.from(tseToDealersMap[tseCode]);
-  
-  //       const records = await ExtractionRecord.find({
-  //         dealer: { $in: dealers },
-  //         uploaded_by: tseCode,
-  //         createdAt: { $gte: start, $lte: end },
-  //       }).sort({ createdAt: -1 }).lean();
-  
-  //       records.forEach(record => {
-  //         allRecords.push({
-  //           name: userMap[tseCode] || "N/A",
-  //           code: tseCode,
-  //           dealerCode: record.dealer,
-  //           segment: `="${record.segment}"`,
-  //           brand: record.brand,
-  //           productName: record.product_name,
-  //           productCode: record.product_code,
-  //           price: record.price,
-  //           quantity: record.quantity,
-  //           amount: record.amount,
-  //           productCategory: record.product_category,
-  //           date: new Date(record.createdAt).toISOString().split("T")[0],
-  //         });
-  //       });
-  //     }
-  
-  //     // Step 6: Format for CSV
-  //     const fields = [
-  //       "name", "code", "dealerCode", "segment", "brand", "productName",
-  //       "productCode", "price", "quantity", "amount", "productCategory", "date",
-  //     ];
-  //     const parser = new Parser({ fields });
-  //     const csv = parser.parse(allRecords);
-  
-  //     res.header("Content-Type", "text/csv");
-  //     res.attachment("extraction_records.csv");
-  //     return res.send(csv);
-  
-  //   } catch (error) {
-  //     console.error("Error in getExtractionRecordsForDownload:", error);
-  //     return res.status(500).json({
-  //       message: "Error downloading extraction records",
-  //       error: error.message,
-  //     });
-  //   }
-  // };
+// exports.getExtractionRecords = async (req, res) => {
+//   try {
+//     const { startDate, endDate, uploadedBy } = req.body;
+//     console.log("Request Body:", req.body);
 
- exports.getExtractionRecordsForDownload = async (req, res) => {
+//     const filter = {};
+
+//     // Date range filter
+//     if (startDate || endDate) {
+//       filter.createdAt = {};
+//       if (startDate) filter.createdAt.$gte = new Date(startDate);
+//       if (endDate) filter.createdAt.$lte = new Date(endDate);
+//     }
+
+//     // Uploaded By filter
+//     if (uploadedBy) {
+//       filter.uploaded_by = uploadedBy;
+//     }
+
+//     // Aggregation: Get latest record for each unique dealer
+//     const records = await ExtractionRecord.aggregate([
+//       { $match: filter },
+//       { $sort: { createdAt: -1 } },
+//       {
+//         $group: {
+//           _id: "$dealer",
+//           record: { $first: "$$ROOT" }
+//         }
+//       },
+//       { $replaceWith: "$record" },
+//       { $sort: { createdAt: -1 } }
+//     ]);
+
+//     // Format for response
+//     const formattedRecords = records.map(record => ({
+//       "Dealer Code": record.dealer,
+//       uploadedBy: record.uploaded_by,
+//       Segment: record.segment,
+//       Brand: record.brand,
+//       "Product Name": record.product_name,
+//       "Product Code": record.product_code,
+//       Price: record.price,
+//       Quantity: record.quantity,
+//       Amount: record.amount,
+//       Product_category: record.product_category,
+//       "Date": record.createdAt
+//     }));
+
+//     return res.status(200).json({
+//       success: true,
+//       data: formattedRecords,
+//       total: formattedRecords.length
+//     });
+
+//   } catch (error) {
+//     console.error("Error in getExtractionRecords:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error"
+//     });
+//   }
+// };
+
+// exports.getExtractionRecordsForDownload = async (req, res) => {
+//   try {
+//     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
+
+//     // Step 1: Define default date range
+//     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+//     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+
+//     // Step 2: Build hierarchy filter
+//     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+//     if (smd.length) hierarchyFilter.smd = { $in: smd };
+//     if (asm.length) hierarchyFilter.asm = { $in: asm };
+//     if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
+
+//     const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+//     if (!hierarchyEntries.length) {
+//       return res.status(200).json({ message: "No records found", data: [], total: 0 });
+//     }
+
+//     // Step 3: Group dealers by TSE
+//     const tseToDealersMap = {};
+//     hierarchyEntries.forEach(({ tse, dealer }) => {
+//       if (!tseToDealersMap[tse]) tseToDealersMap[tse] = new Set();
+//       tseToDealersMap[tse].add(dealer);
+//     });
+
+//     const tseCodes = Object.keys(tseToDealersMap);
+
+//     // Step 4: Get all users once
+//     const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
+//     const userMap = users.reduce((acc, user) => {
+//       acc[user.code] = user.name;
+//       return acc;
+//     }, {});
+
+//     // Step 5: Fetch extraction records
+//     const allRecords = [];
+
+//     for (const tseCode of tseCodes) {
+//       const dealers = Array.from(tseToDealersMap[tseCode]);
+
+//       const records = await ExtractionRecord.find({
+//         dealer: { $in: dealers },
+//         uploaded_by: tseCode,
+//         createdAt: { $gte: start, $lte: end },
+//       }).sort({ createdAt: -1 }).lean();
+
+//       records.forEach(record => {
+//         allRecords.push({
+//           name: userMap[tseCode] || "N/A",
+//           code: tseCode,
+//           dealerCode: record.dealer,
+//           segment: `="${record.segment}"`,
+//           brand: record.brand,
+//           productName: record.product_name,
+//           productCode: record.product_code,
+//           price: record.price,
+//           quantity: record.quantity,
+//           amount: record.amount,
+//           productCategory: record.product_category,
+//           date: new Date(record.createdAt).toISOString().split("T")[0],
+//         });
+//       });
+//     }
+
+//     // Step 6: Format for CSV
+//     const fields = [
+//       "name", "code", "dealerCode", "segment", "brand", "productName",
+//       "productCode", "price", "quantity", "amount", "productCategory", "date",
+//     ];
+//     const parser = new Parser({ fields });
+//     const csv = parser.parse(allRecords);
+
+//     res.header("Content-Type", "text/csv");
+//     res.attachment("extraction_records.csv");
+//     return res.send(csv);
+
+//   } catch (error) {
+//     console.error("Error in getExtractionRecordsForDownload:", error);
+//     return res.status(500).json({
+//       message: "Error downloading extraction records",
+//       error: error.message,
+//     });
+//   }
+// };
+
+exports.getExtractionRecordsForDownload = async (req, res) => {
   try {
     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
 
-    const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+    const start = startDate
+      ? new Date(startDate)
+      : moment().startOf("month").toDate();
     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
 
     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
@@ -554,9 +553,13 @@ exports.getExtractionStatus = async (req, res) => {
     if (asm.length) hierarchyFilter.asm = { $in: asm };
     if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
 
-    const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+    const hierarchyEntries = await HierarchyEntries.find(
+      hierarchyFilter
+    ).lean();
     if (!hierarchyEntries.length) {
-      return res.status(200).json({ message: "No records found", data: [], total: 0 });
+      return res
+        .status(200)
+        .json({ message: "No records found", data: [], total: 0 });
     }
 
     const tseToDealersMap = {};
@@ -567,13 +570,18 @@ exports.getExtractionStatus = async (req, res) => {
 
     const tseCodes = Object.keys(tseToDealersMap);
 
-    const users = await User.find({ code: { $in: tseCodes } }, "code name").lean();
+    const users = await User.find(
+      { code: { $in: tseCodes } },
+      "code name"
+    ).lean();
     const userMap = users.reduce((acc, user) => {
       acc[user.code] = user.name;
       return acc;
     }, {});
 
-    const allDealerCodes = Array.from(new Set(hierarchyEntries.map((entry) => entry.dealer)));
+    const allDealerCodes = Array.from(
+      new Set(hierarchyEntries.map((entry) => entry.dealer))
+    );
     const dealerDetails = await User.find(
       { code: { $in: allDealerCodes } },
       { code: 1, name: 1, _id: 0 }
@@ -599,8 +607,10 @@ exports.getExtractionStatus = async (req, res) => {
       const totalCount = dealers.length;
       const pendingCount = totalCount - doneCount;
 
-      const donePercent = totalCount > 0 ? Math.round(((doneCount / totalCount) * 100)) : "0.00";
-      const pendingPercent = totalCount > 0 ? Math.round(((pendingCount / totalCount) * 100)) : "0.00";
+      const donePercent =
+        totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : "0.00";
+      const pendingPercent =
+        totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : "0.00";
 
       // Create a row for each dealer
       dealers.forEach((dealerCode) => {
@@ -611,9 +621,9 @@ exports.getExtractionStatus = async (req, res) => {
           DONE: doneCount,
           "DONE PERCENT": donePercent,
           Pending: pendingCount,
-          "PENDING PERCENT":pendingPercent,
+          "PENDING PERCENT": pendingPercent,
           "DEALER NAME": dealerMap[dealerCode] || "N/A",
-          "DEALER CODE" :dealerCode,
+          "DEALER CODE": dealerCode,
           STATUS: doneDealers.includes(dealerCode) ? "Done" : "Pending",
         });
       });
@@ -622,24 +632,28 @@ exports.getExtractionStatus = async (req, res) => {
         dealer: { $in: dealers },
         uploaded_by: tseCode,
         createdAt: { $gte: start, $lte: end },
-      }).sort({ createdAt: -1 }).lean();
+      })
+        .sort({ createdAt: -1 })
+        .lean();
 
       records.forEach((record) => {
         recordsData.push({
-          "Name": userMap[tseCode] || "N/A",
-          "CODE": tseCode,
+          Name: userMap[tseCode] || "N/A",
+          CODE: tseCode,
           "DEALER CODE": record.dealer,
           "DEALER NAME": dealerMap[record.dealer] || "N/A",
-          "DEALER STATUS": doneDealers.includes(record.dealer) ? "Done" : "Pending",
-          "SEGMENT": record.segment,
-          "BRAND": record.brand,
+          "DEALER STATUS": doneDealers.includes(record.dealer)
+            ? "Done"
+            : "Pending",
+          SEGMENT: record.segment,
+          BRAND: record.brand,
           "PRODUCT NAME": record.product_name,
           "PRODUCT CODE": record.product_code,
-          "PRICE": record.price,
-          "QUANTITY": record.quantity,
-          "AMOUNT": record.amount,
+          PRICE: record.price,
+          QUANTITY: record.quantity,
+          AMOUNT: record.amount,
           "PRODUCT CATEGORY": record.product_category,
-          "DATE": new Date(record.createdAt).toISOString().split("T")[0],
+          DATE: new Date(record.createdAt).toISOString().split("T")[0],
         });
       });
     }
@@ -659,7 +673,9 @@ exports.getExtractionStatus = async (req, res) => {
       "DEALER CODE",
       "STATUS",
     ];
-    const summaryWs = XLSX.utils.json_to_sheet(summaryData, { header: summaryFields });
+    const summaryWs = XLSX.utils.json_to_sheet(summaryData, {
+      header: summaryFields,
+    });
     XLSX.utils.book_append_sheet(wb, summaryWs, "Summary");
 
     // Records sheet
@@ -679,14 +695,18 @@ exports.getExtractionStatus = async (req, res) => {
       "PRODUCT CATEGORY",
       "DATE",
     ];
-    const recordsWs = XLSX.utils.json_to_sheet(recordsData, { header: recordsFields });
+    const recordsWs = XLSX.utils.json_to_sheet(recordsData, {
+      header: recordsFields,
+    });
     XLSX.utils.book_append_sheet(wb, recordsWs, "Records");
 
     const buffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" });
-    res.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.header(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
     res.attachment("extraction_records.xlsx");
     return res.send(buffer);
-
   } catch (error) {
     console.error("Error in getExtractionRecordsForDownload:", error);
     return res.status(500).json({
@@ -851,10 +871,8 @@ exports.getExtractionStatus = async (req, res) => {
 //     grandTotalRow[b] = response.reduce((sum, row) => sum + (row[b] || 0), 0);
 // });
 
-
 // // Append grand total row to response
 // response.push(grandTotalRow);
-
 
 //      return res.status(200).json({
 //          metricUsed: metric,
@@ -868,7 +886,8 @@ exports.getExtractionStatus = async (req, res) => {
 //  }
 // };
 
-const hierarchyLevels = ['smd', 'asm', 'mdd', 'tse', 'dealer'];
+const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
+
 exports.getExtractionReportForAdmin = async (req, res) => {
   try {
     const {
@@ -914,6 +933,10 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       end.setUTCHours(23, 59, 59, 999);
     }
 
+    // Log date range for debugging
+    console.log("Start Date (UTC):", start);
+    console.log("End Date (UTC):", end);
+
     // Step 2: Get all matching dealers from hierarchy
     const hierarchyFilters = {};
     hierarchyLevels.forEach((level) => {
@@ -936,7 +959,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     }
 
     const dealerFilter = [...matchingDealersSet];
-    console.log( "Dealer filters: " ,dealerFilter.length)
+    console.log("Dealer filters:", dealerFilter);
 
     // Step 3: Brand List
     const brands = [
@@ -962,7 +985,8 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       8: "100k+",
     };
 
-    // Step 4: Aggregation for Samsung from SalesData
+    // Step 4: Aggregation for Samsung from Sales挪
+
     const samsungMatchStage = {
       date: { $gte: start, $lte: end },
       sales_type: "Sell Out",
@@ -983,51 +1007,35 @@ exports.getExtractionReportForAdmin = async (req, res) => {
             $switch: {
               branches: [
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000] },
                   then: 0,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000] },
                   then: 1,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000] },
                   then: 2,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000] },
                   then: 3,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000] },
                   then: 4,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000] },
                   then: 5,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000] },
                   then: 6,
                 },
                 {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000],
-                  },
+                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000] },
                   then: 7,
                 },
               ],
@@ -1038,10 +1046,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
             $cond: {
               if: { $eq: [metric, "value"] },
               then: {
-                $ifNull: [
-                  "$amount",
-                  { $multiply: ["$total_amount", "$quantity"] },
-                ],
+                $ifNull: ["$amount", { $multiply: ["$total_amount", "$quantity"] }],
               },
               else: "$quantity",
             },
@@ -1071,31 +1076,43 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     ];
 
     const samsungData = await SalesData.aggregate(samsungPipeline);
-    // console.log("samsung", samsungData);
-    // console.log("Samsung Data Brands:");
-    // samsungData.forEach(entry => {
-    //   console.log(`Price Class ${entry._id}:`);
-    //   entry.brands.forEach(brand=>{
-    //     console.log(brand)
-    //   })
+    console.log("Samsung Data:", JSON.stringify(samsungData, null, 2));
 
-    // });
     // Step 5: Aggregation for other brands from ExtractionRecord
     const otherBrandsMatchStage = {
       createdAt: { $gte: start, $lte: end },
-      brand: { $ne: 'samsung' }
+      brand: { $ne: 'samsung' },
     };
     if (segment) {
       otherBrandsMatchStage.segment = segment.replace(/[<>\+kK\s]/g, '');
     }
     if (brand && brand !== 'Samsung') {
-      otherBrandsMatchStage.brand = brand;
+      otherBrandsMatchStage.brand = { $regex: `^${brand}$`, $options: 'i' };
     }
     if (dealerFilter.length > 0) {
       otherBrandsMatchStage.buyer_code = { $in: dealerFilter };
     }
 
-    // console.log("otherBrandsMatchStage: ", otherBrandsMatchStage)
+    console.log("otherBrandsMatchStage:", otherBrandsMatchStage);
+
+    // Debug raw ExtractionRecord data
+    const debugPipeline = [
+      { $match: otherBrandsMatchStage },
+      {
+        $project: {
+          brand: 1,
+          price: 1,
+          quantity: 1,
+          amount: 1,
+          segment: 1,
+          buyer_code: 1,
+          createdAt: 1,
+        },
+      },
+      { $limit: 10 },
+    ];
+    const debugData = await ExtractionRecord.aggregate(debugPipeline);
+    console.log("Debug ExtractionRecord data:", JSON.stringify(debugData, null, 2));
 
     const otherBrandsPipeline = [
       { $match: otherBrandsMatchStage },
@@ -1110,13 +1127,12 @@ exports.getExtractionReportForAdmin = async (req, res) => {
                 ],
               },
               then: {
-                $concat: [
-                  { $toUpper: { $substrCP: ["$brand", 0, 1] } },
+                $arrayElemAt: [
+                  brands,
                   {
-                    $substrCP: [
+                    $indexOfArray: [
+                      brands.map((b) => b.toLowerCase()),
                       { $toLower: "$brand" },
-                      1,
-                      { $subtract: [{ $strLenCP: "$brand" }, 1] },
                     ],
                   },
                 ],
@@ -1172,18 +1188,15 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       },
     ];
 
-    const otherBrandsData = await ExtractionRecord.aggregate(
-      otherBrandsPipeline
-    );
-    // console.log("otherBrands: ", otherBrandsData)
-    // console.log("Other Brands:");
-    // otherBrandsData.forEach(entry => {
-    //   console.log(`Price Class ${entry._id}:`);
-    //   entry.brands.forEach(brand=>{
-    //     console.log(brand)
-    //   })
-
-    // });
+    const otherBrandsData = await ExtractionRecord.aggregate(otherBrandsPipeline);
+    console.log("otherBrandsData:", JSON.stringify(otherBrandsData, null, 2));
+    console.log("Other Brands:");
+    otherBrandsData.forEach(entry => {
+      console.log(`Price Class ${entry._id}:`);
+      entry.brands.forEach(brand => {
+        console.log(brand);
+      });
+    });
 
     // Step 6: Combine and sort data
     const aggregatedData = [];
@@ -1199,26 +1212,29 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 
     // Merge Samsung data
     samsungData.forEach((entry) => {
-      const index = aggregatedData.findIndex((item) => item._id === entry._id);
+      const index = aggregatedData.findIndex((item) => item._id === Number(entry._id));
       if (index >= 0) {
         aggregatedData[index].brands = entry.brands;
+      } else {
+        console.log("No matching price class for Samsung data:", entry);
       }
     });
 
     // Merge other brands data
     otherBrandsData.forEach((entry) => {
-      const index = aggregatedData.findIndex((item) => item._id === entry._id);
+      const index = aggregatedData.findIndex((item) => item._id === Number(entry._id));
       if (index >= 0) {
-        aggregatedData[index].brands = aggregatedData[index].brands.concat(
-          entry.brands
-        );
+        aggregatedData[index].brands = aggregatedData[index].brands.concat(entry.brands);
       } else {
-        aggregatedData.push(entry);
+        console.log("No matching price class for other brands data:", entry);
+        aggregatedData.push({ _id: Number(entry._id), brands: entry.brands });
       }
     });
 
     // Sort by priceClassOrder
     aggregatedData.sort((a, b) => a._id - b._id);
+
+    console.log("Aggregated Data:", JSON.stringify(aggregatedData, null, 2));
 
     // Step 7: Final response formatting
     const response = aggregatedData.map((entry) => {
@@ -1231,8 +1247,13 @@ exports.getExtractionReportForAdmin = async (req, res) => {
         row[b] = 0;
       });
 
+      console.log("Processing price class:", priceClassMap[entry._id], "Brands:", entry.brands);
       entry.brands.forEach((b) => {
-        row[b.brand] = b.total;
+        if (brands.includes(b.brand) || b.brand === "Others") {
+          row[b.brand] = b.total;
+        } else {
+          console.log("Unexpected brand in response mapping:", b.brand);
+        }
       });
 
       const sortedBrands = Object.entries(row)
@@ -1253,6 +1274,8 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 
       return row;
     });
+
+    console.log("Final Response:", JSON.stringify(response, null, 2));
 
     // Step 8: Grand Total Row
     const grandTotalRow = { "Price Class": "Total", "Rank of Samsung": null };
@@ -1286,7 +1309,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       grandTotalRow["Total"] = "100.00";
     }
 
-    response.push(grandTotalRow);
+    console.log("Grand Total Row:", JSON.stringify(grandTotalRow, null, 2));
 
     return res.status(200).json({
       metricUsed: metric,
@@ -1463,75 +1486,64 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 //   }
 // };
 exports.getHierarchyFilters = async (req, res) => {
- try {
-   const hierarchyName = "default_sales_flow";
-   const hierarchyLevels = ['smd', 'asm', 'mdd', 'tse', 'dealer'];
+  try {
+    const hierarchyName = "default_sales_flow";
+    const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
 
-   // Step 1: Collect all query filters
-   const filters = { hierarchy_name: hierarchyName };
-   hierarchyLevels.forEach(level => {
-     if (req.query[level]) {
-       filters[level] = req.query[level];
-     }
-   });
+    // Step 1: Collect all query filters
+    const filters = { hierarchy_name: hierarchyName };
+    hierarchyLevels.forEach((level) => {
+      if (req.query[level]) {
+        filters[level] = req.query[level];
+      }
+    });
 
-   // Step 2: Find all hierarchy entries that match all filters
-   const hierarchyEntries = await HierarchyEntries.find(filters);
+    // Step 2: Find all hierarchy entries that match all filters
+    const hierarchyEntries = await HierarchyEntries.find(filters);
 
-   // Step 3: Collect all unique codes from these entries
-   const codeSet = new Set();
-   hierarchyEntries.forEach(entry => {
-     hierarchyLevels.forEach(level => {
-       if (entry[level]) {
-         codeSet.add(entry[level]);
-       }
-     });
-   });
+    // Step 3: Collect all unique codes from these entries
+    const codeSet = new Set();
+    hierarchyEntries.forEach((entry) => {
+      hierarchyLevels.forEach((level) => {
+        if (entry[level]) {
+          codeSet.add(entry[level]);
+        }
+      });
+    });
 
-   const allCodes = [...codeSet];
+    const allCodes = [...codeSet];
 
-   // Step 4: Get names for these codes
-   const actorCodes = await ActorCode.find({ code: { $in: allCodes } });
-   const codeNameMap = {};
-   actorCodes.forEach(actor => {
-     codeNameMap[actor.code] = actor.name;
-   });
+    // Step 4: Get names for these codes
+    const actorCodes = await ActorCode.find({ code: { $in: allCodes } });
+    const codeNameMap = {};
+    actorCodes.forEach((actor) => {
+      codeNameMap[actor.code] = actor.name;
+    });
 
-   // Step 5: Group by hierarchy level
-   const grouped = {};
-   const uniqueSet = {};
-   hierarchyLevels.forEach(level => {
-     grouped[level] = [];
-     uniqueSet[level] = new Set();
-   });
+    // Step 5: Group by hierarchy level
+    const grouped = {};
+    const uniqueSet = {};
+    hierarchyLevels.forEach((level) => {
+      grouped[level] = [];
+      uniqueSet[level] = new Set();
+    });
 
-   hierarchyEntries.forEach(entry => {
-     hierarchyLevels.forEach(level => {
-       const code = entry[level];
-       if (code && !uniqueSet[level].has(code)) {
-         uniqueSet[level].add(code);
-         grouped[level].push({
-           code,
-           name: codeNameMap[code] || null
-         });
-       }
-     });
-   });
+    hierarchyEntries.forEach((entry) => {
+      hierarchyLevels.forEach((level) => {
+        const code = entry[level];
+        if (code && !uniqueSet[level].has(code)) {
+          uniqueSet[level].add(code);
+          grouped[level].push({
+            code,
+            name: codeNameMap[code] || null,
+          });
+        }
+      });
+    });
 
-   return res.status(200).json(grouped);
-
- } catch (error) {
-   console.error("Error in getHierarchyFilters:", error);
-   return res.status(500).json({ error: "Internal Server Error" });
- }
+    return res.status(200).json(grouped);
+  } catch (error) {
+    console.error("Error in getHierarchyFilters:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 };
-
-
-
-
-
-
-  
-  
-  
-
