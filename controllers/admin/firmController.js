@@ -237,3 +237,73 @@ exports.getFirms = async (req, res) => {
     });
   }
 };
+
+exports.getAttendanceCountByFirms = async (req, res) => {
+ try {
+   // Set date range to current day in IST
+   const startDate = new Date();
+   startDate.setUTCHours(-5, -30, 0, 0); // 00:00:00 IST
+   const endDate = new Date();
+   endDate.setUTCHours(18, 29, 59, 999); // 23:59:59 IST
+
+   // Fetch firms with only name and code
+   const firms = await Firm.find().select('name code');
+
+   // Map through firms to add user count, user codes, and attendance counts
+   const firmsWithUserData = await Promise.all(
+     firms.map(async (firm) => {
+       // Find users in metadata collection with matching firm_code and attendance true
+       const users = await MetaData.find({ firm_code: firm.code, attendance: true }).select('code');
+       
+       // Extract user codes and count
+       const userCodes = users.map(user => user.code);
+       const totalUsers = users.length;
+
+       // Build query for attendance records for current day
+       const attendanceQuery = { 
+         code: { $in: userCodes },
+         date: { $gte: startDate, $lte: endDate }
+       };
+
+       // Find attendance records for these user codes
+       const attendanceRecords = await Attendance.find(attendanceQuery).select('code status date');
+       // console.log(`Firm: ${firm.name}, Attendance Records:`, attendanceRecords); // Debug log
+
+       // Count present, leave, and halfDay
+       const counts = {
+         present: attendanceRecords.filter(r => r.status && (r.status.toLowerCase() === 'present' || r.status.toLowerCase() === 'pending')).length,
+         leave: attendanceRecords.filter(r => r.status && r.status.toLowerCase() === 'leave').length,
+         halfDay: attendanceRecords.filter(r => r.status && r.status.toLowerCase() === 'halfday').length,
+       };
+
+       // Calculate absent as totalUsers minus other counts
+       counts.absent = totalUsers - (counts.present + counts.leave + counts.halfDay);
+
+       // Ensure absent is not negative
+       counts.absent = counts.absent < 0 ? 0 : counts.absent;
+
+       // Return firm data with only required fields
+       return {
+         name: firm.name,
+         code: firm.code,
+         totalUsers,
+         userCodes,
+         attendanceCounts: counts,
+       };
+     })
+   );
+
+   return res.status(200).json({
+     success: true,
+     message: "Firms with attendance counts for current day fetched successfully",
+     data: firmsWithUserData,
+   });
+ } catch (error) {
+   console.error("❌ Error fetching firms with attendance counts:", error);
+   return res.status(500).json({
+     success: false,
+     message: "Failed to fetch firms with attendance counts",
+     error: error.message,
+   });
+ }
+};
