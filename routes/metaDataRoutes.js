@@ -4,6 +4,6 @@ const { uploadMetadata, getEmployeesForAttendanceCount } = require('../controlle
 const upload = require("../helpers/multerHelper");
 const router = express.Router();
 router.post('/upload-metadata', upload.single('file'), uploadMetadata);
-router.get('/get-total-employee', getEmployeesForAttendanceCount);
+router.get('/get-total-employee-count', getEmployeesForAttendanceCount);
 
 module.exports = router;
