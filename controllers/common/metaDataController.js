@@ -108,6 +108,81 @@ exports.uploadMetadata = async (req, res) => {
  }
 };
 
+// exports.getEmployeesForAttendanceCount = async (req, res) => {
+//  try {
+//    // 1. Get all employees where attendance = true
+//    const eligibleEmployees = await MetaData.find({ attendance: true });
+//    const employeeCodes = eligibleEmployees.map(emp => emp.code);
+
+//    // 2. Use query date if provided, else default to today
+//    const selectedDate = req.query.date
+//      ? moment(req.query.date, 'YYYY-MM-DD')
+//      : moment(); // today
+
+//    const startOfDay = selectedDate.startOf('day').toDate();
+//    const endOfDay = selectedDate.endOf('day').toDate();
+
+//    // 3. Fetch all attendance for selected date
+//    const todayAttendance = await Attendance.find({
+//      code: { $in: employeeCodes },
+//      date: { $gte: startOfDay, $lte: endOfDay },
+//    });
+
+//    // 4. Create a map of attendance by code
+//    const attendanceMap = {};
+//    todayAttendance.forEach((record) => {
+//      attendanceMap[record.code] = record.status;
+//    });
+
+//    // 5. Classify employees by status
+//    const allEmployees = [];
+//    let presentCount = 0;
+//    let absentCount = 0;
+//    let leaveCount = 0;
+//    let halfDayCount = 0;
+//    let pendingCount = 0;
+
+//    for (const emp of eligibleEmployees) {
+//      const code = emp.code;
+//      const status = attendanceMap[code] || "Absent"; // default to Absent
+
+//      const employeeWithStatus = {
+//        ...emp._doc,
+//        status,
+//      };
+
+//      if (status === "Present") presentCount++;
+//      else if (status === "Leave") leaveCount++;
+//      else if (status === "Half Day") halfDayCount++;
+//      else if (status === "Pending") pendingCount++;
+//      else absentCount++;
+
+//      allEmployees.push(employeeWithStatus);
+//    }
+
+//    res.status(200).json({
+//      success: true,
+//      date: selectedDate.format('YYYY-MM-DD'),
+//      total: allEmployees.length,
+//      presentCount,
+//      absentCount,
+//      leaveCount,
+//      halfDayCount,
+//      pendingCount,
+//      data: allEmployees,
+//    });
+
+//  } catch (error) {
+//    console.error("Fetch error:", error);
+//    res.status(500).json({
+//      success: false,
+//      message: 'Failed to fetch employees for attendance',
+//      error: error.message,
+//    });
+//  }
+// };
+
+
 exports.getEmployeesForAttendanceCount = async (req, res) => {
  try {
    // 1. Get all employees where attendance = true
@@ -160,6 +235,83 @@ exports.getEmployeesForAttendanceCount = async (req, res) => {
      allEmployees.push(employeeWithStatus);
    }
 
+   // ---------------------------------------------
+   // ✅ 6. Weekly Data (for Line Chart)
+   // ---------------------------------------------
+// ---------------------------------------------
+// ✅ 6. Weekly Data (for Line Chart - Current Week Auto)
+// ---------------------------------------------
+let weeklyChartData = [];
+
+const baseDate = selectedDate.clone(); // either query date or today
+
+// Get current week range: Monday to Sunday
+const startDate = baseDate.clone().startOf('isoWeek').startOf('day'); // Monday
+const endDate = baseDate.clone().endOf('isoWeek').endOf('day');       // Sunday
+
+const weeklyAttendance = await Attendance.find({
+  code: { $in: employeeCodes },
+  date: { $gte: startDate.toDate(), $lte: endDate.toDate() },
+});
+
+// Group by date
+const groupedByDate = {};
+
+weeklyAttendance.forEach((record) => {
+  const dateStr = moment(record.date).format('YYYY-MM-DD');
+  if (!groupedByDate[dateStr]) {
+    groupedByDate[dateStr] = {
+      date: dateStr,
+      Present: 0,
+      Absent: 0,
+      Leave: 0,
+      'Half Day': 0,
+      Pending: 0,
+    };
+  }
+  groupedByDate[dateStr][record.status] =
+    (groupedByDate[dateStr][record.status] || 0) + 1;
+});
+
+// Fill missing dates with 0 counts
+// Fill missing dates with 0 counts
+const current = startDate.clone();
+while (current.isSameOrBefore(endDate)) {
+  const dateStr = current.format('YYYY-MM-DD');
+
+  if (!groupedByDate[dateStr]) {
+    groupedByDate[dateStr] = {
+      date: dateStr,
+      Present: 0,
+      Absent: 0,
+      Leave: 0,
+      'Half Day': 0,
+      Pending: 0,
+    };
+  }
+
+  // 👇 Add Absent logic based on total - others
+  const present = groupedByDate[dateStr].Present || 0;
+  const leave = groupedByDate[dateStr].Leave || 0;
+  const halfDay = groupedByDate[dateStr]['Half Day'] || 0;
+  const pending = groupedByDate[dateStr].Pending || 0;
+  const total = employeeCodes.length;
+
+  groupedByDate[dateStr].Absent = total - (present + leave + halfDay + pending);
+
+  current.add(1, 'day');
+}
+
+
+// Final sorted array
+weeklyChartData = Object.values(groupedByDate).sort((a, b) =>
+  a.date.localeCompare(b.date)
+);
+
+
+   // ---------------------------------------------
+   // ✅ Final Response
+   // ---------------------------------------------
    res.status(200).json({
      success: true,
      date: selectedDate.format('YYYY-MM-DD'),
@@ -170,6 +322,7 @@ exports.getEmployeesForAttendanceCount = async (req, res) => {
      halfDayCount,
      pendingCount,
      data: allEmployees,
+     weeklyChart: weeklyChartData, // 👉 for frontend chart
    });
 
  } catch (error) {
