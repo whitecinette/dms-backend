@@ -270,11 +270,23 @@ exports.getAttendanceCountByFirms = async (req, res) => {
        // console.log(`Firm: ${firm.name}, Attendance Records:`, attendanceRecords); // Debug log
 
        // Count present, leave, and halfDay
-       const counts = {
-         present: attendanceRecords.filter(r => r.status && (r.status.toLowerCase() === 'present' || r.status.toLowerCase() === 'pending')).length,
-         leave: attendanceRecords.filter(r => r.status && r.status.toLowerCase() === 'leave').length,
-         halfDay: attendanceRecords.filter(r => r.status && r.status.toLowerCase() === 'halfday').length,
-       };
+  const counts = {
+  present: attendanceRecords.filter(r => {
+    const status = r.status?.toLowerCase();
+    return status === 'present' || status === 'pending';
+  }).length,
+
+  leave: attendanceRecords.filter(r => {
+    const status = r.status?.toLowerCase();
+    return status === 'leave';
+  }).length,
+
+  halfDay: attendanceRecords.filter(r => {
+    const status = r.status?.toLowerCase();
+    return status === 'half day'; // space between 'half' and 'day'
+  }).length,
+};
+
 
        // Calculate absent as totalUsers minus other counts
        counts.absent = totalUsers - (counts.present + counts.leave + counts.halfDay);
