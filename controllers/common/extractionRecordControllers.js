@@ -887,6 +887,7 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
 // };
 
 const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
+const locationLevels = ["zone", "district", "town"];
 
 exports.getExtractionReportForAdmin = async (req, res) => {
   try {
@@ -898,6 +899,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       metric = "volume",
       view = "default",
     } = req.query;
+    console.log("report", req.query);
 
     // Helper: Parse a date string like "2025-07-01" as IST and return UTC Date
     function parseISTDate(dateStr) {
@@ -933,33 +935,99 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       end.setUTCHours(23, 59, 59, 999);
     }
 
-    // Log date range for debugging
-    console.log("Start Date (UTC):", start);
-    console.log("End Date (UTC):", end);
-
-    // Step 2: Get all matching dealers from hierarchy
+    // Step 2: Get all matching dealers from hierarchy and location filters
     const hierarchyFilters = {};
     hierarchyLevels.forEach((level) => {
       if (req.query[level]) {
-        hierarchyFilters[level] = req.query[level];
+        // Handle multiple values by splitting on comma
+        const values = Array.isArray(req.query[level]) 
+          ? req.query[level] 
+          : req.query[level].split(',').map(v => v.trim());
+        hierarchyFilters[level] = { $in: values };
       }
     });
 
-    const matchingDealersSet = new Set();
-    if (Object.keys(hierarchyFilters).length > 0) {
-      const matchingHierarchy = await HierarchyEntries.find({
-        hierarchy_name: "default_sales_flow",
-        ...hierarchyFilters,
-      });
-      matchingHierarchy.forEach((entry) => {
-        if (entry.dealer) {
-          matchingDealersSet.add(entry.dealer);
+    const locationFilters = {};
+    locationLevels.forEach((level) => {
+      if (req.query[level]) {
+        // Handle multiple values by splitting on comma
+        const values = Array.isArray(req.query[level]) 
+          ? req.query[level] 
+          : req.query[level].split(',').map(v => v.trim());
+        locationFilters[level] = { $in: values };
+      }
+    });
+
+    // First approach: Get dealers that match BOTH hierarchy AND location filters
+    let dealerFilter = [];
+    
+    if (Object.keys(hierarchyFilters).length > 0 || Object.keys(locationFilters).length > 0) {
+      // Get initial set of dealers from hierarchy if filters exist
+      let hierarchyDealers = [];
+      if (Object.keys(hierarchyFilters).length > 0) {
+        const matchingHierarchy = await HierarchyEntries.find({
+          hierarchy_name: "default_sales_flow",
+          ...hierarchyFilters,
+        });
+        hierarchyDealers = matchingHierarchy.map(entry => entry.dealer).filter(Boolean);
+      }
+      
+      // Get initial set of dealers from location if filters exist
+      let locationDealers = [];
+      if (Object.keys(locationFilters).length > 0) {
+        const locationQuery = locationFilters;
+        const matchingLocations = await User.find(locationQuery);
+        locationDealers = matchingLocations.map(location => location.code).filter(Boolean);
+      }
+      
+      // Combine based on which filters were provided
+      if (Object.keys(hierarchyFilters).length > 0 && Object.keys(locationFilters).length > 0) {
+        // Intersection - dealers must be in BOTH sets
+        const hierarchySet = new Set(hierarchyDealers);
+        dealerFilter = locationDealers.filter(dealer => hierarchySet.has(dealer));
+        
+        // If both filters are provided but no dealers match, return empty response
+        if (dealerFilter.length === 0) {
+          return res.status(200).json({
+            metricUsed: metric,
+            viewUsed: view,
+            data: [],
+            dealerFilter: [],
+            message: "No dealers found matching both hierarchy and location filters"
+          });
         }
-      });
+      } else if (Object.keys(hierarchyFilters).length > 0) {
+        // Only hierarchy filters
+        dealerFilter = hierarchyDealers;
+        
+        // If hierarchy filters are provided but no dealers match, return empty response
+        if (dealerFilter.length === 0) {
+          return res.status(200).json({
+            metricUsed: metric,
+            viewUsed: view,
+            data: [],
+            dealerFilter: [],
+            message: "No dealers found matching hierarchy filters"
+          });
+        }
+      } else {
+        // Only location filters
+        dealerFilter = locationDealers;
+        
+        // If location filters are provided but no dealers match, return empty response
+        if (dealerFilter.length === 0) {
+          return res.status(200).json({
+            metricUsed: metric,
+            viewUsed: view,
+            data: [],
+            dealerFilter: [],
+            message: "No dealers found matching location filters"
+          });
+        }
+      }
     }
 
-    const dealerFilter = [...matchingDealersSet];
-    console.log("Dealer filters:", dealerFilter);
+    console.log("Dealer filters:", dealerFilter.length);
 
     // Step 3: Brand List
     const brands = [
@@ -994,7 +1062,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       samsungMatchStage.segment = segment.replace(/[<>\+kK\s]/g, "");
     }
     if (dealerFilter.length > 0) {
-      samsungMatchStage.dealer = { $in: dealerFilter };
+      samsungMatchStage.buyer_code = { $in: dealerFilter };
     }
 
     const samsungPipeline = [
@@ -1006,35 +1074,51 @@ exports.getExtractionReportForAdmin = async (req, res) => {
             $switch: {
               branches: [
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000],
+                  },
                   then: 0,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000],
+                  },
                   then: 1,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000],
+                  },
                   then: 2,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000],
+                  },
                   then: 3,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000],
+                  },
                   then: 4,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000],
+                  },
                   then: 5,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000],
+                  },
                   then: 6,
                 },
                 {
-                  case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000] },
+                  case: {
+                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000],
+                  },
                   then: 7,
                 },
               ],
@@ -1045,7 +1129,10 @@ exports.getExtractionReportForAdmin = async (req, res) => {
             $cond: {
               if: { $eq: [metric, "value"] },
               then: {
-                $ifNull: ["$amount", { $multiply: ["$total_amount", "$quantity"] }],
+                $ifNull: [
+                  "$amount",
+                  { $multiply: ["$total_amount", "$quantity"] },
+                ],
               },
               else: "$quantity",
             },
@@ -1075,43 +1162,21 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     ];
 
     const samsungData = await SalesData.aggregate(samsungPipeline);
-    console.log("Samsung Data:", JSON.stringify(samsungData, null, 2));
 
     // Step 5: Aggregation for other brands from ExtractionRecord
     const otherBrandsMatchStage = {
       createdAt: { $gte: start, $lte: end },
-      brand: { $ne: 'samsung' },
+      brand: { $ne: "samsung" },
     };
     if (segment) {
-      otherBrandsMatchStage.segment = segment.replace(/[<>\+kK\s]/g, '');
+      otherBrandsMatchStage.segment = segment.replace(/[<>\+kK\s]/g, "");
     }
-    if (brand && brand !== 'Samsung') {
-      otherBrandsMatchStage.brand = { $regex: `^${brand}$`, $options: 'i' };
+    if (brand && brand !== "Samsung") {
+      otherBrandsMatchStage.brand = { $regex: `^${brand}$`, $options: "i" };
     }
     if (dealerFilter.length > 0) {
-      otherBrandsMatchStage.buyer_code = { $in: dealerFilter };
+      otherBrandsMatchStage.dealer = { $in: dealerFilter };
     }
-
-    console.log("otherBrandsMatchStage:", otherBrandsMatchStage);
-
-    // Debug raw ExtractionRecord data
-    const debugPipeline = [
-      { $match: otherBrandsMatchStage },
-      {
-        $project: {
-          brand: 1,
-          price: 1,
-          quantity: 1,
-          amount: 1,
-          segment: 1,
-          buyer_code: 1,
-          createdAt: 1,
-        },
-      },
-      { $limit: 10 },
-    ];
-    const debugData = await ExtractionRecord.aggregate(debugPipeline);
-    console.log("Debug ExtractionRecord data:", JSON.stringify(debugData, null, 2));
 
     const otherBrandsPipeline = [
       { $match: otherBrandsMatchStage },
@@ -1188,14 +1253,6 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     ];
 
     const otherBrandsData = await ExtractionRecord.aggregate(otherBrandsPipeline);
-    console.log("otherBrandsData:", JSON.stringify(otherBrandsData, null, 2));
-    console.log("Other Brands:");
-    otherBrandsData.forEach(entry => {
-      console.log(`Price Class ${entry._id}:`);
-      entry.brands.forEach(brand => {
-        console.log(brand);
-      });
-    });
 
     // Step 6: Combine and sort data
     const aggregatedData = [];
@@ -1211,7 +1268,9 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 
     // Merge Samsung data
     samsungData.forEach((entry) => {
-      const index = aggregatedData.findIndex((item) => item._id === Number(entry._id));
+      const index = aggregatedData.findIndex(
+        (item) => item._id === Number(entry._id)
+      );
       if (index >= 0) {
         aggregatedData[index].brands = entry.brands;
       } else {
@@ -1221,9 +1280,13 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 
     // Merge other brands data
     otherBrandsData.forEach((entry) => {
-      const index = aggregatedData.findIndex((item) => item._id === Number(entry._id));
+      const index = aggregatedData.findIndex(
+        (item) => item._id === Number(entry._id)
+      );
       if (index >= 0) {
-        aggregatedData[index].brands = aggregatedData[index].brands.concat(entry.brands);
+        aggregatedData[index].brands = aggregatedData[index].brands.concat(
+          entry.brands
+        );
       } else {
         console.log("No matching price class for other brands data:", entry);
         aggregatedData.push({ _id: Number(entry._id), brands: entry.brands });
@@ -1232,8 +1295,6 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 
     // Sort by priceClassOrder
     aggregatedData.sort((a, b) => a._id - b._id);
-
-    console.log("Aggregated Data:", JSON.stringify(aggregatedData, null, 2));
 
     // Step 7: Final response formatting
     const response = aggregatedData.map((entry) => {
@@ -1246,7 +1307,6 @@ exports.getExtractionReportForAdmin = async (req, res) => {
         row[b] = 0;
       });
 
-      console.log("Processing price class:", priceClassMap[entry._id], "Brands:", entry.brands);
       entry.brands.forEach((b) => {
         if (brands.includes(b.brand) || b.brand === "Others") {
           row[b.brand] = b.total;
@@ -1274,8 +1334,6 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       return row;
     });
 
-    console.log("Final Response (before total row):", JSON.stringify(response, null, 2));
-
     // Step 8: Add Total Row
     const totalRow = { "Price Class": "Total", "Rank of Samsung": null };
     brands.concat("Others").forEach((b) => {
@@ -1292,25 +1350,27 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     const sortedTotalBrands = Object.entries(totalRow)
       .filter(([key]) => brands.includes(key) || key === "Others")
       .sort(([, a], [, b]) => b - a);
-    const samsungTotalIndex = sortedTotalBrands.findIndex(([b]) => b === "Samsung");
-    totalRow["Rank of Samsung"] = samsungTotalIndex >= 0 ? samsungTotalIndex + 1 : null;
+    const samsungTotalIndex = sortedTotalBrands.findIndex(
+      ([b]) => b === "Samsung"
+    );
+    totalRow["Rank of Samsung"] =
+      samsungTotalIndex >= 0 ? samsungTotalIndex + 1 : null;
 
     if (view === "share" && totalRow["Total"] > 0) {
       brands.concat("Others").forEach((b) => {
-        totalRow[b] = ((totalRow[b] / totalRow["Total"]) * 100).toFixed(2) + "%";
+        totalRow[b] =
+          ((totalRow[b] / totalRow["Total"]) * 100).toFixed(2) + "%";
       });
       totalRow["Total"] = "100.00";
     }
 
     response.push(totalRow);
 
-    console.log("Total Row:", JSON.stringify(totalRow, null, 2));
-    console.log("Final Response (with total row):", JSON.stringify(response, null, 2));
-
     return res.status(200).json({
       metricUsed: metric,
       viewUsed: view,
       data: response,
+      dealerFilter,
     });
   } catch (error) {
     console.error("Error in getExtractionReport:", error);
@@ -1481,26 +1541,140 @@ exports.getExtractionReportForAdmin = async (req, res) => {
 //     return res.status(500).json({ error: 'Internal Server Error' });
 //   }
 // };
+//  exports.getHierarchyFilters = async (req, res) => {
+//    try {
+//     console.log("hiii")
+//      const hierarchyName = "default_sales_flow";
+//      const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
+
+//      // Step 1: Collect all query filters
+//      const filters = { hierarchy_name: hierarchyName };
+//      hierarchyLevels.forEach((level) => {
+//        if (req.query[level]) {
+//          filters[level] = req.query[level];
+//        }
+//      });
+
+//      // Step 2: Find all hierarchy entries that match all filters
+//      const hierarchyEntries = await HierarchyEntries.find(filters);
+
+//      // Step 3: Collect all unique codes from these entries
+//      const codeSet = new Set();
+//      hierarchyEntries.forEach((entry) => {
+//        hierarchyLevels.forEach((level) => {
+//          if (entry[level]) {
+//            codeSet.add(entry[level]);
+//          }
+//        });
+//      });
+
+//      const allCodes = [...codeSet];
+
+//      // Step 4: Get names for these codes
+//      const actorCodes = await ActorCode.find({ code: { $in: allCodes } });
+//      const codeNameMap = {};
+//      actorCodes.forEach((actor) => {
+//        codeNameMap[actor.code] = actor.name;
+//      });
+
+//      // Step 5: Group by hierarchy level
+//      const grouped = {};
+//      const uniqueSet = {};
+//      hierarchyLevels.forEach((level) => {
+//        grouped[level] = [];
+//        uniqueSet[level] = new Set();
+//      });
+
+//      hierarchyEntries.forEach((entry) => {
+//        hierarchyLevels.forEach((level) => {
+//          const code = entry[level];
+//          if (code && !uniqueSet[level].has(code)) {
+//            uniqueSet[level].add(code);
+//            grouped[level].push({
+//              code,
+//              name: codeNameMap[code] || null,
+//            });
+//          }
+//        });
+//      });
+
+//      return res.status(200).json(grouped);
+//    } catch (error) {
+//      console.error("Error in getHierarchyFilters:", error);
+//      return res.status(500).json({ error: "Internal Server Error" });
+//    }
+//  };
+
 exports.getHierarchyFilters = async (req, res) => {
   try {
     const hierarchyName = "default_sales_flow";
-    const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
+    const hierarchyLevels = [
+      "smd",
+      "asm",
+      "mdd",
+      "tse",
+      "dealer",
+      "district",
+      "town",
+      "zone",
+    ];
+    const hierarchyEntryLevels = ["smd", "asm", "mdd", "tse", "dealer"]; // Levels used for selectedLevel
 
-    // Step 1: Collect all query filters
-    const filters = { hierarchy_name: hierarchyName };
+    // Step 1: Collect query filters and handle multiple inputs
+    const hierarchyFilters = { hierarchy_name: hierarchyName };
+    const userFilters = {};
+    let selectedLevel = null;
     hierarchyLevels.forEach((level) => {
       if (req.query[level]) {
-        filters[level] = req.query[level];
+        const values = req.query[level].split(","); // Handle comma-separated values
+        if (["district", "town", "zone"].includes(level)) {
+          userFilters[level] = values; // Filters for User model
+        } else {
+          hierarchyFilters[level] = { $in: values }; // Filters for HierarchyEntries
+        }
+        // Only update selectedLevel for hierarchyEntryLevels
+        if (
+          hierarchyEntryLevels.includes(level) &&
+          (!selectedLevel ||
+            hierarchyLevels.indexOf(level) <
+              hierarchyLevels.indexOf(selectedLevel))
+        ) {
+          selectedLevel = level; // Track the highest selected level from hierarchyEntryLevels
+        }
       }
     });
 
-    // Step 2: Find all hierarchy entries that match all filters
-    const hierarchyEntries = await HierarchyEntries.find(filters);
+    // Add dealer filter for User model queries if provided
+    if (req.query.dealer) {
+      userFilters.dealer = req.query.dealer.split(","); // Handle comma-separated dealer codes
+    }
 
-    // Step 3: Collect all unique codes from these entries
+    // console.log("hierarchy query:", req.query);
+    // console.log("userFilters:", userFilters);
+    // console.log("hierarchyFilters:", hierarchyFilters);
+    // console.log("selectedLevel:", selectedLevel);
+
+    // Step 2: Initialize grouped response
+    const grouped = {};
+    hierarchyLevels.forEach((level) => {
+      grouped[level] = [];
+    });
+
+    // Step 3: Fetch data for smd, asm, mdd, tse, dealer from HierarchyEntries
+    // Use unfiltered data for selected level and above, filtered data for below
+    const baseHierarchyFilters = { hierarchy_name: hierarchyName }; // No filters for higher levels and selected level
+    const hierarchyEntries = await HierarchyEntries.find(hierarchyFilters); // Filtered for levels below selectedLevel
+    const allHierarchyEntries = await HierarchyEntries.find(
+      baseHierarchyFilters
+    ); // Unfiltered for selected level and above
+
+    // console.log("hierarchyEntries count:", hierarchyEntries.length);
+    // console.log("allHierarchyEntries count:", allHierarchyEntries.length);
+
+    // Collect codes for all hierarchy levels
     const codeSet = new Set();
-    hierarchyEntries.forEach((entry) => {
-      hierarchyLevels.forEach((level) => {
+    allHierarchyEntries.forEach((entry) => {
+      hierarchyEntryLevels.forEach((level) => {
         if (entry[level]) {
           codeSet.add(entry[level]);
         }
@@ -1508,34 +1682,103 @@ exports.getHierarchyFilters = async (req, res) => {
     });
 
     const allCodes = [...codeSet];
-
-    // Step 4: Get names for these codes
     const actorCodes = await ActorCode.find({ code: { $in: allCodes } });
     const codeNameMap = {};
     actorCodes.forEach((actor) => {
       codeNameMap[actor.code] = actor.name;
     });
 
-    // Step 5: Group by hierarchy level
-    const grouped = {};
+    // Group hierarchy entries by level
     const uniqueSet = {};
-    hierarchyLevels.forEach((level) => {
-      grouped[level] = [];
+    hierarchyEntryLevels.forEach((level) => {
       uniqueSet[level] = new Set();
     });
 
-    hierarchyEntries.forEach((entry) => {
-      hierarchyLevels.forEach((level) => {
-        const code = entry[level];
-        if (code && !uniqueSet[level].has(code)) {
-          uniqueSet[level].add(code);
+    // Process levels at or above selectedLevel using allHierarchyEntries
+    allHierarchyEntries.forEach((entry) => {
+      hierarchyEntryLevels.forEach((level) => {
+        const levelIndex = hierarchyLevels.indexOf(level);
+        if (
+          entry[level] &&
+          !uniqueSet[level].has(entry[level]) &&
+          (!selectedLevel ||
+            levelIndex <= hierarchyLevels.indexOf(selectedLevel))
+        ) {
+          uniqueSet[level].add(entry[level]);
           grouped[level].push({
-            code,
-            name: codeNameMap[code] || null,
+            code: entry[level],
+            name: codeNameMap[entry[level]] || null,
           });
         }
       });
     });
+
+    // Process levels below selectedLevel using hierarchyEntries
+    if (selectedLevel) {
+      const selectedLevelIndex = hierarchyLevels.indexOf(selectedLevel);
+      hierarchyEntries.forEach((entry) => {
+        hierarchyEntryLevels.forEach((level) => {
+          const levelIndex = hierarchyLevels.indexOf(level);
+          if (
+            entry[level] &&
+            !uniqueSet[level].has(entry[level]) &&
+            levelIndex > selectedLevelIndex
+          ) {
+            uniqueSet[level].add(entry[level]);
+            grouped[level].push({
+              code: entry[level],
+              name: codeNameMap[entry[level]] || null,
+            });
+          }
+        });
+      });
+    }
+
+    // Step 4: Fetch data for district, town, zone from User, filtered by dealer
+    // Derive dealer filter from hierarchyEntries for levels below selectedLevel
+    let dealerFilter = userFilters.dealer || [];
+    if (selectedLevel && hierarchyEntryLevels.includes(selectedLevel)) {
+      dealerFilter = [
+        ...new Set(
+          hierarchyEntries.map((entry) => entry.dealer).filter((code) => code)
+        ),
+      ];
+      if (userFilters.dealer) {
+        dealerFilter = dealerFilter.filter((dealer) =>
+          userFilters.dealer.includes(dealer)
+        );
+      }
+    }
+
+    // console.log("dealerFilter:", dealerFilter);
+
+    for (const level of ["district", "town", "zone"]) {
+      // Build filters for User model, prioritizing dealer filter
+      const levelFilters = {};
+      if (dealerFilter.length > 0) {
+        levelFilters.code = dealerFilter; // Apply dealer filter based on hierarchy
+      }
+      // Only apply level-specific filter if explicitly provided in query
+      // if (userFilters[level]) {
+      //   levelFilters[level] = userFilters[level];
+      // }
+
+      // console.log(`levelFilters for ${level}:`, levelFilters);
+
+      // Fetch distinct codes for the current level
+      const entries = await User.find(levelFilters, { [level]: 1 })
+        .distinct(level)
+        .lean();
+
+      // console.log(`entries for ${level}:`, entries);
+
+      // Build grouped response for this level (only include code)
+      grouped[level] = entries
+        .filter((code) => code) // Remove null/undefined codes
+        .map((code) => ({
+          code,
+        }));
+    }
 
     return res.status(200).json(grouped);
   } catch (error) {
