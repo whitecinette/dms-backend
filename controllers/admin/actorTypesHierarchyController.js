@@ -177,3 +177,43 @@ exports.getAllActorType = async(req, res) =>{
     return res.status(500).json({ message: "Internal server error" })
   }
 }
+
+
+exports.getHierarchySubordinatesDSF = async (req, res) => {
+  try {
+    const userPosition = req.user?.position?.toLowerCase();
+    const userRole = req.user?.role?.toLowerCase();
+    console.log("eac", userRole);
+
+    const hierarchyDoc = await ActorTypesHierarchy.findOne({ name: 'default_sales_flow' });
+    if (!hierarchyDoc) {
+      return res.status(404).json({ error: 'Hierarchy not found' });
+    }
+
+    const hierarchy = hierarchyDoc.hierarchy;
+
+    // If user is admin, return all positions
+    if (userRole === 'admin') {
+      return res.json({ position: userPosition || 'admin', subordinates: hierarchy });
+    }
+
+    if (!userPosition) {
+      return res.status(400).json({ error: 'User position not found' });
+    }
+
+    const index = hierarchy.indexOf(userPosition);
+
+    if (index === -1) {
+      return res.status(400).json({ error: 'User position not in hierarchy' });
+    }
+
+    const subordinates = hierarchy.slice(index + 1).filter(pos => pos !== 'dealer');
+    console.log("Sub: ", subordinates)
+    return res.json({ position: userPosition, subordinates });
+
+
+  } catch (err) {
+    console.error('Error fetching hierarchy:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
