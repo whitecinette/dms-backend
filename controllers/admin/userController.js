@@ -625,7 +625,7 @@ exports.editUserByAdmins = async (req, res) => {
     const userRole = req.user.role;
     const { id } = req.params; // Extract user ID from request parameters
     const updateData = req.body; // Extract incoming update data
-    const role = updateData.role;
+    const {code,name,position,status,role} = updateData;
 
     if (userRole === "admin" && (role === "admin" || role === "super_admin")) {
       return res
@@ -661,12 +661,18 @@ exports.editUserByAdmins = async (req, res) => {
       }
     }
 
+    const existing = await User.findById(id);
+
+    // oldCode, newCode, name, status, role, position
+    editActorCode(existing.code, code, name, status, role, position);
+    
+
     // Perform the update with $set
     const updatedUser = await User.findByIdAndUpdate(
-      id,
-      { $set: updateFields },
-      { new: true, runValidators: true }
-    );
+       id,
+       { $set: updateFields },
+       { new: true, runValidators: true }
+     );
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
@@ -1384,4 +1390,82 @@ exports.createSecurityKey = async (req, res) => {
 
   // Update the security oldKey in the user
   res.status(200).json({ success: true, message: "Security oldKey created successfully" });
+};
+ 
+/**
+ * Bulk update tags and siddha_code for users from a CSV file.
+ * CSV columns: code,tags,siddha_code
+ * tags should be separated by semicolon (e.g. tag1;tag2;tag3)
+ */
+exports.bulkAddTagsAndOtherFromCSV = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "CSV file is required." });
+    }
+
+    const filePath = req.file.path;
+    const results = [];
+    const errors = [];
+
+    fs.createReadStream(filePath)
+      .pipe(csvParser())
+      .on("data", (row) => {
+        const code = row.code?.trim();
+        const tags = row.tags ? row.tags.split(";").map(t => t.trim()).filter(Boolean) : [];
+
+        // Collect all other fields except code, tags
+        const otherFields = {};
+        for (const key in row) {
+          if (!["code", "tags"].includes(key) && row[key] && row[key].trim() !== "") {
+            otherFields[key] = row[key].trim();
+          }
+        }
+
+        if (!code) {
+          errors.push({ row, message: "Missing code" });
+        } else {
+          results.push({ code, tags, ...otherFields });
+        }
+      })
+      .on("end", async () => {
+        let updated = 0;
+        for (const row of results) {
+          const { code, tags, ...otherFields } = row;
+
+          // Build update object
+          const updateObj = {};
+          if (tags && tags.length) updateObj.$addToSet = { tags: { $each: tags } };
+          // Add any other fields to $set
+          if (Object.keys(otherFields).length) {
+            if (!updateObj.$set) updateObj.$set = {};
+            Object.assign(updateObj.$set, otherFields);
+          }
+
+          if (Object.keys(updateObj).length === 0) {
+            errors.push({ code, message: "No fields to update" });
+            continue;
+          }
+
+          const user = await User.findOneAndUpdate(
+            { code },
+            updateObj,
+            { new: true }
+          );
+          if (user) updated++;
+          else errors.push({ code, message: "User not found" });
+        }
+
+        fs.unlinkSync(filePath);
+
+        res.status(200).json({
+          success: true,
+          message: "Bulk update completed",
+          updatedCount: updated,
+          errors
+        });
+      });
+  } catch (error) {
+    console.error("Bulk update error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 };

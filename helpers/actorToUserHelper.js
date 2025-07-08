@@ -101,23 +101,34 @@ exports.inactiveActor = async (code) => {
 }
 
 //edit actor codes
-exports.editActorCode = async (code, name, status, role, position) => {
-  try{
-    const existingActor = await ActorCode.findOne({code});
-    if(!existingActor){
+exports.editActorCode = async (oldCode, newCode, name, status, role, position) => {
+  try {
+    console.log("hello im here");
+    console.log({ oldCode, newCode, name, status, role, position });
+
+    // FIXED: Correct field name used in query
+    const existingActor = await ActorCode.findOne({ code: oldCode });
+
+    if (!existingActor) {
       return { success: false, message: "Actor code not found." };
     }
-    existingActor.name = name;
-    existingActor.status = status;
-    existingActor.role = role;
-    existingActor.position = position
+
+    // Update only if values are provided (optional: skip undefined)
+    if (newCode !== undefined) existingActor.code = newCode;
+    if (name !== undefined) existingActor.name = name;
+    if (status !== undefined) existingActor.status = status;
+    if (role !== undefined) existingActor.role = role;
+    if (position !== undefined) existingActor.position = position;
+
     await existingActor.save();
+
     return { success: true, message: "Actor code updated successfully." };
-  }catch(err){
+  } catch (err) {
     console.error("Error in editActorCode:", err);
     return { success: false, message: "Internal server error." };
   }
-}
+};
+
 
 //edit user codes
 exports.editUser = async (oldCode, newCode, name, position, role, status) => {
