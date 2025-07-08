@@ -11,6 +11,7 @@ const cloudinary = require("../../config/cloudinary");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 const MetaData = require("../../model/MetaData");
 const { DateTime } = require("luxon");
+// const { warn } = require("console");
 
 // punch in
 // exports.punchIn = async (req, res) => {
@@ -174,7 +175,7 @@ const { DateTime } = require("luxon");
 //       .json({ message: "Error recording punch in. please try again later" });
 //   }
 // };
-
+// in this api i just add the succes true or false message not changed any other things
 exports.punchIn = async (req, res) => {
   try {
     console.log("Punch in here");
@@ -186,7 +187,7 @@ exports.punchIn = async (req, res) => {
     if (!code)
       return res
         .status(400)
-        .json({ message: "User code is missing in token." });
+        .json({ success: false, message: "User code is missing in token." });
     if (!req.file) {
       return res.status(200).json({
         warning: true,
@@ -203,6 +204,8 @@ exports.punchIn = async (req, res) => {
     });
     if (existingAttendance) {
       return res.status(200).json({
+       success: false,
+       warning: true,
         message: "You have already punched in for today.",
         attendance: existingAttendance,
       });
@@ -257,7 +260,7 @@ exports.punchIn = async (req, res) => {
     if (!allCodes.length) {
       return res
         .status(404)
-        .json({ message: "No related employees found in the hierarchy." });
+        .json({ success: false, message: "No related employees found in the hierarchy." });
     }
 
     const relatedUsers = await User.aggregate([
@@ -280,7 +283,7 @@ exports.punchIn = async (req, res) => {
     if (!relatedUsers.length) {
       return res
         .status(404)
-        .json({ message: "No related users with location data found." });
+        .json({ success: false, message: "No related users with location data found." });
     }
 
     const userLat = parseFloat(latitude);
@@ -380,202 +383,387 @@ exports.punchIn = async (req, res) => {
     console.error("Error during punch-in:", error);
     res
       .status(500)
-      .json({ message: "Error recording punch in. Please try again later" });
+      // add the sucess false (Nameera)
+      .json({ success: false, message: "Error recording punch in. Please try again later" });
   }
 };
 
 // punch out
+// exports.punchOut = async (req, res) => {
+//   try {
+//     const { latitude, longitude } = req.body;
+//     const { code } = req.user;
+
+//     if (!code) {
+//       return res
+//         .status(400)
+//         .json({ message: "User code is missing in token." });
+//     }
+//     if (!req.file) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Please capture an image." });
+//     }
+//     const formattedDate = moment().format("YYYY-MM-DD");
+//     const punchOutTime = moment().format("YYYY-MM-DD HH:mm:ss");
+
+//     const attendance = await Attendance.findOne({
+//       code,
+//       date: formattedDate,
+//     });
+//     if (!attendance) {
+//       return res.status(200).json({
+//         warning: true,
+//         message: "You have not punched in yet for today.",
+//       });
+//     }
+
+//     if (attendance.punchOut) {
+//       return res.status(200).json({
+//         warning: true,
+//         message: "You have already punched out today.",
+//       });
+//     }
+//     const allHierarchies = await HierarchyEntries.find({});
+//     const matchedHierarchies = allHierarchies.filter((hierarchy) => {
+//       const fields = Object.keys(hierarchy.toObject()).filter(
+//         (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
+//       );
+//       return fields.some((key) => hierarchy[key] === code);
+//     });
+//     const hasDealerField = matchedHierarchies.some((hierarchy) =>
+//       Object.prototype.hasOwnProperty.call(hierarchy.toObject(), "dealer")
+//     );
+//     const isDealerAssigned = matchedHierarchies.some(
+//       (hierarchy) => hierarchy.dealer === code
+//     );
+
+//     if (hasDealerField && !isDealerAssigned) {
+//       return await attendanceHelpers.handlePunchOutWithoutDealer({
+//         attendance,
+//         req,
+//         res,
+//         punchOutTime,
+//         latitude,
+//         longitude,
+//       });
+//     }
+
+//     // ✅ Proceed with hierarchy + distance check
+//     const allCodesSet = new Set();
+//     matchedHierarchies.forEach((hierarchy) => {
+//       Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
+//         if (!["_id", "__v", "hierarchy_name"].includes(key)) {
+//           if (Array.isArray(value)) {
+//             value.forEach((v) => v && allCodesSet.add(v));
+//           } else if (value) {
+//             allCodesSet.add(value);
+//           }
+//         }
+//       });
+//     });
+
+//     const allCodes = Array.from(allCodesSet);
+
+//     const relatedUsers = await User.aggregate([
+//       {
+//         $match: {
+//           code: { $in: allCodes },
+//           latitude: { $type: "decimal" },
+//           longitude: { $type: "decimal" },
+//         },
+//       },
+//       { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
+//     ]);
+
+//     if (!relatedUsers.length) {
+//       return res
+//         .status(404)
+//         .json({ message: "No related users with location data found." });
+//     }
+
+//     const userLat = parseFloat(latitude);
+//     const userLon = parseFloat(longitude);
+
+//     let nearestUser = null;
+//     let minDistance = Infinity;
+
+//     relatedUsers.forEach((relUser) => {
+//       const relLat = parseFloat(relUser.latitude);
+//       const relLon = parseFloat(relUser.longitude);
+//       const distance = attendanceHelpers.getDistance(
+//         userLat,
+//         userLon,
+//         relLat,
+//         relLon
+//       );
+//       if (distance < minDistance) {
+//         minDistance = distance;
+//         nearestUser = relUser;
+//       }
+//     });
+
+//     if (!nearestUser || minDistance > 100) {
+//       return res.status(200).json({
+//         warning: true,
+//         message: `You are too far — approx ${minDistance.toFixed(
+//           2
+//         )} meters away. Please move closer to a hierarchy member and try again.`,
+//       });
+//     }
+
+//     // ✅ Upload punch-out image
+//     if (!req.file) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Please capture an image." });
+//     } // store image as name and time
+//     const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+//     const publicId = `${code}_${timestamp}`;
+
+//     // Upload to Cloudinary
+//     const result = await cloudinary.uploader.upload(req.file.path, {
+//       folder: "gpunchOutImage",
+//       public_id: publicId,
+//       transformation: [
+//         { width: 800, height: 800, crop: "limit" },
+//         { quality: "auto" },
+//         { fetch_format: "auto" },
+//       ],
+//     });
+//     // delete temp file
+//     try {
+//       if (req.file?.path) {
+//         await fsPromises.unlink(req.file.path);
+//         console.log("Temp file deleted:", req.file.path);
+//       }
+//     } catch (err) {
+//       console.error("Failed to delete temp file:", err);
+//     }
+
+//     const punchOutImage = result.secure_url;
+
+//     const durationMinutes = moment(punchOutTime).diff(
+//       moment(attendance.punchIn),
+//       "minutes"
+//     );
+//     const hoursWorked = (durationMinutes / 60).toFixed(2);
+
+//     let status = "Present";
+//     if (hoursWorked <= 4) status = "Absent";
+//     else if (hoursWorked < 8) status = "Half Day";
+
+//     attendance.punchOut = punchOutTime;
+//     attendance.punchOutImage = punchOutImage;
+//     attendance.status = status;
+//     attendance.punchOutLatitude = latitude;
+//     attendance.punchOutLongitude = longitude;
+//     attendance.hoursWorked = parseFloat(hoursWorked);
+//     attendance.punchOutCode = nearestUser.code;
+//     attendance.punchOutName = nearestUser.name;
+
+//     await attendance.save();
+
+//     res.status(201).json({
+//       message: "Punch-out recorded successfully",
+//       attendance: {
+//         ...attendance.toObject(),
+//         punchOutCode: nearestUser.code,
+//         punchOutName: nearestUser.name,
+//         punchOutLatitude: latitude,
+//         punchOutLongitude: longitude,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error during punch-out:", error);
+//     res
+//       .status(500)
+//       .json({ message: "Error recording punch out. please try again later" });
+//   }
+// };
+// punch out lates api Nameera (07 july 2025)
 exports.punchOut = async (req, res) => {
-  try {
-    const { latitude, longitude } = req.body;
-    const { code } = req.user;
+ console.log("punhc out start here...");
+ try {
+   const { latitude, longitude } = req.body;
+   const { code } = req.user;
+   console.log("latitude is", latitude, "longitude is", longitude);
 
-    if (!code) {
-      return res
-        .status(400)
-        .json({ message: "User code is missing in token." });
-    }
-    if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Please capture an image." });
-    }
-    const formattedDate = moment().format("YYYY-MM-DD");
-    const punchOutTime = moment().format("YYYY-MM-DD HH:mm:ss");
+   if (!code) {
+     return res.status(400).json({ success: false, message: "User code is missing in token." });
+   }
 
-    const attendance = await Attendance.findOne({
-      code,
-      date: formattedDate,
-    });
-    if (!attendance) {
-      return res.status(200).json({
-        warning: true,
-        message: "You have not punched in yet for today.",
-      });
-    }
+   if (!req.file) {
+     return res.status(400).json({ success: false, message: "Please capture an image." });
+   }
 
-    if (attendance.punchOut) {
-      return res.status(200).json({
-        warning: true,
-        message: "You have already punched out today.",
-      });
-    }
-    const allHierarchies = await HierarchyEntries.find({});
-    const matchedHierarchies = allHierarchies.filter((hierarchy) => {
-      const fields = Object.keys(hierarchy.toObject()).filter(
-        (key) => key !== "_id" && key !== "hierarchy_name" && key !== "__v"
-      );
-      return fields.some((key) => hierarchy[key] === code);
-    });
-    const hasDealerField = matchedHierarchies.some((hierarchy) =>
-      Object.prototype.hasOwnProperty.call(hierarchy.toObject(), "dealer")
-    );
-    const isDealerAssigned = matchedHierarchies.some(
-      (hierarchy) => hierarchy.dealer === code
-    );
+   const formattedDate = moment().format("YYYY-MM-DD");
+   const punchOutTime = moment().format("YYYY-MM-DD HH:mm:ss");
 
-    if (hasDealerField && !isDealerAssigned) {
-      return await attendanceHelpers.handlePunchOutWithoutDealer({
-        attendance,
-        req,
-        res,
-        punchOutTime,
-        latitude,
-        longitude,
-      });
-    }
+   const attendance = await Attendance.findOne({ code, date: formattedDate });
+   if (!attendance) {
+     return res.status(200).json({ success: false, message: "You have not punched in yet for today." });
+   }
 
-    // ✅ Proceed with hierarchy + distance check
-    const allCodesSet = new Set();
-    matchedHierarchies.forEach((hierarchy) => {
-      Object.entries(hierarchy.toObject()).forEach(([key, value]) => {
-        if (!["_id", "__v", "hierarchy_name"].includes(key)) {
-          if (Array.isArray(value)) {
-            value.forEach((v) => v && allCodesSet.add(v));
-          } else if (value) {
-            allCodesSet.add(value);
-          }
-        }
-      });
-    });
+   if (attendance.punchOut) {
+     return res.status(200).json({ success: false, warning: true, message: "You have already punched out today." });
+   }
 
-    const allCodes = Array.from(allCodesSet);
+   // Fetch valid fields from ActorTypesHierarchy
+   const actorTypes = await ActorTypesHierarchy.find().lean();
+   const fieldsToQuery = [
+     ...new Set(
+       actorTypes
+         .flatMap((entry) => entry.hierarchy?.map((role) => role.toLowerCase()) || [])
+         .filter((role) => role)
+     ),
+   ];
 
-    const relatedUsers = await User.aggregate([
-      {
-        $match: {
-          code: { $in: allCodes },
-          latitude: { $type: "decimal" },
-          longitude: { $type: "decimal" },
-        },
-      },
-      { $project: { code: 1, name: 1, latitude: 1, longitude: 1 } },
-    ]);
+   // Build OR query for all fields
+   const orQuery = fieldsToQuery.map((key) => ({
+     [key]: { $in: [code] },
+   }));
 
-    if (!relatedUsers.length) {
-      return res
-        .status(404)
-        .json({ message: "No related users with location data found." });
-    }
+   const userHierarchies = await HierarchyEntries.find({ $or: orQuery }).lean();
 
-    const userLat = parseFloat(latitude);
-    const userLon = parseFloat(longitude);
+   const allCodes = [
+     ...new Set(
+       userHierarchies.flatMap((hierarchy) =>
+         fieldsToQuery
+           .flatMap((key) => {
+             const val = hierarchy[key];
+             return Array.isArray(val) ? val : [val];
+           })
+           .filter((v) => v && v !== code)
+       )
+     ),
+   ];
 
-    let nearestUser = null;
-    let minDistance = Infinity;
+   if (!allCodes.length) {
+     return res.status(404).json({ success: false, message: "No related employees found in the hierarchy." });
+   }
 
-    relatedUsers.forEach((relUser) => {
-      const relLat = parseFloat(relUser.latitude);
-      const relLon = parseFloat(relUser.longitude);
-      const distance = attendanceHelpers.getDistance(
+   const relatedUsers = await User.aggregate([
+     {
+       $match: {
+         code: { $in: allCodes },
+         latitude: { $type: ["double", "decimal"] },
+         longitude: { $type: ["double", "decimal"] },
+       },
+     },
+     {
+       $project: { code: 1, name: 1, position: 1, latitude: 1, longitude: 1 },
+     },
+   ]);
+
+   if (!relatedUsers.length) {
+     return res.status(404).json({ success: false, message: "No related users with location data found." });
+   }
+
+   const userLat = parseFloat(latitude);
+   const userLon = parseFloat(longitude);
+
+   let nearestUser = null;
+   let minDistance = Infinity;
+   let ptnUser;
+   relatedUsers.forEach((relUser) => {
+     const relLat = parseFloat(relUser.latitude);
+     const relLon = parseFloat(relUser.longitude);
+     if (isNaN(relLat) || isNaN(relLon)) return;
+     const distance = attendanceHelpers.getDistance(userLat, userLon, relLat, relLon);
+     if (distance == null) {
+      console.log(`Null distance for ${relUser.code}:`, {
         userLat,
         userLon,
         relLat,
-        relLon
-      );
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestUser = relUser;
-      }
-    });
-
-    if (!nearestUser || minDistance > 100) {
-      return res.status(200).json({
-        warning: true,
-        message: `You are too far — approx ${minDistance.toFixed(
-          2
-        )} meters away. Please move closer to a hierarchy member and try again.`,
+        relLon,
       });
+      return;
     }
 
-    // ✅ Upload punch-out image
-    if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Please capture an image." });
-    } // store image as name and time
-    const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
-    const publicId = `${code}_${timestamp}`;
-
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "gpunchOutImage",
-      public_id: publicId,
-      transformation: [
-        { width: 800, height: 800, crop: "limit" },
-        { quality: "auto" },
-        { fetch_format: "auto" },
-      ],
-    });
-    // delete temp file
-    try {
-      if (req.file?.path) {
-        await fsPromises.unlink(req.file.path);
-        console.log("Temp file deleted:", req.file.path);
-      }
-    } catch (err) {
-      console.error("Failed to delete temp file:", err);
-    }
-
-    const punchOutImage = result.secure_url;
-
-    const durationMinutes = moment(punchOutTime).diff(
-      moment(attendance.punchIn),
-      "minutes"
+    console.log(
+      `Distance to ${relUser.code} (${relUser.position}): ${distance.toFixed(
+        2
+      )} km`
     );
-    const hoursWorked = (durationMinutes / 60).toFixed(2);
 
-    let status = "Present";
-    if (hoursWorked <= 4) status = "Absent";
-    else if (hoursWorked < 8) status = "Half Day";
+     if (distance < minDistance) {
+       minDistance = distance;
+       nearestUser = relUser;
+     }
+     ptnUser = nearestUser;
+   });
+   console.log("Ptn user: ", ptnUser, minDistance.toFixed(2), "Meters");
 
-    attendance.punchOut = punchOutTime;
-    attendance.punchOutImage = punchOutImage;
-    attendance.status = status;
-    attendance.punchOutLatitude = latitude;
-    attendance.punchOutLongitude = longitude;
-    attendance.hoursWorked = parseFloat(hoursWorked);
-    attendance.punchOutCode = nearestUser.code;
-    attendance.punchOutName = nearestUser.name;
+   if (!nearestUser || minDistance > 200) {
+     return res.status(200).json({
+       warning: true,
+       message: `You are too far — approx ${minDistance.toFixed(
+         2
+       )} meters away. Please move closer to a hierarchy member and try again.`,
+     });
+   }
+   console.log("Punch out nearest User:", nearestUser);
+   // Upload punch-out image to Cloudinary
+   const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
+   const publicId = `${code}_${timestamp}`;
 
-    await attendance.save();
+   const result = await cloudinary.uploader.upload(req.file.path, {
+     folder: "gpunchOutImage",
+     public_id: publicId,
+     transformation: [
+       { width: 800, height: 800, crop: "limit" },
+       { quality: "auto" },
+       { fetch_format: "auto" },
+     ],
+   });
 
-    res.status(201).json({
-      message: "Punch-out recorded successfully",
-      attendance: {
-        ...attendance.toObject(),
-        punchOutCode: nearestUser.code,
-        punchOutName: nearestUser.name,
-        punchOutLatitude: latitude,
-        punchOutLongitude: longitude,
-      },
-    });
-  } catch (error) {
-    console.error("Error during punch-out:", error);
-    res
-      .status(500)
-      .json({ message: "Error recording punch out. please try again later" });
-  }
+   // Delete temp image
+   try {
+     if (req.file?.path) {
+       await fsPromises.unlink(req.file.path);
+       console.log("Temp file deleted:", req.file.path);
+     }
+   } catch (err) {
+     console.error("Failed to delete temp file:", err);
+   }
+
+   // Calculate worked hours
+   const durationMinutes = moment(punchOutTime).diff(moment(attendance.punchIn), "minutes");
+   const hoursWorked = (durationMinutes / 60).toFixed(2);
+
+   let status = "Present";
+   if (hoursWorked <= 4) status = "Absent";
+   else if (hoursWorked < 8) status = "Half Day";
+
+   // Update attendance record
+   attendance.punchOut = punchOutTime;
+   attendance.punchOutImage = result.secure_url;
+   attendance.status = status;
+   attendance.punchOutLatitude = latitude;
+   attendance.punchOutLongitude = longitude;
+   attendance.hoursWorked = parseFloat(hoursWorked);
+   attendance.punchOutCode = nearestUser.code;
+   attendance.punchOutName = nearestUser.name;
+   attendance.distance = parseFloat(minDistance.toFixed(2));
+
+   await attendance.save();
+
+   res.status(201).json({
+     message: "Punch-out recorded successfully",
+     attendance: {
+       ...attendance.toObject(),
+       punchOutCode: nearestUser.code,
+       punchOutName: nearestUser.name,
+       punchOutLatitude: latitude,
+       punchOutLongitude: longitude,
+       distance: parseFloat(minDistance.toFixed(2)), // Also in response
+     },
+   });
+ } catch (error) {
+   console.error("Error during punch-out:", error);
+   res.status(500).json({ success: false, message: "Error recording punch out. Please try again later." });
+ }
 };
 
 exports.getAttendance = async (req, res) => {
