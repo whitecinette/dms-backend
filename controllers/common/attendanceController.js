@@ -330,6 +330,7 @@ exports.punchIn = async (req, res) => {
 
     if (!nearestUser || minDistance > 200) {
       return res.status(200).json({
+       success: false,
         warning: true,
         message: `You are too far — approx ${minDistance.toFixed(
           2
