@@ -1,14 +1,58 @@
 const mongoose = require("mongoose");
 
-const PayrollSchema = new mongoose.Schema(
+const payrollSchema = new mongoose.Schema(
   {
+    // 🎯 Unique Employee Code (ref to ActorCode or User)
     code: {
       type: String,
-      ref: "ActorCode",
+      ref: "ActorCode", // Or "User" if you're using User collection
       required: true,
     },
+
+    // 📅 Month for which salary is being generated (e.g., "2025-07")
+    salaryMonth: {
+      type: String,
+      required: true,
+    },
+
+    // 🕒 Date when payroll was generated
+    payrollDate: {
+      type: Date,
+      default: Date.now,
+    },
+
+    // 💰 Date when salary was actually paid
+    salaryPaidAt: {
+      type: Date,
+    },
+
+    // 📆 Total salary days in the month (e.g., 26 working days out of 30)
+    salaryDays: {
+      type: Number,
+      required: true,
+    },
+
+    // ✅ Attendance-based working days (Present + 0.5 × Half Days + Paid Leaves)
+    workingDaysCounted: {
+      type: Number,
+      required: true,
+    },
+    carryForward: {
+     pendingSalary: Number,
+     unpaidExpenses: Number,
+     remarks: String,
+   },   
+    // 🧾 Salary Components
     salaryDetails: {
-      baseSalary: { type: Number },          // Auto-calculated field
+      baseSalary: { type: Number, required: true }, // Monthly snapshot from CTC/12
+
+      bonuses: [
+        {
+          name: { type: String },
+          amount: { type: Number, default: 0 },
+        },
+      ],
+
       deductions: [
         {
           name: { type: String, required: true },
@@ -17,72 +61,58 @@ const PayrollSchema = new mongoose.Schema(
           isActive: { type: Boolean, default: false },
         },
       ],
-      bonuses: [
+      increments: [
+       {
+         name: String,
+         amount: Number,
+         type: { type: String, enum: ["permanent", "one-time"] },
+         effectiveFrom: Date,
+         approvedBy: { type: String, ref: "User" },
+       }
+     ],     
+
+      other: [
         {
-          name: { type: String },
-          amount: { type: Number, default: 0 },
+          name: { type: String, required: true },
+          type: { type: String, enum: ["addition", "deduction"], required: true },
+          amount: { type: Number, required: true },
         },
       ],
-      other: {
-        type: [
-          {
-            name: { type: String, required: true },
-            type: { type: String, enum: ["addition", "deduction"], required: true },
-            amount: { type: Number, required: true },
-          },
-        ],
-        default: [],  
-      }
+
+      reimbursedExpenses: {
+        type: Number,
+        default: 0,
+      },
     },
-    totalSalary: { type: Number },
-    payrollDate: { type: Date, default: Date.now },
-    salaryMonth: { type: String, required: true } 
+
+    // 🧮 Final Computed Values (after all calculations)
+    calculatedSalary: { type: Number },   // Raw salary before bonuses/deductions
+    grossPay: { type: Number },           // base + bonuses + additions
+    totalDeductions: { type: Number },    // All fixed & percentage deductions + other deductions
+    netPayable: { type: Number },         // Final payout after deductions
+
+    // 📌 Metadata
+    status: {
+      type: String,
+      enum: ["Generated", "Pending", "Paid"],
+      default: "Generated",
+    },
+
+    createdBy: {
+      type: String,
+      ref: "User",
+    },
+
+    remarks: {
+      type: String,
+    },
+    // to store payslip url for salary generted 
+    payslipUrl: {
+     type: String
+   }
+   
+
   },
-  { strict: false, timestamps: true }
+  { timestamps: true, strict: false }
 );
-
-// Salary Calculation Logic (Pre-save Hook)
-PayrollSchema.pre("save", function (next) {
-  const { CTC, other } = this.salaryDetails;
-
-  // Auto-calculate baseSalary from CTC
-  const baseSalary = Math.round(CTC / 12); 
-  this.salaryDetails.baseSalary = baseSalary;
-
-  let totalSalary = baseSalary;
-
-  // Add Bonuses
-  if (this.salaryDetails.bonuses) {
-    this.salaryDetails.bonuses.forEach((bonus) => {
-      totalSalary += bonus.amount;
-    });
-  }
-
-  // Deduct Deductions
-  if (this.salaryDetails.deductions) {
-    this.salaryDetails.deductions.forEach((deduction) => {
-      if (deduction.isActive) {
-        totalSalary -=
-          deduction.type === "percentage"
-            ? totalSalary * (deduction.value / 100)
-            : deduction.value;
-      }
-    });
-  }
-
-  // Handle 'Other' Dynamic Fields (e.g., House Allowance)
-  if (other) {
-    other.forEach((entry) => {
-      if (entry.type === "addition") {
-        totalSalary += entry.amount; 
-      } else if (entry.type === "deduction") {
-        totalSalary -= entry.amount; 
-      }
-    });
-  }
-
-  this.calculatedSalary = totalSalary;
-  next();
-});
-
-module.exports = mongoose.model("Payroll", PayrollSchema);
+module.exports = mongoose.model("Payroll", payrollSchema);
