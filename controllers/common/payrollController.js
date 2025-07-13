@@ -2,7 +2,9 @@ const ActorCode = require("../../model/ActorCode");
 const Payroll = require("../../model/Payroll");
 const Attendance = require("../../model/Attendance");
 const User = require("../../model/User");
+const Metadata = require("../../model/MetaData");
 const moment = require("moment");
+const calculatePayroll = require("../../helpers/payrollCalculation");
 
 
 // calculate salary for employee
@@ -278,3 +280,436 @@ exports.generatePayslipByEmp = async (req, res) => {
   }
 };
 
+// generate salary  calculation in this 
+
+// exports.generateSalary = async (req, res) => {
+//  try {
+//    // Ensure only admin can generate salary
+//    if (req.user?.role !== "admin") {
+//      return res.status(403).json({ message: "Only admin can generate salary" });
+//    }
+
+//    const code = req.query.code;
+//    const salaryMonth = req.query.salaryMonth;
+
+//    if (!code || !salaryMonth) {
+//      return res.status(400).json({ message: "Missing employee code or salaryMonth in query" });
+//    }
+
+//    const user = await User.findOne({ code });
+//    if (!user) return res.status(404).json({ message: "Employee not found" });
+
+//    const [year, month] = salaryMonth.split("-");
+//    const startDate = new Date(year, month - 1, 1);
+//    const endDate = new Date(year, month, 0);
+
+//    const attendanceRecords = await Attendance.find({
+//      code,
+//      date: { $gte: startDate, $lte: endDate },
+//    });
+
+//    // let present = 0;
+//    // let halfDay = 0;
+//    // let leave = 0;
+
+//    // for (let record of attendanceRecords) {
+//    //   if (record.status === "Present") present++;
+//    //   else if (record.status === "Half Day") halfDay++;
+//    //   else if (record.status === "Leave") leave++;
+//    // }
+
+//    // const workingDaysCounted = present + 0.5 * halfDay + leave;
+//    let present = 0;
+//    let halfDay = 0;
+//    let leave = 0;
+
+// for (let record of attendanceRecords) {
+//   if (record.status === "Present") present++;
+//   else if (record.status === "Half Day") halfDay++;
+//   else if (record.status === "Leave") leave++;
+// }
+
+// // ✅ Get allowed paid leaves from user's leave policy
+// const userMetadata = await Metadata.findOne({ code });
+// const paidLeavesAllowed = userMetadata?.leavePolicy?.paidLeavesAllowedPerMonth || 0;
+
+// // ✅ Count only allowed leaves as paid
+// const paidLeavesUsed = Math.min(leave, paidLeavesAllowed);
+
+// // ✅ Final working days counted for salary
+// const workingDaysCounted = present + 0.5 * halfDay + paidLeavesUsed;
+
+//    const totalDaysInMonth = endDate.getDate();
+//    const baseSalary = 30000;
+
+//    const calculatedSalary = (baseSalary * workingDaysCounted) / totalDaysInMonth;
+//    const existingPayroll = await Payroll.findOne({ code, salaryMonth });
+
+//    if (existingPayroll) {
+//     if (existingPayroll.status === "Paid") {
+//       return res.status(400).json({
+//         message: "Salary for this employee and month has already been paid. Cannot regenerate.",
+//       });
+//     }
+  
+//     // ✅ Safe to update if not paid
+//     existingPayroll.salaryDays = totalDaysInMonth;
+//     existingPayroll.workingDaysCounted = workingDaysCounted;
+//     existingPayroll.calculatedSalary = calculatedSalary;
+//     existingPayroll.grossPay = calculatedSalary;
+//     existingPayroll.totalDeductions = 0;
+//     existingPayroll.netPayable = calculatedSalary;
+//     existingPayroll.salaryDetails = {
+//       baseSalary,
+//       bonuses: [],
+//       deductions: [],
+//       other: [],
+//       increments: [],
+//       reimbursedExpenses: 0,
+//     };
+//     existingPayroll.status = "Generated";
+//     existingPayroll.createdBy = req.user?.code || "admin";
+  
+//     await existingPayroll.save();
+  
+//     return res.status(200).json({
+//       message: "Payroll updated successfully",
+//       data: existingPayroll,
+//     });
+//   }
+  
+
+//    const payroll = await Payroll.create({
+//      code,
+//      salaryMonth,
+//      salaryDays: totalDaysInMonth,
+//      workingDaysCounted,
+//      calculatedSalary,
+//      grossPay: calculatedSalary,
+//      totalDeductions: 0,
+//      netPayable: calculatedSalary,
+//      salaryDetails: {
+//        baseSalary,
+//        bonuses: [],
+//        deductions: [],
+//        other: [],
+//        increments: [],
+//        reimbursedExpenses: 0,
+//      },
+//      status: "Generated",
+//      createdBy: req.user?.code || "admin",
+//    });
+
+//    res.status(200).json({
+//      message: "Payroll generated successfully",
+//      data: payroll,
+//    });
+//  } 
+//  catch (err) {
+//    console.error("Payroll generation failed:", err);
+//    res.status(500).json({ message: "Internal server error", error: err.message });
+//  }
+// };
+
+// calculation in payrollCalculation.js function
+// exports.generateSalary = async (req, res) => {
+//  try {
+//    // ✅ Only admin can generate salary
+//    if (req.user?.role !== "admin") {
+//      return res.status(403).json({ message: "Only admin can generate salary" });
+//    }
+
+//    const code = req.query.code;
+//    const salaryMonth = req.query.salaryMonth;
+
+//    if (!code || !salaryMonth) {
+//      return res.status(400).json({ message: "Missing employee code or salaryMonth in query" });
+//    }
+
+//    const user = await User.findOne({ code });
+//    if (!user) return res.status(404).json({ message: "Employee not found" });
+
+//    const [year, month] = salaryMonth.split("-");
+//    const startDate = new Date(year, month - 1, 1);
+//    const endDate = new Date(year, month, 0);
+
+//    const attendanceRecords = await Attendance.find({
+//      code,
+//      date: { $gte: startDate, $lte: endDate },
+//    });
+
+//    // ✅ Use calculateSalary function
+//    const payrollData = await calculatePayroll({
+//      user,
+//      attendanceRecords,
+//      salaryMonth,
+//    });
+
+//    const existingPayroll = await Payroll.findOne({ code, salaryMonth });
+
+//    if (existingPayroll) {
+//      if (existingPayroll.status === "Paid") {
+//        return res.status(400).json({
+//          message: "Salary for this employee and month has already been paid. Cannot regenerate.",
+//        });
+//      }
+
+//      // ✅ Update existing payroll
+//      Object.assign(existingPayroll, {
+//        ...payrollData,
+//        status: "Generated",
+//        createdBy: req.user?.code || "admin",
+//      });
+
+//      await existingPayroll.save();
+
+//      return res.status(200).json({
+//        message: "Payroll updated successfully",
+//        data: existingPayroll,
+//      });
+//    }
+
+//    // ✅ Create new payroll
+//    const payroll = await Payroll.create({
+//      code,
+//      salaryMonth,
+//      ...payrollData,
+//      status: "Generated",
+//      createdBy: req.user?.code || "admin",
+//    });
+
+//    res.status(200).json({
+//      message: "Payroll generated successfully",
+//      data: payroll,
+//    });
+
+//  } catch (err) {
+//    console.error("Payroll generation failed:", err);
+//    res.status(500).json({ message: "Internal server error", error: err.message });
+//  }
+// };
+
+// if salary is generated in same month then it calculate the attendance last day and if generated in next month that it check the last month attendance 
+// exports.generateSalary = async (req, res) => {
+//  try {
+//    // ✅ Only admin can generate salary
+//    if (req.user?.role !== "admin") {
+//      return res.status(403).json({ message: "Only admin can generate salary" });
+//    }
+
+//    const code = req.query.code;
+//    const salaryMonth = req.query.salaryMonth;
+
+//    if (!code || !salaryMonth) {
+//      return res.status(400).json({ message: "Missing employee code or salaryMonth in query" });
+//    }
+
+//    const user = await User.findOne({ code });
+//    if (!user) return res.status(404).json({ message: "Employee not found" });
+
+//    // const [year, month] = salaryMonth.split("-");
+//    // const startDate = new Date(year, month - 1, 1);
+//    // const endDate = new Date(year, month, 0);
+
+//    // const attendanceRecords = await Attendance.find({
+//    //   code,
+//    //   date: { $gte: startDate, $lte: endDate },
+//    // });
+
+//    const [year, month] = salaryMonth.split("-");
+// const startDate = new Date(year, month - 1, 1);
+
+// // 👇 Replace this block right here
+// let endDate;
+// const today = new Date();
+// const salaryGenMonth = parseInt(month); // from salaryMonth
+// const salaryGenYear = parseInt(year);
+
+// if (
+//   today.getFullYear() === salaryGenYear &&
+//   today.getMonth() + 1 === salaryGenMonth
+// ) {
+//   endDate = new Date();
+//   endDate.setDate(endDate.getDate() - 1);
+//   endDate.setHours(23, 59, 59, 999);
+// } else {
+//   endDate = new Date(year, month, 0); // full month
+// }
+
+// // Fetch attendance only till adjusted endDate
+// const attendanceRecords = await Attendance.find({
+//   code,
+//   date: { $gte: startDate, $lte: endDate },
+// });
+
+
+//    // ✅ Use calculateSalary function
+//    const payrollData = await calculatePayroll({
+//      user,
+//      attendanceRecords,
+//      salaryMonth,
+//    });
+
+//    const existingPayroll = await Payroll.findOne({ code, salaryMonth });
+
+//    if (existingPayroll) {
+//      if (existingPayroll.status === "Paid") {
+//        return res.status(400).json({
+//          message: "Salary for this employee and month has already been paid. Cannot regenerate.",
+//        });
+//      }
+
+//      // ✅ Update existing payroll
+//      Object.assign(existingPayroll, {
+//        ...payrollData,
+//        status: "Generated",
+//        createdBy: req.user?.code || "admin",
+//      });
+
+//      await existingPayroll.save();
+
+//      return res.status(200).json({
+//       message: "Payroll updated successfully",
+//       data: {
+//         ...existingPayroll.toObject(),
+//         attendanceBreakdown: payrollData.attendanceBreakdown,
+//       },
+//     });
+    
+//    }
+
+//    // ✅ Create new payroll
+//    const payroll = await Payroll.create({
+//      code,
+//      salaryMonth,
+//      ...payrollData,
+//      status: "Generated",
+//      createdBy: req.user?.code || "admin",
+//    });
+
+//    // res.status(200).json({
+//    //   message: "Payroll generated successfully",
+//    //   data: payroll,
+//    // });
+//    res.status(200).json({
+//     message: "Payroll generated successfully",
+//     data: {
+//       ...payroll.toObject(),
+//       attendanceBreakdown: payrollData.attendanceBreakdown,
+//     },
+//   });
+  
+
+//  } catch (err) {
+//    console.error("Payroll generation failed:", err);
+//    res.status(500).json({ message: "Internal server error", error: err.message });
+//  }
+// };
+
+exports.generateSalary = async (req, res) => {
+ try {
+   // ✅ Only admin can generate salary
+   if (req.user?.role !== "admin") {
+     return res.status(403).json({ message: "Only admin can generate salary" });
+   }
+
+   const code = req.query.code;
+   const salaryMonth = req.query.salaryMonth;
+      // ✅ Get salary extras from body
+      const {
+       bonuses = [],
+       increments = [],
+       deductions = [],
+       reimbursedExpenses = 0,
+     } = req.body;
+  
+
+   if (!code || !salaryMonth) {
+     return res.status(400).json({ message: "Missing employee code or salaryMonth in query" });
+   }
+
+   const user = await User.findOne({ code });
+   if (!user) return res.status(404).json({ message: "Employee not found" });
+
+   // ✅ Date range for salary
+   const [year, month] = salaryMonth.split("-");
+   const startDate = new Date(year, month - 1, 1);
+
+   let endDate;
+   const today = new Date();
+   const salaryGenMonth = parseInt(month);
+   const salaryGenYear = parseInt(year);
+
+   if (today.getFullYear() === salaryGenYear && today.getMonth() + 1 === salaryGenMonth) {
+     endDate = new Date();
+     endDate.setDate(endDate.getDate() - 1);
+     endDate.setHours(23, 59, 59, 999);
+   } else {
+     endDate = new Date(year, month, 0);
+   }
+
+   // ✅ Fetch attendance
+   const attendanceRecords = await Attendance.find({
+     code,
+     date: { $gte: startDate, $lte: endDate },
+   });
+
+   // ✅ Call calculator
+   const payrollData = await calculatePayroll({
+     user,
+     attendanceRecords,
+     salaryMonth,
+     bonuses,
+     increments,
+     deductions,
+     reimbursedExpenses,
+     isAdmin: true,
+   });
+
+   const existingPayroll = await Payroll.findOne({ code, salaryMonth });
+
+   if (existingPayroll) {
+     if (existingPayroll.status === "Paid") {
+       return res.status(400).json({
+         message: "Salary for this employee and month has already been paid. Cannot regenerate.",
+       });
+     }
+
+     Object.assign(existingPayroll, {
+       ...payrollData,
+       status: "Generated",
+       createdBy: req.user?.code || "admin",
+     });
+
+     await existingPayroll.save();
+
+     return res.status(200).json({
+       message: "Payroll updated successfully",
+       data: {
+         ...existingPayroll.toObject(),
+         attendanceBreakdown: payrollData.attendanceBreakdown,
+       },
+     });
+   }
+
+   // ✅ Create new payroll
+   const payroll = await Payroll.create({
+     code,
+     salaryMonth,
+     ...payrollData,
+     status: "Generated",
+     createdBy: req.user?.code || "admin",
+   });
+
+   res.status(200).json({
+     message: "Payroll generated successfully",
+     data: {
+       ...payroll.toObject(),
+       attendanceBreakdown: payrollData.attendanceBreakdown,
+     },
+   });
+ } catch (err) {
+   console.error("Payroll generation failed:", err);
+   res.status(500).json({ message: "Internal server error", error: err.message });
+ }
+};
