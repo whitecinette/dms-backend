@@ -177,6 +177,98 @@ const PayrollPolicy = require("../model/PayrollPolicy");
 
 // this calculate increament, bonus, and deduction passes from the body as well 
 // abhi Pf esi calcualte nahi ho rhe, naa hi body se aa  rhe h generate api ki
+// const calculatePayroll = async ({
+//  user,
+//  attendanceRecords,
+//  salaryMonth,
+//  isAdmin = false,
+//  bonuses = [],
+//  increments = [],
+//  deductions = [],
+//  reimbursedExpenses = 0
+// }) => {
+//  let present = 0, halfDay = 0, leave = 0;
+
+//  for (let record of attendanceRecords) {
+//    const status = record.status?.toLowerCase();
+//    if (status === "present") present++;
+//    else if (status === "half day") halfDay++;
+//    else if (status === "leave") leave++;
+//  }
+
+//  let paidLeavesAllowed = 0;
+//  try {
+//    const meta = await MetaData.findOne({ code: user.code });
+//    if (meta?.leavePolicy?.paidLeavesAllowedPerMonth != null) {
+//      paidLeavesAllowed = meta.leavePolicy.paidLeavesAllowedPerMonth;
+//    }
+//  } catch (err) {
+//    console.error("⚠️ Error fetching MetaData:", err.message);
+//  }
+
+//  const paidLeavesUsed = Math.min(leave, paidLeavesAllowed);
+//  const workingDaysCounted = present + 0.5 * halfDay + paidLeavesUsed;
+//   console.log("✅ Summary → Present:", present, "Half Day:", halfDay, "Leave:", leave);
+//   console.log("✅ Paid Leaves Allowed:", paidLeavesAllowed);
+//   console.log("✅ Paid Leaves Used:", paidLeavesUsed);
+//   console.log("✅ Working Days Counted:", workingDaysCounted);
+//  const [year, month] = salaryMonth.split("-");
+//  const endDate = new Date(year, month, 0);
+//  const totalDaysInMonth = endDate.getDate();
+
+//  const baseSalary = 30000;
+//  const calculatedSalary = (baseSalary * workingDaysCounted) / totalDaysInMonth;
+
+//  let pf = 0, esi = 0;
+//  if (isAdmin && user.state) {
+//    const config = await PayrollPolicy.findOne({ state: user.state });
+//    if (config) {
+//      pf = (config.pf / 100) * calculatedSalary;
+//      esi = (config.esi / 100) * calculatedSalary;
+//    }
+//  }
+
+//  const bonusTotal = bonuses.reduce((sum, b) => sum + (b.amount || 0), 0);
+//  const incrementTotal = increments.reduce((sum, i) => sum + (i.amount || 0), 0);
+//  const extraDeductions = deductions.reduce((sum, d) => sum + (d.amount || 0), 0
+// );
+
+
+//  const grossPay = calculatedSalary + bonusTotal + incrementTotal;
+//  const totalDeductions = pf + esi + extraDeductions;
+//  const netPayable = grossPay - totalDeductions + reimbursedExpenses;
+
+//  return {
+//    salaryDays: totalDaysInMonth,
+//    workingDaysCounted,
+//    calculatedSalary,
+//    grossPay,
+//    totalDeductions,
+//    netPayable,
+//    salaryDetails: {
+//      baseSalary,
+//      bonuses,
+//      increments,
+//      deductions: [
+//        ...deductions,
+//        { name: "PF", type: "percentage", value: pf, isActive: pf > 0 },
+//        { name: "ESI", type: "percentage", value: esi, isActive: esi > 0 },
+//      ],
+//      reimbursedExpenses,
+//      other: [],
+//    },
+//    attendanceBreakdown: {
+//      present,
+//      halfDay,
+//      leave,
+//      paidLeavesAllowed,
+//      paidLeavesUsed,
+//    },
+//  };
+// };
+
+
+// bonus, increament, deduction and other can be in percentage and fixed amount and can be applied in base salary or ctc 
 const calculatePayroll = async ({
  user,
  attendanceRecords,
@@ -185,7 +277,8 @@ const calculatePayroll = async ({
  bonuses = [],
  increments = [],
  deductions = [],
- reimbursedExpenses = 0
+ other = [],
+ reimbursedExpenses = 0,
 }) => {
  let present = 0, halfDay = 0, leave = 0;
 
@@ -208,17 +301,39 @@ const calculatePayroll = async ({
 
  const paidLeavesUsed = Math.min(leave, paidLeavesAllowed);
  const workingDaysCounted = present + 0.5 * halfDay + paidLeavesUsed;
-  console.log("✅ Summary → Present:", present, "Half Day:", halfDay, "Leave:", leave);
-  console.log("✅ Paid Leaves Allowed:", paidLeavesAllowed);
-  console.log("✅ Paid Leaves Used:", paidLeavesUsed);
-  console.log("✅ Working Days Counted:", workingDaysCounted);
+
  const [year, month] = salaryMonth.split("-");
  const endDate = new Date(year, month, 0);
  const totalDaysInMonth = endDate.getDate();
 
- const baseSalary = 30000;
+ const baseSalary = user.baseSalary || 30000;
+ const ctc = user.ctc || baseSalary;
  const calculatedSalary = (baseSalary * workingDaysCounted) / totalDaysInMonth;
 
+ // 🧮 Compute each list (supports both % and fixed)
+ const computeComponent = (list = [], baseSalary, ctc) => {
+  return list.reduce((sum, item) => {
+    const base = item.baseOn === "ctc" ? ctc : baseSalary;
+    let value = 0;
+
+    if (item.type === "percentage") {
+      value = (item.value / 100) * base;
+      item.amount = value; // ✅ Set amount for response clarity
+    } else {
+      value = item.amount || 0;
+    }
+
+    return sum + value;
+  }, 0);
+};
+
+ const bonusTotal = computeComponent(bonuses, baseSalary, ctc);
+ const incrementTotal = computeComponent(increments, baseSalary, ctc);
+ const extraDeductions = computeComponent(deductions, baseSalary, ctc);
+ const otherAdditions = computeComponent(other.filter(o => o.category === "addition"), baseSalary, ctc);
+ const otherDeductions = computeComponent(other.filter(o => o.category === "deduction"), baseSalary, ctc);
+
+ // 🧮 PF & ESI
  let pf = 0, esi = 0;
  if (isAdmin && user.state) {
    const config = await PayrollPolicy.findOne({ state: user.state });
@@ -228,16 +343,8 @@ const calculatePayroll = async ({
    }
  }
 
- const bonusTotal = bonuses.reduce((sum, b) => sum + (b.value || 0), 0);
- const incrementTotal = increments.reduce((sum, i) => sum + (i.value || 0), 0);
- const extraDeductions = deductions.reduce(
-  (sum, d) => sum + (d.value || 0),
-  0
-);
-
-
- const grossPay = calculatedSalary + bonusTotal + incrementTotal;
- const totalDeductions = pf + esi + extraDeductions;
+ const grossPay = calculatedSalary + bonusTotal + incrementTotal + otherAdditions;
+ const totalDeductions = pf + esi + extraDeductions + otherDeductions;
  const netPayable = grossPay - totalDeductions + reimbursedExpenses;
 
  return {
@@ -257,7 +364,7 @@ const calculatePayroll = async ({
        { name: "ESI", type: "percentage", value: esi, isActive: esi > 0 },
      ],
      reimbursedExpenses,
-     other: [],
+     other,
    },
    attendanceBreakdown: {
      present,

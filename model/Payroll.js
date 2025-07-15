@@ -47,37 +47,59 @@ const payrollSchema = new mongoose.Schema(
       baseSalary: { type: Number, required: true }, // Monthly snapshot from CTC/12
 
       bonuses: [
-        {
-          name: { type: String },
-          amount: { type: Number, default: 0 },
-        },
-      ],
-
-      deductions: [
-        {
-          name: { type: String, required: true },
-          type: { type: String, enum: ["percentage", "fixed"], required: true },
-          value: { type: Number, required: true },
-          isActive: { type: Boolean, default: false },
-        },
-      ],
-      increments: [
        {
-         name: String,
-         amount: Number,
-         type: { type: String, enum: ["permanent", "one-time"] },
-         effectiveFrom: Date,
-         approvedBy: { type: String, ref: "User" },
-       }
-     ],     
+         name: { type: String },
+         type: { type: String, enum: ["percentage", "fixed"], required: true },
+         amount: { type: Number, default: 0 },
+         value: { type: Number }, // optional % value
+         baseOn: {
+           type: String,
+           enum: ["baseSalary", "ctc"],
+           default: "baseSalary",
+         },
+       },
+     ],
 
-      other: [
-        {
-          name: { type: String, required: true },
-          type: { type: String, enum: ["addition", "deduction"], required: true },
-          amount: { type: Number, required: true },
+     deductions: [
+      {
+        name: { type: String, required: true },
+        type: { type: String, enum: ["percentage", "fixed"], required: true },
+        value: { type: Number, required: true },
+        baseOn: {
+          type: String,
+          enum: ["baseSalary", "ctc"],
+          default: "baseSalary",
         },
-      ],
+        isActive: { type: Boolean, default: false },
+      },
+    ],
+    increments: [
+     {
+       name: String,
+       amount: Number,
+       value: Number, // optional % value
+       type: { type: String, enum: ["permanent", "one-time"] },
+       baseOn: {
+         type: String,
+         enum: ["baseSalary", "ctc", "calculatedSalary"],
+         default: "calculatedSalary",
+       },
+       effectiveFrom: Date,
+       approvedBy: { type: String, ref: "User" },
+     },
+   ], 
+
+   other: [
+    {
+      name: { type: String, required: true },
+      category: { type: String, enum: ["addition", "deduction"], required: true }, // renamed to avoid confusion with 'type' of value
+      type: { type: String, enum: ["percentage", "fixed"], required: true },
+      value: { type: Number, required: true }, // value can be % or fixed amount depending on `type`
+      isActive: { type: Boolean, default: false },
+      baseOn: { type: String, enum: ["baseSalary", "ctc"], default: "baseSalary" }, // optional, if needed
+    },
+  ],
+  
 
       reimbursedExpenses: {
         type: Number,

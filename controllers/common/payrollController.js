@@ -608,9 +608,13 @@ exports.generatePayslipByEmp = async (req, res) => {
 
 exports.generateSalary = async (req, res) => {
  try {
-   // ✅ Only admin can generate salary
-   if (req.user?.role !== "admin") {
-     return res.status(403).json({ message: "Only admin can generate salary" });
+   // // ✅ Only admin can generate salary
+   // if (req.user?.role !== "admin") {
+   //   return res.status(403).json({ message: "Only admin can generate salary" });
+   // }
+   // admin superadmin and hr can generate a salary
+   if (!["admin", "super_admin", "hr"].includes(req.user?.role)) {
+    return res.status(403).json({ message: "Only admin, superadmin and hr can generate salary" });
    }
 
    const code = req.query.code;
@@ -620,6 +624,7 @@ exports.generateSalary = async (req, res) => {
        bonuses = [],
        increments = [],
        deductions = [],
+       other = [],
        reimbursedExpenses = 0,
      } = req.body;
   
@@ -663,6 +668,7 @@ exports.generateSalary = async (req, res) => {
      increments,
      deductions,
      reimbursedExpenses,
+     other,
      isAdmin: true,
    });
 
