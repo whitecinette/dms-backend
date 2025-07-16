@@ -10,6 +10,6 @@ router.get('/get-salary', userAuth, generatePayslipByEmp);
 router.post('/generate-payroll', userAuth, generateSalary);
 
 // admin routes
-router.get('/admin/get-payroll', adminOrSuperAdminAuth, getPayroll);
+router.get('/admin/get-payroll', userAuth, getPayroll);
 
 module.exports = router;

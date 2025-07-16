@@ -725,6 +725,10 @@ exports.generateSalary = async (req, res) => {
 // get payroll from admin
 exports.getPayroll = async (req, res) => {
     try {
+        const { role } = req.user;
+        if(!["admin", "super_admin", "hr"].includes(role)) {
+            res.status(403).json({ message: "Only admin, superadmin and hr can get payroll" });
+        }
         const { search, page, limit = 20, month, year, status, firm } = req.query;
         const skip = (page - 1) * limit;
         const employees = await User.find({ role: "employee" }).lean();
