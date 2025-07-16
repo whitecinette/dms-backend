@@ -3,6 +3,8 @@ const Payroll = require("../../model/Payroll");
 const Attendance = require("../../model/Attendance");
 const User = require("../../model/User");
 const Metadata = require("../../model/MetaData");
+const Firm = require("../../model/Firm");
+
 const moment = require("moment");
 const calculatePayroll = require("../../helpers/payrollCalculation");
 
@@ -718,4 +720,106 @@ exports.generateSalary = async (req, res) => {
    console.error("Payroll generation failed:", err);
    res.status(500).json({ message: "Internal server error", error: err.message });
  }
+};
+
+// get payroll from admin
+exports.getPayroll = async (req, res) => {
+    try {
+        const { search, page, limit = 20, month, year, status, firm } = req.query;
+        const skip = (page - 1) * limit;
+        const employees = await User.find({ role: "employee" }).lean();
+        const employeeCodes = employees.map((emp) => emp.code);
+        const firms = await Firm.find({}).lean();
+        const metaData = await Metadata.find({}).lean();
+        const query = { code: { $in: employeeCodes } };
+        if (month) query.salaryMonth = { $regex: month, $options: "i" };
+        if (year) query.salaryMonth = { $regex: year, $options: "i" };
+        if (status) query.status = status;
+        if (firm) {
+            const firmCodes = firms.filter(f => f.name.toLowerCase().includes(firm.toLowerCase())).map(f => f.code);
+            const filteredMetaData = metaData.filter(md => firmCodes.includes(md.firm_code));
+            query.code = { $in: filteredMetaData.map(md => md.code) };
+        }
+
+        const payrolls = await Payroll.find(query).skip(skip).limit(parseInt(limit)).lean();
+
+        const formatData = (payrolls, employees, firms, metaData, search, firm) => {
+            let filteredPayrolls = payrolls;
+
+            // Apply firm filter if firm is provided
+            if (firm) {
+                const firmCodes = firms.filter(f => f.name.toLowerCase().includes(firm.toLowerCase())).map(f => f.code);
+                const validEmployeeCodes = metaData
+                    .filter(md => firmCodes.includes(md.firm_code))
+                    .map(md => md.code);
+                filteredPayrolls = payrolls.filter(payroll => validEmployeeCodes.includes(payroll.code));
+            }
+
+            // Apply search filter if search is provided
+            if (search) {
+                const searchLower = search.toLowerCase();
+                filteredPayrolls = filteredPayrolls.filter(payroll => {
+                    const employee = employees.find(emp => emp.code === payroll.code);
+                    return (
+                        employee?.name.toLowerCase().includes(searchLower) ||
+                        payroll.code.toLowerCase().includes(searchLower)
+                    );
+                });
+            }
+
+            return filteredPayrolls.map(payroll => {
+                const employee = employees.find(emp => emp.code === payroll.code);
+                const meta = metaData.find(md => md.code === payroll.code);
+                const firm = meta ? firms.find(f => f.code === meta.firm_code) : null;
+
+                return {
+                    _id: payroll._id,
+                    code: payroll.code,
+                    firm: firm ? firm.name : 'Unknown Firm',
+                    name: employee ? employee.name : 'Unknown',
+                    position: employee ? employee.position : 'Unknown',
+                    email: employee ? employee.email : 'N/A',
+                    phone: employee ? employee.phone : 'N/A',
+                    bankAccount: employee ? employee.bankAccount : 'N/A',
+                    salaryMonth: payroll.salaryMonth,
+                    payrollDate: payroll.payrollDate,
+                    salaryDays: payroll.salaryDays,
+                    workingDaysCounted: payroll.workingDaysCounted,
+                    carryForward: payroll.carryForward || {
+                        pendingSalary: 0,
+                        unpaidExpenses: 0,
+                        remarks: ''
+                    },
+                    salaryDetails: payroll.salaryDetails || {
+                        baseSalary: 0,
+                        bonuses: [],
+                        deductions: [],
+                        increments: [],
+                        other: [],
+                        reimbursedExpenses: 0
+                    },
+                    calculatedSalary: payroll.calculatedSalary || 0,
+                    grossPay: payroll.grossPay || 0,
+                    totalDeductions: payroll.totalDeductions || 0,
+                    netPayable: payroll.netPayable || 0,
+                    status: payroll.status || 'Pending',
+                    createdBy: payroll.createdBy || 'Unknown',
+                    remarks: payroll.remarks || ''
+                };
+            });
+        };
+
+        const formattedPayrolls = formatData(payrolls, employees, firms, metaData, search, firm);
+
+        res.status(200).json({
+            success: true,
+            data: formattedPayrolls,
+            total: formattedPayrolls.length,
+            page: parseInt(page),
+            limit: parseInt(limit)
+        });
+    } catch (err) {
+        console.error("Payroll generation failed:", err);
+        res.status(500).json({ message: "Internal server error", error: err.message });
+    }
 };
