@@ -497,3 +497,30 @@ exports.uploadRoutes = async (req, res) => {
     return res.status(500).json({ message: "Something went wrong", error: error.message });
   }
 };
+
+exports.getRouteByUser = async (req, res) => {
+ try {
+   const { code } = req.user;
+
+   // 🔒 Validate user code
+   if (!code) {
+     return res.status(401).json({ message: "Unauthorized: User code missing" });
+   }
+
+   // 🔍 Fetch all routes for this user
+   const userRoutes = await Routes.find({ code: code.toUpperCase() }).sort({ createdAt: -1 });
+
+   // 📦 Return response
+   return res.status(200).json({
+     success: true,
+     total: userRoutes.length,
+     data: userRoutes,
+   });
+ } catch (error) {
+   console.error("Error fetching routes for user:", error);
+   return res.status(500).json({
+     success: false,
+     message: "Server error while fetching user routes",
+   });
+ }
+};
