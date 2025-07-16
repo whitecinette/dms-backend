@@ -81,8 +81,8 @@ const payrollSchema = new mongoose.Schema(
        type: { type: String, enum: ["permanent", "one-time"] },
        baseOn: {
          type: String,
-         enum: ["baseSalary", "ctc", "calculatedSalary"],
-         default: "calculatedSalary",
+         enum: ["baseSalary", "ctc"],
+         default: "baseSalary",
        },
        effectiveFrom: Date,
        approvedBy: { type: String, ref: "User" },
