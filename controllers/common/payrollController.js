@@ -726,38 +726,56 @@ exports.generateSalary = async (req, res) => {
 exports.getPayroll = async (req, res) => {
     try {
         const { role } = req.user;
-        if(!["admin", "super_admin", "hr"].includes(role)) {
-            res.status(403).json({ message: "Only admin, superadmin and hr can get payroll" });
+        if (!["admin", "super_admin", "hr"].includes(role)) {
+            return res.status(403).json({ message: "Only admin, super admin and hr can get payroll" });
         }
         const { search, page, limit = 20, month, year, status, firm } = req.query;
+        console.log("Query params:", req.query);
+
+        // Normalize firm to an array
+        const firmArray = Array.isArray(firm) ? firm : firm ? firm.split(",") : [];
+        console.log("firmArray:", firmArray);
+
+        // Convert page and limit to numbers
         const skip = (page - 1) * limit;
         const employees = await User.find({ role: "employee" }).lean();
         const employeeCodes = employees.map((emp) => emp.code);
         const firms = await Firm.find({}).lean();
         const metaData = await Metadata.find({}).lean();
+
         const query = { code: { $in: employeeCodes } };
-        if (month) query.salaryMonth = { $regex: month, $options: "i" };
-        if (year) query.salaryMonth = { $regex: year, $options: "i" };
-        if (status) query.status = status;
-        if (firm) {
-            const firmCodes = firms.filter(f => f.name.toLowerCase().includes(firm.toLowerCase())).map(f => f.code);
-            const filteredMetaData = metaData.filter(md => firmCodes.includes(md.firm_code));
-            query.code = { $in: filteredMetaData.map(md => md.code) };
+
+        // Combine month and year into a single regex for salaryMonth
+        if (month || year) {
+            let regexPattern = '';
+            if (year && month) {
+                regexPattern = `^${year}-${month.padStart(2, '0')}`;
+            } else if (year) {
+                regexPattern = year;
+            } else if (month) {
+                regexPattern = `-${month.padStart(2, '0')}$`;
+            }
+            query.salaryMonth = { $regex: regexPattern, $options: 'i' };
         }
+        if (status) query.status = status;
+
+        // Apply firm filter in MongoDB query
+        if (firmArray.length > 0) {
+            const firmCodes = firms
+                .filter(f => firmArray.some(firmName => f.name.toLowerCase() === firmName.toLowerCase()))
+                .map(f => f.code);
+            const validEmployeeCodes = metaData
+                .filter(md => firmCodes.includes(md.firm_code))
+                .map(md => md.code);
+            query.code = { $in: validEmployeeCodes };
+        }
+
+        console.log("MongoDB query:", query);
 
         const payrolls = await Payroll.find(query).skip(skip).limit(parseInt(limit)).lean();
 
-        const formatData = (payrolls, employees, firms, metaData, search, firm) => {
+        const formatData = (payrolls, employees, firms, metaData, search) => {
             let filteredPayrolls = payrolls;
-
-            // Apply firm filter if firm is provided
-            if (firm) {
-                const firmCodes = firms.filter(f => f.name.toLowerCase().includes(firm.toLowerCase())).map(f => f.code);
-                const validEmployeeCodes = metaData
-                    .filter(md => firmCodes.includes(md.firm_code))
-                    .map(md => md.code);
-                filteredPayrolls = payrolls.filter(payroll => validEmployeeCodes.includes(payroll.code));
-            }
 
             // Apply search filter if search is provided
             if (search) {
@@ -813,7 +831,7 @@ exports.getPayroll = async (req, res) => {
             });
         };
 
-        const formattedPayrolls = formatData(payrolls, employees, firms, metaData, search, firm);
+        const formattedPayrolls = formatData(payrolls, employees, firms, metaData, search);
 
         res.status(200).json({
             success: true,

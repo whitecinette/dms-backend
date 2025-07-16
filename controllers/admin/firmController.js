@@ -319,3 +319,23 @@ exports.getAttendanceCountByFirms = async (req, res) => {
    });
  }
 };
+
+//get all firms for dropdown
+exports.getFirmsForDropdown = async (req, res) => {
+  try {
+    const firms = await Firm.find().select('name code');
+
+    return res.status(200).json({
+      success: true,
+      message: "Firms fetched successfully",
+      data: firms,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching firms:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch firms",
+      error: error.message,
+    });
+  }
+};
