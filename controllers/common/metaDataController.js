@@ -460,3 +460,45 @@ exports.getEmployeesForAttendanceCount = async (req, res) => {
    });
  }
 };
+
+// Update metadata 
+// exports.updateMetadata = async (req, res) => {
+//  try {
+//    const { code, ...rest } = req.body;
+
+//    if (!code) {
+//      return res.status(400).json({ message: "Employee code is required" });
+//    }
+
+//    const existing = await MetaData.findOne({ code: code.trim() });
+
+//    if (existing) {
+//      let shouldUpdate = false;
+
+//      for (const key in rest) {
+//        const oldVal = existing[key]?.toString().trim().toLowerCase() || "";
+//        const newVal = rest[key]?.toString().trim().toLowerCase() || "";
+
+//        if (oldVal !== newVal) {
+//          existing[key] = rest[key]; // Update only changed field
+//          shouldUpdate = true;
+//        }
+//      }
+
+//      if (shouldUpdate) {
+//        await existing.save();
+//        return res.status(200).json({ message: "Metadata updated", code });
+//      } else {
+//        return res.status(200).json({ message: "No changes detected", code });
+//      }
+//    } else {
+//      // Create new metadata if not exists
+//      const newEntry = new MetaData({ code: code.trim(), ...rest });
+//      await newEntry.save();
+//      return res.status(201).json({ message: "New metadata entry created", code });
+//    }
+//  } catch (error) {
+//    console.error("Update by code error:", error);
+//    res.status(500).json({ message: "Internal server error", error: error.message });
+//  }
+// };
