@@ -1,6 +1,8 @@
 const fs = require("fs");
 const csvParser = require("csv-parser");
 const Routes = require("../../model/Routes");
+const moment = require('moment-timezone');
+const RoutePlan = require("../../model/RoutePlan");
 
 // exports.uploadRoutes = async (req, res) => {
 //   try {
@@ -522,5 +524,129 @@ exports.getRouteByUser = async (req, res) => {
      success: false,
      message: "Server error while fetching user routes",
    });
+ }
+};
+// itenary by taluka
+// exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
+//  try {
+//    const { routes = [] } = req.body;
+//    const { code } = req.user;
+
+//    if (!routes.length) {
+//      return res.status(400).json({ message: "Please provide selected route names." });
+//    }
+
+//    // 🔍 Step 1: Fetch matching routes for the user
+//    const routeDocs = await Routes.find({
+//      code: code.toUpperCase(),
+//      name: { $in: routes }
+//    });
+
+//    if (!routeDocs.length) {
+//      return res.status(404).json({ message: "No matching routes found." });
+//    }
+
+//    // 🧱 Step 2: Collect towns from matched routes
+//    const allTowns = routeDocs.flatMap(route => route.town || []);
+//    const uniqueTowns = [...new Set(allTowns)];
+
+//    // 🧩 Step 3: Prepare the itinerary
+//    const itinerary = {
+//      district: [],
+//      zone: [],
+//      taluka: uniqueTowns, // ✅ putting towns into taluka
+//    };
+
+//    // 📆 Step 4: Dates
+//    const today = moment().tz("Asia/Kolkata");
+//    const startDate = today.clone().startOf("day").toDate();
+//    const endDate = today.clone().endOf("day").toDate();
+
+//    // 🏷️ Step 5: Name = selected route names joined with "-"
+//    const name = routes.join("-").toLowerCase();
+
+//    // 📌 Step 6: Save the RoutePlan
+//    const newPlan = await RoutePlan.create({
+//      startDate,
+//      endDate,
+//      code,
+//      name,
+//      itinerary,
+//      status: "active",
+//      approved: true
+//    });
+
+//    return res.status(201).json({
+//      success: true,
+//      message: "Route plan created successfully from selected routes.",
+//      data: newPlan
+//    });
+
+//  } catch (err) {
+//    console.error("Error in addRoutePlanFromSelectedRoutes:", err);
+//    return res.status(500).json({ message: "Internal Server Error" });
+//  }
+// };
+// itenary by town 
+exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
+ console.log("tryingg to add route ");
+ try {
+   const { routes = [] } = req.body;
+   const { code } = req.user;
+
+   if (!routes.length) {
+     return res.status(400).json({ message: "Please provide selected route names." });
+   }
+
+   // 🔍 Step 1: Fetch matching routes for the user
+   const routeDocs = await Routes.find({
+     code: code.toUpperCase(),
+     name: { $in: routes }
+   });
+
+   if (!routeDocs.length) {
+     return res.status(404).json({ message: "No matching routes found." });
+   }
+
+   // 🧱 Step 2: Collect towns from matched routes
+   const allTowns = routeDocs.flatMap(route => route.town || []);
+   const uniqueTowns = [...new Set(allTowns)];
+
+   // 🧩 Step 3: Prepare the itinerary
+   const itinerary = {
+     district: [],
+     zone: [],
+     taluka: [],
+     town: uniqueTowns // ✅ putting towns into taluka
+   };
+
+   // 📆 Step 4: Dates
+   const today = moment().tz("Asia/Kolkata");
+   const startDate = today.clone().startOf("day").toDate();
+   const endDate = today.clone().endOf("day").toDate();
+
+   // 🏷️ Step 5: Name = selected route names joined with "-"
+   const name = routes.join("-").toLowerCase();
+
+   // 📌 Step 6: Save the RoutePlan
+   const newPlan = await RoutePlan.create({
+     startDate,
+     endDate,
+     code,
+     name,
+     itinerary,
+     status: "active",
+     approved: true
+   });
+
+   return res.status(201).json({
+     success: true,
+     message: "Route plan created successfully from selected routes.",
+     data: newPlan
+   });
+
+ } catch (err) {
+   console.error("Error in addRoutePlanFromSelectedRoutes:", err);
+   return res.status(500).json({ message: "Internal Server Error" });
  }
 };
