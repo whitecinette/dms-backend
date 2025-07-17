@@ -589,6 +589,77 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
   }
 };
 
+exports.getDealersWithStatusForExtraction = async (req, res) => {
+  try {
+    console.log("Here!<3")
+    const { startDate, endDate } = req.query;
+    const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+    const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+
+    // 🔐 Get user code (from req.user or fallback to req.query/params)
+    const userCode = req.user?.code || req.query.code || req.params.code;
+    // 🧑‍💼 Fetch position from DB using code
+    const user = await User.findOne({ code: userCode });
+    if (!user || !user.position) {
+      return res.status(404).json({ success: false, message: "User not found or position missing" });
+    }
+    const userPosition = user.position;
+
+    if (!userCode || !userPosition) {
+      return res.status(400).json({ success: false, message: "User code and position required" });
+    }
+
+    // 🔍 Get hierarchy entries for that user
+    const hierarchyEntries = await HierarchyEntries.find({
+      hierarchy_name: "default_sales_flow",
+      [userPosition]: userCode,
+    });
+
+    const dealerSet = new Set();
+    for (let entry of hierarchyEntries) {
+      if (entry.dealer) dealerSet.add(entry.dealer);
+    }
+
+    const dealerCodes = Array.from(dealerSet);
+    if (dealerCodes.length === 0) {
+      return res.status(200).json({ success: true, dealers: [] });
+    }
+
+    // 🔍 Fetch extraction done dealers
+    const doneDealers = await ExtractionRecord.distinct("dealer", {
+      dealer: { $in: dealerCodes },
+      createdAt: { $gte: start, $lte: end },
+    });
+
+    const doneSet = new Set(doneDealers);
+
+    // 🧾 Get full dealer info
+      const allDealers = await User.find({ code: { $in: dealerCodes }, role: "dealer" });
+
+      const dealersWithStatus = allDealers.map(dealer => ({
+        ...dealer.toObject(),
+        status: doneSet.has(dealer.code) ? "done" : "pending"
+      }));
+
+      // ✅ Sort: Show 'pending' dealers on top
+      dealersWithStatus.sort((a, b) => {
+        if (a.status === b.status) return 0;
+        return a.status === 'pending' ? -1 : 1;
+      });
+
+
+    res.status(200).json({
+      success: true,
+      dealers: dealersWithStatus,
+    });
+
+  } catch (error) {
+    console.error("Error in getDealersWithStatus:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+
 
 // exports.getExtractionRecords = async (req, res) => {
 //   try {

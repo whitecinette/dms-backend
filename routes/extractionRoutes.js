@@ -1,5 +1,5 @@
 const express = require('express');
-const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise } = require('../controllers/common/extractionRecordControllers');
+const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction } = require('../controllers/common/extractionRecordControllers');
 const { userAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
@@ -13,6 +13,7 @@ router.get("/user/get-extraction-records/month", userAuth, getCurrentMonthExtrac
 
 router.post("/admin/extraction-status", getExtractionStatus);
 router.post("/user/extraction-status-role-wise", userAuth, getExtractionStatusRoleWise);
+router.post("/user/extraction-dealers-w-status", getDealersWithStatusForExtraction);
 // router.get('/admin/get-extraction-for-uploaded-by', getExtractionRecords)
 router.get("/admin/get-extraction-records/download",  getExtractionRecordsForDownload);
 
