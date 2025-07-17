@@ -845,3 +845,92 @@ exports.getPayroll = async (req, res) => {
         res.status(500).json({ message: "Internal server error", error: err.message });
     }
 };
+
+//get payroll overview for admin
+exports.getPayrollOverviewForAdmin = async (req, res) => {
+    try {
+        // Access control
+        if (!["admin", "super_admin"].includes(req.user?.role)) {
+            return res.status(403).json({ message: "Only admin and super admin can access this route" });
+        }
+
+        // Validate query parameters
+        const { month, year } = req.query;
+        if ((month && !/^\d{1,2}$/.test(month)) || (year && !/^\d{4}$/.test(year))) {
+            return res.status(400).json({ message: "Invalid month or year format" });
+        }
+
+        // Build payroll query
+        const query = {};
+        if (month || year) {
+            let regexPattern = '';
+            if (year && month) {
+                regexPattern = `^${year}-${month.padStart(2, '0')}`;
+            } else if (year) {
+                regexPattern = year;
+            } else if (month) {
+                regexPattern = `-${month.padStart(2, '0')}$`;
+            }
+            query.salaryMonth = { $regex: regexPattern, $options: 'i' };
+        }
+        console.log("MongoDB query:", query);
+
+        // Fetch data
+        const [firms, metaData, payrolls] = await Promise.all([
+            Firm.find({}).lean(),
+            Metadata.find({ attendance: { $exists: true } }).lean(),
+            Payroll.find(query).lean()
+        ]);
+
+        // Create payroll map for O(1) lookups
+        const payrollMap = new Map(payrolls.map(p => [p.code, p]));
+
+        // Process payrolls
+        const firmPayrollMap = {};
+        metaData.forEach((meta) => {
+            const firm = firms.find((f) => f.code === meta.firm_code);
+            const firmCode = firm ? firm.code : 'unknown';
+            const firmName = firm ? firm.name : 'Unknown Firm';
+
+            if (!firmPayrollMap[firmCode]) {
+                firmPayrollMap[firmCode] = {
+                    firmName,
+                    paid: 0,
+                    pending: 0,
+                    generated: 0,
+                    amount: 0
+                };
+            }
+
+            const payroll = payrollMap.get(meta.code);
+            if (payroll) {
+                if (payroll.status === 'Paid') {
+                    firmPayrollMap[firmCode].paid += 1;
+                } else if (payroll.status === 'Pending') {
+                    firmPayrollMap[firmCode].pending += 1;
+                } else if (payroll.status === 'Generated') {
+                    firmPayrollMap[firmCode].generated += 1;
+                }
+                firmPayrollMap[firmCode].amount += payroll.netPayable || 0;
+            } else {
+                firmPayrollMap[firmCode].pending += 1;
+            }
+        });
+
+        // Convert to array
+        const result = Object.keys(firmPayrollMap).map((firmCode, index) => ({
+            _id: index + 1,
+            firmName: firmPayrollMap[firmCode].firmName,
+            paid: firmPayrollMap[firmCode].paid,
+            pending: firmPayrollMap[firmCode].pending,
+            generated: firmPayrollMap[firmCode].generated,
+            total: firmPayrollMap[firmCode].paid + firmPayrollMap[firmCode].pending + firmPayrollMap[firmCode].generated,
+            amount: firmPayrollMap[firmCode].amount
+        }));
+
+        res.status(200).json({ success: true, data: result });
+    } catch (err) {
+        console.error("Payroll generation failed:", err);
+        res.status(500).json({ message: "Internal server error", error: err.message });
+    }
+};
