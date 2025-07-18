@@ -1578,7 +1578,7 @@ exports.deleteDealerFromSchedule = async (req, res) => {
 
 exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
   try {
-    const { startDate, endDate, search, page = 1, limit = 20 } = req.query;
+    const { startDate, endDate, search } = req.query;
 
     // Validate date formats (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
@@ -1604,20 +1604,8 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
     // Set start and end dates
     let start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
-    let end;
-    if (endDate) {
-      end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-    } else {
-      end = new Date(start);
-      end.setHours(23, 59, 59, 999);
-    }
-
-    // Log dates for debugging
-    // console.log("Query Start:", start.toISOString());
-    // console.log("Query End:", end.toISOString());
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    let end = endDate ? new Date(endDate) : new Date(start);
+    end.setHours(23, 59, 59, 999);
 
     // Query for schedules that overlap with the date range
     let query = {
@@ -1636,11 +1624,8 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       return acc;
     }, {});
 
-    // Fetch schedules with pagination
-    const schedules = await WeeklyBeatMappingSchedule.find(query)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    // Fetch all schedules
+    const schedules = await WeeklyBeatMappingSchedule.find(query).lean();
 
     // Fetch route plans for the date range
     const routePlans = await RoutePlan.find({
@@ -1669,23 +1654,21 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
 
       for (const dealer of schedule.schedule || []) {
         const dealerCode = dealer.code || dealer._id || JSON.stringify(dealer);
-        const dealerStatus = dealer.status || "unknown";
+        const dealerStatus = dealer.status || "pending";
         const key = dealerCode;
 
         const existing = scheduleMap.get(normalizedCode).dealersMap.get(key);
 
-        if (dealerStatus === "pending" && existing?.status === "done") {
-          continue;
-        }
-
         if (!existing) {
           scheduleMap.get(normalizedCode).dealersMap.set(key, {
             ...dealer,
+            status: dealerStatus,
             visited: dealerStatus === "done" ? 1 : 0,
           });
         } else if (dealerStatus === "done") {
           scheduleMap.get(normalizedCode).dealersMap.set(key, {
             ...dealer,
+            status: dealerStatus,
             visited: (existing.visited || 0) + 1,
           });
         }
@@ -1695,12 +1678,7 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       const matchingRoutes = routePlans.filter((route) => {
         const routeStart = new Date(route.startDate).setUTCHours(0, 0, 0, 0);
         const routeEnd = new Date(route.endDate).setUTCHours(0, 0, 0, 0);
-        const scheduleStart = new Date(schedule.startDate).setUTCHours(
-          0,
-          0,
-          0,
-          0
-        );
+        const scheduleStart = new Date(schedule.startDate).setUTCHours(0, 0, 0, 0);
         const scheduleEnd = new Date(schedule.endDate).setUTCHours(0, 0, 0, 0);
 
         return (
@@ -1746,9 +1724,6 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       };
     });
 
-    // Sort schedules by "done" count
-    formattedSchedules.sort((a, b) => b.done - a.done);
-
     // Apply search filter
     if (search) {
       const searchRegex = new RegExp(search, "i");
@@ -1760,16 +1735,13 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
       );
     }
 
-    // Get total count for pagination
-    const totalCount = await WeeklyBeatMappingSchedule.countDocuments(query);
+    // Sort schedules by "done" count
+    formattedSchedules.sort((a, b) => b.done - a.done);
 
     return res.status(200).json({
       success: true,
       data: formattedSchedules,
-      total: totalCount,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      totalPages: Math.ceil(totalCount / limit),
+      total: formattedSchedules.length,
     });
   } catch (error) {
     console.error("❌ Error fetching schedules:", error);
