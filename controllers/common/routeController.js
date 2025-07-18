@@ -3,6 +3,10 @@ const csvParser = require("csv-parser");
 const Routes = require("../../model/Routes");
 const moment = require('moment-timezone');
 const RoutePlan = require("../../model/RoutePlan");
+const HierarchyEntries = require("../../model/HierarchyEntries");
+const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule");
+const User = require("../../model/User");
+const Notification = require("../../model/Notification");
 
 // exports.uploadRoutes = async (req, res) => {
 //   try {
@@ -588,11 +592,238 @@ exports.getRouteByUser = async (req, res) => {
 //  }
 // };
 // itenary by town 
+// exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
+//  console.log("tryingg to add route ");
+//  try {
+//    const { routes = [] } = req.body;
+//    const { code } = req.user;
+
+//    if (!routes.length) {
+//      return res.status(400).json({ message: "Please provide selected route names." });
+//    }
+
+//    // 🔍 Step 1: Fetch matching routes for the user
+//    const routeDocs = await Routes.find({
+//      code: code.toUpperCase(),
+//      name: { $in: routes }
+//    });
+
+//    if (!routeDocs.length) {
+//      return res.status(404).json({ message: "No matching routes found." });
+//    }
+
+//    // 🧱 Step 2: Collect towns from matched routes
+//    const allTowns = routeDocs.flatMap(route => route.town || []);
+//    const uniqueTowns = [...new Set(allTowns)];
+
+//    // 🧩 Step 3: Prepare the itinerary
+//    const itinerary = {
+//      district: [],
+//      zone: [],
+//      taluka: [],
+//      town: uniqueTowns // ✅ putting towns into taluka
+//    };
+
+//    // 📆 Step 4: Dates
+//    const today = moment().tz("Asia/Kolkata");
+//    const startDate = today.clone().startOf("day").toDate();
+//    const endDate = today.clone().endOf("day").toDate();
+
+//    // 🏷️ Step 5: Name = selected route names joined with "-"
+//    const name = routes.join("-").toLowerCase();
+
+//    // 📌 Step 6: Save the RoutePlan
+//    const newPlan = await RoutePlan.create({
+//      startDate,
+//      endDate,
+//      code,
+//      name,
+//      itinerary,
+//      status: "inactive",
+//      approved: false,
+//    });
+
+//    return res.status(201).json({
+//      success: true,
+//      message: "Route plan created successfully from selected routes.",
+//      data: newPlan
+//    });
+
+//  } catch (err) {
+//    console.error("Error in addRoutePlanFromSelectedRoutes:", err);
+//    return res.status(500).json({ message: "Internal Server Error" });
+//  }
+// };
+// Just addign the route logic in exisiting logic
+// exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
+//  try {
+//   const {
+//     routes = [], // optional
+//     itinerary = {}, // optional if using routes
+//     status = "inactive",
+//     approved = false,
+//     startDate: inputStart,
+//     endDate: inputEnd,
+//   } = req.body;
+
+//   const { code: userCode, position } = req.user;
+
+//   // 📆 Set startDate and endDate
+//   const todayIST = moment().tz("Asia/Kolkata");
+//   const startDate = inputStart
+//     ? moment.tz(inputStart, "Asia/Kolkata").startOf("day").toDate()
+//     : todayIST.clone().startOf("day").toDate();
+
+//   const endDate = inputEnd
+//     ? moment.tz(inputEnd, "Asia/Kolkata").endOf("day").toDate()
+//     : todayIST.clone().endOf("day").toDate();
+
+//   let finalItinerary = { ...itinerary };
+
+//   // 🔍 If routes provided, fetch towns from Routes collection
+//   if (routes.length) {
+//     const routeDocs = await Routes.find({
+//       code: userCode.toUpperCase(),
+//       name: { $in: routes },
+//     });
+
+//     if (!routeDocs.length) {
+//       return res.status(404).json({ message: "No matching routes found." });
+//     }
+
+//     const allTowns = routeDocs.flatMap((r) => r.town || []);
+//     finalItinerary.town = [...new Set(allTowns)];
+//   }
+
+//   // 🏷️ Route name from available fields
+//   const locationFields = ["district", "taluka", "zone", "town"];
+//   const nameParts = locationFields
+//     .filter(
+//       (field) => Array.isArray(finalItinerary[field]) && finalItinerary[field].length > 0
+//     )
+//     .flatMap((field) => finalItinerary[field]);
+
+//   const name = (routes.length ? routes.join("-") : nameParts.join("-")).toLowerCase() || "unnamed-route";
+
+//   // 📌 Save Route Plan
+//   const newRoute = await RoutePlan.create({
+//     startDate,
+//     endDate,
+//     code: userCode,
+//     name,
+//     itinerary: finalItinerary,
+//     status,
+//     approved,
+//   });
+
+//   // 📅 Date breakdown
+//   const start = moment(startDate).tz("Asia/Kolkata").startOf("day");
+//   const end = moment(endDate).tz("Asia/Kolkata").endOf("day");
+//   const days = [];
+//   for (let m = moment(start); m.isSameOrBefore(end); m.add(1, "days")) {
+//     days.push({
+//       start: m.clone().startOf("day").toDate(),
+//       end: m.clone().endOf("day").toDate(),
+//     });
+//   }
+
+//   // 📊 Hierarchy mapping
+//   const hierarchy = await HierarchyEntries.find({
+//     hierarchy_name: "default_sales_flow",
+//     [position]: userCode,
+//   });
+
+//   const dealerCodes = [...new Set(hierarchy.map((h) => h.dealer))];
+//   const mddCodes = [...new Set(hierarchy.map((h) => h.mdd))];
+
+//   for (const { start, end } of days) {
+//     const existingSchedule = await WeeklyBeatMappingSchedule.findOne({
+//       code: userCode,
+//       startDate: { $lte: start },
+//       endDate: { $gte: start },
+//     });
+
+//     const baseQuery = {
+//       code: { $in: [...dealerCodes, ...mddCodes] },
+//       ...(finalItinerary.district?.length && {
+//         district: { $in: finalItinerary.district },
+//       }),
+//       ...(finalItinerary.zone?.length && { zone: { $in: finalItinerary.zone } }),
+//       ...(finalItinerary.taluka?.length && { taluka: { $in: finalItinerary.taluka } }),
+//       ...(finalItinerary.town?.length && { town: { $in: finalItinerary.town } }),
+//     };
+
+//     const filteredUsers = await User.find(baseQuery);
+
+//     const entries = filteredUsers.map((user) => ({
+//       code: user.code,
+//       name: user.name,
+//       latitude: user.latitude || 0,
+//       longitude: user.longitude || 0,
+//       status: "pending",
+//       distance: null,
+//       district: user.district || "",
+//       taluka: user.taluka || "",
+//       town: user.town || "",
+//       zone: user.zone || "",
+//       position: user.position || "",
+//     }));
+
+//     if (existingSchedule) {
+//       const existingCodes = new Set(existingSchedule.schedule.map((d) => d.code));
+//       const newEntries = entries.filter((e) => !existingCodes.has(e.code));
+//       existingSchedule.schedule.push(...newEntries);
+//       existingSchedule.total += newEntries.length;
+//       existingSchedule.pending += newEntries.length;
+//       await existingSchedule.save();
+//     } else {
+//       await WeeklyBeatMappingSchedule.create({
+//         startDate: start,
+//         endDate: end,
+//         code: userCode,
+//         schedule: entries,
+//         total: entries.length,
+//         done: 0,
+//         pending: entries.length,
+//       });
+//     }
+//   }
+
+//   // 🔔 Notification
+//   await Notification.create({
+//     title: "Route Plan",
+//     message: `The user with code ${userCode} created ${name} routes from ${formatDate(
+//       startDate
+//     )} to ${formatDate(endDate)}.`,
+//     filters: [name, startDate, endDate],
+//     targetRole: ["admin", "super_admin"],
+//   });
+
+//   return res.status(201).json({
+//     message: "Route Plan created successfully.",
+//     route: newRoute,
+//   });
+// } catch (err) {
+//   console.error("Error in addRoutePlan:", err);
+//   return res.status(500).json({ message: "Internal Server Error" });
+// }
+// };
+ 
+
+const formatDate = (date) =>
+ new Date(date).toLocaleDateString("en-GB", {
+   day: "2-digit",
+   month: "short",
+   year: "numeric",
+ });
+
+// route selected logic only
 exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
- console.log("tryingg to add route ");
+ console.log("trying to add route ");
  try {
-   const { routes = [] } = req.body;
-   const { code } = req.user;
+   const { routes = [],
+     startDate: inputStart, endDate: inputEnd } = req.body;
+   const { code, position } = req.user;
 
    if (!routes.length) {
      return res.status(400).json({ message: "Please provide selected route names." });
@@ -617,14 +848,22 @@ exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
      district: [],
      zone: [],
      taluka: [],
-     town: uniqueTowns // ✅ putting towns into taluka
+     town: uniqueTowns
    };
 
-   // 📆 Step 4: Dates
-   const today = moment().tz("Asia/Kolkata");
-   const startDate = today.clone().startOf("day").toDate();
-   const endDate = today.clone().endOf("day").toDate();
+   // 📆 Step 4: Handle start and end date
+   const todayIST = moment().tz("Asia/Kolkata");
 
+   const startDate = inputStart
+     ? moment.tz(inputStart, "Asia/Kolkata").startOf("day").toDate()
+     : todayIST.clone().startOf("day").toDate();
+   
+   const endDate = inputEnd
+     ? moment.tz(inputEnd, "Asia/Kolkata").endOf("day").toDate()
+     : todayIST.clone().endOf("day").toDate();
+   
+   console.log("✅ Final Start & End Dates (IST):", startDate, endDate);
+   
    // 🏷️ Step 5: Name = selected route names joined with "-"
    const name = routes.join("-").toLowerCase();
 
@@ -635,8 +874,87 @@ exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
      code,
      name,
      itinerary,
-     status: "active",
-     approved: true
+     status: "inactive",
+     approved: false,
+   });
+
+   // 🔁 Step 7: Breakdown per day
+   const start = moment(startDate).tz("Asia/Kolkata").startOf("day");
+   const end = moment(endDate).tz("Asia/Kolkata").endOf("day");
+   const days = [];
+   for (let m = moment(start); m.isSameOrBefore(end); m.add(1, "days")) {
+     days.push({
+       start: m.clone().startOf("day").toDate(),
+       end: m.clone().endOf("day").toDate(),
+     });
+   }
+
+   // 📚 Step 8: Get hierarchy entries
+   const hierarchy = await HierarchyEntries.find({
+     hierarchy_name: "default_sales_flow",
+     [position]: code,
+   });
+
+   const dealerCodes = [...new Set(hierarchy.map((h) => h.dealer))];
+   const mddCodes = [...new Set(hierarchy.map((h) => h.mdd))];
+
+   // 📦 Step 9: Loop through days & update schedules
+   for (const { start, end } of days) {
+     const existingSchedule = await WeeklyBeatMappingSchedule.findOne({
+       code,
+       startDate: { $lte: start },
+       endDate: { $gte: start },
+     });
+
+     const baseQuery = {
+       code: { $in: [...dealerCodes, ...mddCodes] },
+       ...(itinerary.town?.length && { town: { $in: itinerary.town } }),
+     };
+
+     const filteredUsers = await User.find(baseQuery);
+
+     const entries = filteredUsers.map((user) => ({
+       code: user.code,
+       name: user.name,
+       latitude: user.latitude || 0,
+       longitude: user.longitude || 0,
+       status: "pending",
+       distance: null,
+       district: user.district || "",
+       taluka: user.taluka || "",
+       town: user.town || "",
+       zone: user.zone || "",
+       position: user.position || "",
+     }));
+
+     if (existingSchedule) {
+       const existingCodes = new Set(
+         existingSchedule.schedule.map((d) => d.code)
+       );
+       const newEntries = entries.filter((e) => !existingCodes.has(e.code));
+       existingSchedule.schedule.push(...newEntries);
+       existingSchedule.total += newEntries.length;
+       existingSchedule.pending += newEntries.length;
+       await existingSchedule.save();
+     } else {
+       await WeeklyBeatMappingSchedule.create({
+         startDate: start,
+         endDate: end,
+         code,
+         schedule: entries,
+         total: entries.length,
+         done: 0,
+         pending: entries.length,
+       });
+     }
+   }
+
+   // 🔔 Step 10: Create notification
+   await Notification.create({
+     title: "Route Plan",
+     message: `The user with code ${code} created ${name} routes from ${formatDate(startDate)} to ${formatDate(endDate)}.`,
+     filters: [name, startDate, endDate],
+     targetRole: ["admin", "super_admin"],
    });
 
    return res.status(201).json({
