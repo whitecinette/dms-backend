@@ -1,6 +1,9 @@
 const bcrypt = require("bcryptjs");
 const User = require("../../model/User");
 const jwt = require("jsonwebtoken");
+const fs = require("fs");  // ✅ Import fs module
+const stream = require("stream");
+const csvParser = require("csv-parser");
 const {
   sendNotificationToAdmins,
 } = require("../../helpers/notificationHelper");
@@ -436,3 +439,256 @@ exports.getAllHierarchyUsersByFirm = async (req, res) => {
  }
 };
 
+// Update dealer's town
+// exports.updateDealerTownFromCSV = async (req, res) => {
+//  try {
+//    const filePath = req.file.path;
+//    const updates = [];
+
+//    fs.createReadStream(filePath)
+//      .pipe(csv())
+//      .on('data', (row) => {
+//        const code = row['Code']?.trim();
+//        const town = row['Town']?.trim();
+
+//        if (!code) return;
+
+//        updates.push({ code: code.toUpperCase(), town });
+//      })
+//      .on('end', async () => {
+//        let updated = 0;
+//        let skipped = 0;
+
+//        for (const { code, town } of updates) {
+//          const dealer = await User.findOne({ code });
+
+//          if (!dealer) {
+//            skipped++;
+//            continue;
+//          }
+
+//          const incomingTown = (town || "").trim();
+//          const existingTown = (dealer.town || "").trim();
+
+//          if (!incomingTown || incomingTown.toUpperCase() === "N/A") {
+//            skipped++;
+//            continue;
+//          }
+
+//          if (incomingTown.toLowerCase() === existingTown.toLowerCase()) {
+//            skipped++;
+//            continue;
+//          }
+
+//          dealer.town = incomingTown;
+//          await dealer.save();
+//          updated++;
+//        }
+
+//        res.status(200).json({
+//          success: true,
+//          message: "Dealer towns updated from CSV.",
+//          updated,
+//          skipped,
+//        });
+//      });
+//  } catch (error) {
+//    console.error('Error updating dealer towns from CSV:', error);
+//    res.status(500).json({ success: false, message: 'Internal server error.' });
+//  }
+// };
+
+// update dealer town and if town field is not exist in document and in csv than add the field 
+// exports.updateDealerTownFromCSV = async (req, res) => {
+//  try {
+//    const filePath = req.file.path;
+//    const updates = [];
+
+//    fs.createReadStream(filePath)
+//      .pipe(csvParser())
+//      .on('data', (row) => {
+//        const code = row['Code']?.trim();
+//        const town = row['Town']?.trim();
+
+//        if (!code) return; // skip invalid rows
+//        updates.push({ code: code.toUpperCase(), town });
+//      })
+//      .on('end', async () => {
+//        let updated = 0;
+//        let skipped = 0;
+//        const updatedDealers = [];
+
+//        for (const { code, town } of updates) {
+//          const dealer = await User.findOne({ code });
+//          if (!dealer) {
+//            skipped++;
+//            continue;
+//          }
+
+//          const incomingTown = (town || "").trim();
+//          const hasTownField = dealer.town !== undefined;
+//          const existingTown = (dealer.town || "").trim();
+         
+//          // ❌ Skip if blank or "N/A"
+//          if (!incomingTown || incomingTown.toUpperCase() === "N/A") {
+//            skipped++;
+//            continue;
+//          }
+         
+//          // ✅ Case: town field missing, but valid CSV town present
+//          if (!hasTownField && incomingTown) {
+//            dealer.town = incomingTown;
+//            await dealer.save();
+//            updated++;
+//            updatedDealers.push({ code, town: incomingTown });
+//            console.log(`✅ [NEW FIELD] ${code} => ${incomingTown}`);
+//            continue;
+//          }
+         
+//          // ❌ Skip if same (case-insensitive)
+//          if (incomingTown.toLowerCase() === existingTown.toLowerCase()) {
+//            skipped++;
+//            continue;
+//          }
+         
+//          // ✅ Update if different
+//          await User.updateOne({ code }, { $set: { town: incomingTown } });
+//          updated++;
+//          updatedDealers.push({ code, town: incomingTown });
+//          console.log(`✅ [UPDATED] ${code} => ${incomingTown}`);         
+//        }
+
+//        res.status(200).json({
+//          success: true,
+//          message: "Dealer towns updated from CSV.",
+//          updated,
+//          skipped,
+//          updatedDealers,
+//        });
+//      });
+//  } catch (error) {
+//    console.error('Error updating dealer towns from CSV:', error);
+//    res.status(500).json({ success: false, message: 'Internal server error.' });
+//  }
+// };
+
+// skipped the duplicates code if any in csv suppose csv has a same code with diffrent town than its skip that and does'nt change the existing dealer town
+exports.updateDealerTownFromCSV = async (req, res) => {
+ try {
+   const filePath = req.file.path;
+   const rawUpdates = [];
+
+   // ✅ Step 1: Read and parse the CSV rows
+   fs.createReadStream(filePath)
+     .pipe(csvParser())
+     .on("data", (row) => {
+       const code = row["Code"]?.trim();
+       const town = row["Town"]?.trim();
+       if (code) {
+         rawUpdates.push({ code: code.toUpperCase(), town });
+       }
+     })
+     .on("end", async () => {
+       const codeTownMap = new Map();
+       const conflictCodes = new Set();
+
+       // ✅ Step 2: Detect conflicts where same code has different towns
+       for (const { code, town } of rawUpdates) {
+         if (!town || town.toUpperCase() === "N/A") continue;
+
+         const prevTown = codeTownMap.get(code);
+         if (!prevTown) {
+           codeTownMap.set(code, town);
+         } else if (prevTown.toLowerCase() !== town.toLowerCase()) {
+           // ⚠️ Mark code as conflicted if multiple towns appear for same code
+           conflictCodes.add(code);
+         }
+       }
+
+       // ✅ Step 3: Apply updates for non-conflicting rows only
+       let updated = 0;
+       let skipped = 0;
+       const updatedDealers = [];
+       const conflictedDealers = [];
+       const skippedDealers = [];
+
+       for (const { code, town } of rawUpdates) {
+         if (conflictCodes.has(code)) {
+           // // ❌ Skip this code completely due to conflicting towns
+           // conflictedDealers.push(code);
+           skipped++;
+           conflictedDealers.push({ code, town: incomingTown, reason: "Conflicting town entries" });
+console.log(`⚠️ SKIPPED (Conflict): ${code} => ${incomingTown}`);
+
+           continue;
+         }
+
+         const incomingTown = (town || "").trim();
+         if (!incomingTown || incomingTown.toUpperCase() === "N/A") {
+           // ❌ Skip blank or N/A towns
+           skipped++;
+           skippedDealers.push({ code, town: incomingTown, reason: "Blank or N/A town" });
+           console.log(`⚠️ SKIPPED (Blank/N/A): ${code}`);
+           continue;
+         }
+
+         const dealer = await User.findOne({ code });
+         if (!dealer) {
+           // ❌ Skip if dealer not found
+           skipped++;
+           skippedDealers.push({ code, town: incomingTown, reason: "Dealer not found" });
+           console.log(`⚠️ SKIPPED (Dealer not found): ${code}`);
+           continue;
+         }
+
+         const hasTownField = dealer.town !== undefined;
+         const existingTown = (dealer.town || "").trim();
+
+         // ✅ Case: Add new town if not present before
+         if (!hasTownField && incomingTown) {
+           dealer.town = incomingTown;
+           await dealer.save();
+           updated++;
+           updatedDealers.push({ code, town: incomingTown });
+           console.log(`✅ [NEW FIELD] ${code} => ${incomingTown}`);
+           continue;
+         }
+
+         // ❌ Case: Same town already present — skip
+         if (existingTown.toLowerCase() === incomingTown.toLowerCase()) {
+          skipped++;
+          skippedDealers.push({
+            code,
+            town: incomingTown,
+            reason: "Same town already present",
+          });
+          continue;
+        }
+        
+
+         // ✅ Case: Update town if different
+         await User.updateOne({ code }, { $set: { town: incomingTown } });
+         updated++;
+         updatedDealers.push({ code, town: incomingTown });
+         console.log(`✅ [UPDATED] ${code} => ${incomingTown}`);
+       }
+
+       // ✅ Final response with summary
+       res.status(200).json({
+         success: true,
+         message: "Dealer towns updated from CSV.",
+         updated,
+         skipped: skippedDealers.length + conflictedDealers.length, // fixed count
+         updatedDealers,
+         skippedDealers,
+         conflictedDealers,
+       });
+     });
+ } catch (error) {
+   console.error("Error updating dealer towns from CSV:", error);
+   res.status(500).json({
+     success: false,
+     message: "Internal server error.",
+   });
+ }
+};
