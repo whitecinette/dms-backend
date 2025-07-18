@@ -141,11 +141,18 @@ exports.addRoutePlan = async (req, res) => {
 
     const todayIST = moment().tz("Asia/Kolkata");
     const startDate = todayIST.clone().startOf("day").toDate(); // Today 00:00 IST
-    const endDate = todayIST.clone().endOf("day").toDate(); 
+    const endDate = todayIST.clone().endOf("day").toDate();
 
     console.log("Startdate and enddate: ", startDate, endDate);
 
-    const locationFields = ["district", "taluka", "zone", "state", "province", "town"];
+    const locationFields = [
+      "district",
+      "taluka",
+      "zone",
+      "state",
+      "province",
+      "town",
+    ];
     const nameParts = locationFields
       .filter(
         (field) =>
@@ -221,7 +228,6 @@ exports.addRoutePlan = async (req, res) => {
         position: user.position || "",
       }));
 
-
       if (existingSchedule) {
         const existingCodes = new Set(
           existingSchedule.schedule.map((d) => d.code)
@@ -294,8 +300,12 @@ exports.getRoutePlansForUser = async (req, res) => {
         _id: route._id,
         code: route.code,
         name: route.name,
-        startDate: moment(route.startDate).tz("Asia/Kolkata").format("YYYY-MM-DD HH:mm:ss"),
-        endDate: moment(route.endDate).tz("Asia/Kolkata").format("YYYY-MM-DD HH:mm:ss"),
+        startDate: moment(route.startDate)
+          .tz("Asia/Kolkata")
+          .format("YYYY-MM-DD HH:mm:ss"),
+        endDate: moment(route.endDate)
+          .tz("Asia/Kolkata")
+          .format("YYYY-MM-DD HH:mm:ss"),
         status: route.status,
         approved: route.approved,
         itinerary: mergedArray, // ✅ Final merged array
@@ -398,7 +408,6 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
       if (user.taluka) talukas.add(user.taluka);
       if (user.zone) zones.add(user.zone);
       if (user.town) towns.add(user.town);
-
     });
 
     return res.status(200).json({
@@ -410,7 +419,6 @@ exports.getDropdownOptionsForMarketCoverageUser = async (req, res) => {
       zone: [...zones],
       town: [...towns],
     });
-
   } catch (error) {
     console.error("Error in getDropdownOptionsForMarketCoverage:", error);
     return res.status(500).json({ success: false, message: "Server error" });
@@ -733,14 +741,14 @@ exports.editRoutePlan = async (req, res) => {
     const { routeId } = req.params;
     const { approved, status } = req.body;
     const route = await RoutePlan.findById(routeId);
-    console.log(req.body)
+    console.log(req.body);
     if (!route) {
       return res
         .status(404)
         .json({ success: false, message: "Route not found" });
     }
 
-      route.approved = approved;
+    route.approved = approved;
 
     if (status) {
       route.status = status;
@@ -774,9 +782,20 @@ exports.getAllRoutePlans = async (req, res) => {
       const start = new Date(startDate).setHours(0, 0, 0, 0);
       const end = new Date(endDate).setHours(23, 59, 59, 999);
 
+      // Ensure startDate is not after endDate
+      if (start > end) {
+        return res.status(400).json({
+          success: false,
+          message: "startDate cannot be after endDate",
+        });
+      }
+
       query.startDate = { $gte: start };
       query.endDate = { $lte: end };
     }
+    // if (startDate && endDate) {
+    //
+    // }
 
     if (status) query.status = status;
     if (approved) query.approved = approved === "true";
@@ -795,12 +814,10 @@ exports.getAllRoutePlans = async (req, res) => {
           Array.isArray(itinerary) ||
           Object.keys(itinerary).length === 0
         ) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "Invalid itinerary filter format",
-            });
+          return res.status(400).json({
+            success: false,
+            message: "Invalid itinerary filter format",
+          });
         }
 
         // Build query for itinerary map
@@ -842,7 +859,7 @@ exports.getAllRoutePlans = async (req, res) => {
       routes.map(async (route) => {
         const empCode = route.code?.toLowerCase();
         const itinerary = route.itinerary || {};
-        //  console.log("ItiL: ", itinerary);
+
         // Fetch beat mappings in date range for this code
         const schedules = await WeeklyBeatMappingSchedule.find({
           code: route.code,
@@ -870,12 +887,11 @@ exports.getAllRoutePlans = async (req, res) => {
             district: dealer.district?.trim(),
             taluka: dealer.taluka?.trim(),
             zone: dealer.zone?.trim(),
+            town: dealer.town?.trim(),
             position: dealer.position,
             status: dealer.status,
           }));
         });
-
-        //  console.log("taluka: ", itinerary.taluka);
 
         // Filter dealers by itinerary match for the current route
         const filteredDealers = allDealers.filter((dealer) => {
@@ -889,9 +905,13 @@ exports.getAllRoutePlans = async (req, res) => {
           const matchZone = itinerary
             .get("zone")
             ?.some((z) => dealer.zone?.toLowerCase() === z.toLowerCase());
+          const matchTown = itinerary
+            .get("town")
+            ?.some((z) => dealer.town?.toLowerCase() === z.toLowerCase());
           // If any match is found in taluka, district, or zone
-          return matchTaluka || matchDistrict || matchZone;
+          return matchTaluka || matchDistrict || matchZone || matchTown;
         });
+
         // Remove duplicates by code
         const dealerMap = filteredDealers.reduce((acc, dealer) => {
           const code = dealer.code;
@@ -910,12 +930,20 @@ exports.getAllRoutePlans = async (req, res) => {
 
         const matchedDealers = Object.values(dealerMap);
 
-        // Calculate total, done, and pending
+        // Calculate total, done, pending, and town count
         const total = matchedDealers.length;
         const done = matchedDealers.filter(
           (d) => d.status?.toLowerCase() === "done"
         ).length;
         const pending = total - done;
+        // Calculate unique towns
+        const uniqueTowns = [
+          ...new Set(
+            matchedDealers
+              .filter((d) => d.town) // Ensure town exists
+              .map((d) => d.town.toLowerCase())
+          ),
+        ].length;
 
         return {
           id: route._id,
@@ -932,6 +960,7 @@ exports.getAllRoutePlans = async (req, res) => {
           total,
           done,
           pending,
+          townCount: uniqueTowns, // Added town count
         };
       })
     );

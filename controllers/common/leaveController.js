@@ -243,8 +243,26 @@ exports.getLeaveApplications = async (req, res) => {
       query.leaveType = type;
     }
     if (fromDate && toDate) {
-      query.fromDate = { $gte: new Date(fromDate), $lte: new Date(toDate) };
-      query.toDate = { $gte: new Date(fromDate), $lte: new Date(toDate) };
+      const startDate = new Date(fromDate);
+      const endDate = new Date(toDate);
+      // Ensure endDate includes the full day
+      endDate.setHours(23, 59, 59, 999);
+
+      // Query for leave applications that overlap with the date range
+      query.$or = [
+        {
+          fromDate: { $gte: startDate, $lte: endDate },
+        },
+        {
+          toDate: { $gte: startDate, $lte: endDate },
+        },
+        {
+          $and: [
+            { fromDate: { $lte: startDate } },
+            { toDate: { $gte: endDate } },
+          ],
+        },
+      ];
     }
 
     // Get total count for pagination

@@ -1696,6 +1696,7 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
           zones: route.itinerary?.zone || [],
           districts: route.itinerary?.district || [],
           talukas: route.itinerary?.taluka || [],
+          town: route.itinerary?.town || []
         },
       }));
 
