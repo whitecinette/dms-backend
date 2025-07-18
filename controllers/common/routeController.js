@@ -1053,7 +1053,7 @@ exports.requestRoutePlan = async (req, res) => {
 // }
 // }
 
-
+// get requested route for user
 exports.getRequestedRoute = async (req, res) => {
  try {
    console.log("Fetching requested routes...");
@@ -1103,5 +1103,130 @@ exports.getRequestedRoute = async (req, res) => {
  } catch (err) {
    console.error("Error in getRequestedRoute:", err);
    return res.status(500).json({ message: "Internal Server Error" });
+ }
+};
+
+// get requested route for admin
+// exports.getRequestedRouteForAdmin = async (req, res) => {
+//  try {
+//    const { startDate, endDate, status } = req.query;
+
+//    const query = {};
+
+//    // 🟡 Optional status filter (pending/requested/approved/rejected)
+//    if (status) {
+//      query.status = status;
+//    }
+
+//    // 🗓️ Date filter logic
+//    if (startDate && endDate) {
+//      query.startDate = { $gte: new Date(startDate) };
+//      query.endDate = { $lte: new Date(endDate) };
+//    } else {
+//      // Default to today's routes
+//      const todayStart = moment().tz("Asia/Kolkata").startOf("day").toDate();
+//      const todayEnd = moment().tz("Asia/Kolkata").endOf("day").toDate();
+
+//      query.startDate = { $lte: todayEnd };
+//      query.endDate = { $gte: todayStart };
+//    }
+
+//    const requestedRoutes = await RequestedRoutes.find(query).sort({ createdAt: -1 });
+
+//    return res.status(200).json({
+//      success: true,
+//      data: requestedRoutes,
+//    });
+//  } catch (error) {
+//    console.error("Error getting requested route for admin:", error);
+//    return res.status(500).json({
+//      success: false,
+//      message: "Something went wrong while fetching requested routes",
+//    });
+//  }
+// };
+exports.getRequestedRouteForAdmin = async (req, res) => {
+ try {
+   const { startDate, endDate, status } = req.query;
+
+   const query = {};
+
+   // 🟡 Optional status filter (requested/approved/rejected/inactive etc.)
+   if (status) {
+     query.status = status;
+   }
+
+   // 🗓️ Date filter logic
+   if (startDate && endDate) {
+     query.startDate = { $gte: new Date(startDate) };
+     query.endDate = { $lte: new Date(endDate) };
+   } else {
+     const todayStart = moment().tz("Asia/Kolkata").startOf("day").toDate();
+     const todayEnd = moment().tz("Asia/Kolkata").endOf("day").toDate();
+
+     query.startDate = { $lte: todayEnd };
+     query.endDate = { $gte: todayStart };
+   }
+
+   // 📦 Fetch all requested routes
+   const requestedRoutes = await RequestedRoutes.find(query).sort({ createdAt: -1 });
+
+   // 🧹 Clean codes from requested routes
+   const codes = [
+     ...new Set(
+       requestedRoutes
+         .map((r) => r.code?.trim().toLowerCase())
+         .filter(Boolean)
+     ),
+   ];
+
+   // 👥 Fetch all users and create a user map
+   const users = await User.find({}, "code name position");
+
+   const userMap = {};
+   users.forEach((user) => {
+     const cleanedCode = user.code?.trim().toLowerCase();
+     if (codes.includes(cleanedCode)) {
+       userMap[cleanedCode] = {
+         EmpName: user.name,
+         position: user.position,
+       };
+     }
+   });
+
+   // 📦 Final formatted data with EmpName + position
+   const finalData = requestedRoutes.map((route) => {
+     const cleanedCode = route.code?.trim().toLowerCase();
+     const userInfo = userMap[cleanedCode] || {};
+
+     return {
+       id: route._id,
+       code: route.code,
+       name: route.name,
+       EmpName: userInfo.EmpName || "Unknown",
+       position: userInfo.position || "Unknown",
+       routeName: route.name,
+       startDate: route.startDate,
+       endDate: route.endDate,
+       status: route.status,
+       itinerary: route.itinerary || {},
+       approved: route.approved || false,
+       total: route.total || 0,
+       done: route.done || 0,
+       pending: route.pending || 0,
+       townCount: (route.itinerary?.town || []).length,
+     };
+   });
+
+   return res.status(200).json({
+     success: true,
+     data: finalData,
+   });
+ } catch (error) {
+   console.error("Error getting requested route for admin:", error);
+   return res.status(500).json({
+     success: false,
+     message: "Something went wrong while fetching requested routes",
+   });
  }
 };
