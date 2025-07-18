@@ -441,7 +441,7 @@ exports.getSubordinatesForUser = async (req, res) => {
     enrichedMTDSales.forEach(sale => {
       const value = filter_type === "value" ? sale.total_amount : sale.quantity;
       mtdCategoryMap[sale.category] = (mtdCategoryMap[sale.category] || 0) + value;
-      console.log("Fin val: ", mtdCategoryMap);
+      // console.log("Fin val: ", mtdCategoryMap);
     });
 
     const lmtdCategoryMap = {};
@@ -559,7 +559,7 @@ exports.getSubordinatesForUser = async (req, res) => {
       ]),
     ];
 
-  console.log("Smart Phone Subordinate:", subordinates.find(s => s.code === "smart_phone"));
+  // console.log("Smart Phone Subordinate:", subordinates.find(s => s.code === "smart_phone"));
 
     // console.log("Sobords 19 : ", subordinates)
     res
