@@ -15,7 +15,7 @@ function getDaysLeftInMonth(month) {
     try {
         today = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
+        // console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
         today = dayjs().utc();
     }
     let targetDate = today;
@@ -51,7 +51,7 @@ function getDaysLeftForMonth(month) {
     try {
         today = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
+        // console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
         today = dayjs().utc();
     }
     const currentMonth = today.month();
@@ -68,7 +68,7 @@ function getCurrentPeriod() {
     try {
         date = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        console.warn("Timezone 'Asia/Kolkata' not supported, falling back to UTC:", err.message);
+        // console.warn("Timezone 'Asia/Kolkata' not supported, falling back to UTC:", err.message);
         date = dayjs().utc();
     }
     return {
@@ -146,7 +146,7 @@ function generateRow(original, currentMonth, currentDate) {
         Jul: formatQ3(rowData.jul.target, rowData.jul.achievement, julMetrics.achPercent, julMetrics.requiredAds),
         Aug: formatQ3(rowData.aug.target, rowData.aug.achievement, augMetrics.achPercent, augMetrics.requiredAds),
         Sep: formatQ3(rowData.sep.target, rowData.sep.achievement, sepMetrics.achPercent, sepMetrics.requiredAds),
-        "Q3'25": formatQ3(rowData.q3.target, rowData.q3.achievement, q3Metrics.achPercent, q3Metrics.requiredAds),
+        "Q325": formatQ3(rowData.q3.target, rowData.q3.achievement, q3Metrics.achPercent, q3Metrics.requiredAds),
     };
 }
 
@@ -191,7 +191,7 @@ exports.AlphaMessages = async (req, res) => {
                 stream.destroy();
             } else {
                 headersValidated = true;
-                console.log("Headers validated successfully:", headers);
+                // console.log("Headers validated successfully:", headers);
             }
         })
         .on("data", (data) => {
@@ -229,20 +229,20 @@ exports.AlphaMessages = async (req, res) => {
                 "Jul",
                 "Aug",
                 "Sep",
-                "Q3'25",
+                "Q325",
             ];
             try {
                 const json2csvParser = new Parser({ fields });
                 const csv = json2csvParser.parse(formattedRows);
                 fs.writeFileSync(outputPath, csv);
-                console.log("Output CSV written to:", outputPath);
+                // console.log("Output CSV written to:", outputPath);
 
                 res.download(outputPath, "formatted_dealer_messages.csv", (err) => {
                     try {
                         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
                         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
                     } catch (cleanupErr) {
-                        console.error("Cleanup error:", cleanupErr);
+                        // console.error("Cleanup error:", cleanupErr);
                     }
 
                     if (err) {
