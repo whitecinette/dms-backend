@@ -7,6 +7,7 @@ const HierarchyEntries = require("../../model/HierarchyEntries");
 const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule");
 const User = require("../../model/User");
 const Notification = require("../../model/Notification");
+const RequestedRoutes = require("../../model/RequestedRoutes");
 
 // exports.uploadRoutes = async (req, res) => {
 //   try {
@@ -965,6 +966,142 @@ exports.addRoutePlanFromSelectedRoutes = async (req, res) => {
 
  } catch (err) {
    console.error("Error in addRoutePlanFromSelectedRoutes:", err);
+   return res.status(500).json({ message: "Internal Server Error" });
+ }
+};
+
+
+// request route by user
+exports.requestRoutePlan = async (req, res) => {
+ console.log("Requesting route plan...");
+ try {
+   const { routes = [], startDate: inputStart, endDate: inputEnd } = req.body;
+   const { code } = req.user;
+
+   if (!routes.length) {
+     return res.status(400).json({ message: "Please provide selected route names." });
+   }
+
+   const routeDocs = await Routes.find({
+     code: code.toUpperCase(),
+     name: { $in: routes }
+   });
+
+   if (!routeDocs.length) {
+     return res.status(404).json({ message: "No matching routes found." });
+   }
+
+   const allTowns = routeDocs.flatMap(route => route.town || []);
+   const uniqueTowns = [...new Set(allTowns)];
+
+   const itinerary = {
+     district: [],
+     zone: [],
+     taluka: [],
+     town: uniqueTowns
+   };
+
+   const todayIST = moment().tz("Asia/Kolkata");
+
+   const startDate = inputStart
+     ? moment.tz(inputStart, "Asia/Kolkata").startOf("day").toDate()
+     : todayIST.clone().startOf("day").toDate();
+
+   const endDate = inputEnd
+     ? moment.tz(inputEnd, "Asia/Kolkata").endOf("day").toDate()
+     : todayIST.clone().endOf("day").toDate();
+
+   const name = routes.join("-").toLowerCase();
+
+   const newRequest = await RequestedRoutes.create({
+     startDate,
+     endDate,
+     code,
+     name,
+     itinerary,
+     status: "requested",  // 🆕 Mark as request
+     approved: false,
+   });
+
+   return res.status(201).json({
+     success: true,
+     message: "Route request submitted successfully.",
+     data: newRequest
+   });
+
+ } catch (err) {
+   console.error("Error in requestRoutePlan:", err);
+   return res.status(500).json({ message: "Internal Server Error" });
+ }
+};
+
+
+// get requested route
+// exports.getRequestedRoute = async (req, res) => {
+//  try {
+//   const { code } = req.user;
+
+//   const requests = await RequestedRoutes.find({ code }).sort({ createdAt: -1 });
+
+//   return res.status(200).json({
+//     success: true,
+//     data: requests,
+//   });
+// } catch (err) {
+//   console.error("Error in getRequestedRoutePlans:", err);
+//   return res.status(500).json({ message: "Internal Server Error" });
+// }
+// }
+
+
+exports.getRequestedRoute = async (req, res) => {
+ try {
+   console.log("Fetching requested routes...");
+   const { startDate, endDate } = req.query;
+   const code = req.user.code;
+
+   const query = { code };
+
+   if (startDate && endDate) {
+    query.startDate = { $lte: new Date(endDate) };
+    query.endDate = { $gte: new Date(startDate) };
+  }
+  
+
+   const requests = await RequestedRoutes.find(query).sort({ createdAt: -1 });
+
+   const formattedRequests = requests.map((route) => {
+     const itinerary = route.itinerary || {};
+     let mergedArray = [];
+
+     if (itinerary instanceof Map) {
+       mergedArray = Array.from(itinerary.values()).flat();
+     } else if (typeof itinerary === "object" && itinerary !== null) {
+       mergedArray = Object.values(itinerary).filter(Array.isArray).flat();
+     }
+
+     return {
+       _id: route._id,
+       code: route.code,
+       name: route.name,
+       startDate: moment(route.startDate)
+         .tz("Asia/Kolkata")
+         .format("YYYY-MM-DD HH:mm:ss"),
+       endDate: moment(route.endDate)
+         .tz("Asia/Kolkata")
+         .format("YYYY-MM-DD HH:mm:ss"),
+       status: route.status,
+       approved: route.approved,
+       itinerary: mergedArray,
+     };
+   });
+
+   return res.status(200).json({
+     success: true,
+     data: formattedRequests,
+   });
+ } catch (err) {
+   console.error("Error in getRequestedRoute:", err);
    return res.status(500).json({ message: "Internal Server Error" });
  }
 };
