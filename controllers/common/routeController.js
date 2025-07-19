@@ -1013,6 +1013,18 @@ exports.requestRoutePlan = async (req, res) => {
 
    const name = routes.join("-").toLowerCase();
 
+    const existingRequest = await RequestedRoutes.findOne({
+     code,
+     name,
+     startDate: { $gte: startDate, $lt: moment(startDate).add(1, 'day').toDate() },
+     endDate: { $gte: endDate, $lt: moment(endDate).add(1, 'day').toDate() }
+});
+
+if (existingRequest) {
+ return res.status(409).json({
+   message: "This route has already been requested for the selected date range."
+ });
+}
    const newRequest = await RequestedRoutes.create({
      startDate,
      endDate,
@@ -1022,6 +1034,15 @@ exports.requestRoutePlan = async (req, res) => {
      status: "requested",  // 🆕 Mark as request
      approved: false,
    });
+   const notification = {
+    title: "Route Request",
+    message: `The user with code ${code} requested a route with ${name}  from ${formatDate(
+      startDate
+    )} to ${formatDate(endDate)}.`,
+    filters: [name, startDate, endDate],
+    targetRole: ["admin", "super_admin"],
+  };
+  await Notification.create(notification);
 
    return res.status(201).json({
      success: true,
@@ -1498,14 +1519,14 @@ console.log("Filtered users after town match:", filteredUsers.length);
    await RequestedRoutes.findByIdAndDelete(requestId);
 
    // 7️⃣ Notify the user
-   await Notification.create({
-     title: "Route Approved",
-     message: `Your route "${name}" has been approved by admin for ${formatDate(
-       startDate
-     )} to ${formatDate(endDate)}.`,
-     filters: [name, startDate, endDate],
-     targetRole: ["user"],
-   });
+   // await Notification.create({
+   //   title: "Route Approved",
+   //   message: `Your route "${name}" has been approved by admin for ${formatDate(
+   //     startDate
+   //   )} to ${formatDate(endDate)}.`,
+   //   filters: [name, startDate, endDate],
+   //   targetRole: ["user"],
+   // });
 
    return res.status(200).json({
      success: true,
