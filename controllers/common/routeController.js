@@ -1230,3 +1230,290 @@ exports.getRequestedRouteForAdmin = async (req, res) => {
    });
  }
 };
+
+// approved Reuested route
+// exports.approveRequestedRoute = async (req, res) => {
+//  try {
+//    const { id } = req.params;
+
+//    // 🔍 Step 1: Get the RequestedRoute
+//    const requested = await RequestedRoute.findById(id);
+//    if (!requested) {
+//      return res.status(404).json({ message: "Requested route not found." });
+//    }
+
+//    const { code, name, startDate, endDate } = requested;
+
+//    // 🔍 Step 2: Fetch routes from backend using route name
+//    const routeDocs = await Routes.find({
+//      code: code.toUpperCase(),
+//      name: name
+//    });
+
+//    if (!routeDocs.length) {
+//      return res.status(404).json({ message: "No matching backend route found." });
+//    }
+
+//    // 🧱 Step 3: Get towns
+//    const allTowns = routeDocs.flatMap(route => route.town || []);
+//    const uniqueTowns = [...new Set(allTowns)];
+
+//    const itinerary = {
+//      district: [],
+//      zone: [],
+//      taluka: [],
+//      town: uniqueTowns
+//    };
+
+//    // 🛠️ Step 4: Create RoutePlan
+//    const newPlan = await RoutePlan.create({
+//      code,
+//      name,
+//      startDate,
+//      endDate,
+//      itinerary,
+//      status: "approved",
+//      approved: true,
+//    });
+
+//    // 🔁 Step 5: Breakdown per day
+//    // const days = [];
+//    // const start = moment(startDate).tz("Asia/Kolkata").startOf("day");
+//    // const end = moment(endDate).tz("Asia/Kolkata").endOf("day");
+//    // for (let m = moment(start); m.isSameOrBefore(end); m.add(1, "days")) {
+//    //   days.push({
+//    //     start: m.clone().startOf("day").toDate(),
+//    //     end: m.clone().endOf("day").toDate(),
+//    //   });
+//    // }
+
+//    // 🔍 Step 6: Hierarchy data
+//    // const user = await User.findOne({ code });
+//    // const position = user?.position || "dealer"; // fallback
+
+//    // const hierarchy = await HierarchyEntries.find({
+//    //   hierarchy_name: "default_sales_flow",
+//    //   [position]: code,
+//    // });
+
+//    // const dealerCodes = [...new Set(hierarchy.map((h) => h.dealer))];
+//    // const mddCodes = [...new Set(hierarchy.map((h) => h.mdd))];
+
+//    // 🔁 Step 7: Loop and populate WeeklyBeatMapping
+//    // for (const { start, end } of days) {
+//    //   const existingSchedule = await WeeklyBeatMappingSchedule.findOne({
+//    //     code,
+//    //     startDate: { $lte: start },
+//    //     endDate: { $gte: start },
+//    //   });
+
+//    //   const baseQuery = {
+//    //     code: { $in: [...dealerCodes, ...mddCodes] },
+//    //     ...(itinerary.town?.length && { town: { $in: itinerary.town } }),
+//    //   };
+
+//    //   const filteredUsers = await User.find(baseQuery);
+
+//    //   const entries = filteredUsers.map((user) => ({
+//    //     code: user.code,
+//    //     name: user.name,
+//    //     latitude: user.latitude || 0,
+//    //     longitude: user.longitude || 0,
+//    //     status: "pending",
+//    //     distance: null,
+//    //     district: user.district || "",
+//    //     taluka: user.taluka || "",
+//    //     town: user.town || "",
+//    //     zone: user.zone || "",
+//    //     position: user.position || "",
+//    //   }));
+
+//    //   if (existingSchedule) {
+//    //     const existingCodes = new Set(
+//    //       existingSchedule.schedule.map((d) => d.code)
+//    //     );
+//    //     const newEntries = entries.filter((e) => !existingCodes.has(e.code));
+//    //     existingSchedule.schedule.push(...newEntries);
+//    //     existingSchedule.total += newEntries.length;
+//    //     existingSchedule.pending += newEntries.length;
+//    //     await existingSchedule.save();
+//    //   } else {
+//    //     await WeeklyBeatMappingSchedule.create({
+//    //       startDate: start,
+//    //       endDate: end,
+//    //       code,
+//    //       schedule: entries,
+//    //       total: entries.length,
+//    //       done: 0,
+//    //       pending: entries.length,
+//    //     });
+//    //   }
+//    // }
+
+//    // 🔔 Step 8: Create Notification
+//    await Notification.create({
+//      title: "Route Approved",
+//      message: `Route ${name} was approved and converted into a Route Plan for user ${code}.`,
+//      filters: [name, startDate, endDate],
+//      targetRole: ["admin", "super_admin"],
+//    });
+
+//    // ❌ Step 9: Delete requested route
+//    await RequestedRoute.findByIdAndDelete(id);
+
+//    return res.status(201).json({
+//      success: true,
+//      message: "Requested route approved and converted to RoutePlan.",
+//      data: newPlan
+//    });
+
+//  } catch (err) {
+//    console.error("Error in approveRequestedRoute:", err);
+//    return res.status(500).json({ message: "Internal Server Error" });
+//  }
+// };
+
+exports.approveRequestedRoute = async (req, res) => {
+ try {
+   const { requestId } = req.params;
+   // const { code: adminCode, position: adminPosition } = req.user;
+
+   // 1️⃣ Fetch the requested route
+   const request = await RequestedRoutes.findById(requestId);
+   if (!request) {
+     return res.status(404).json({ message: "Requested route not found." });
+   }
+
+   const { startDate, endDate, code: userCode, name, itinerary } = request;
+
+   // 2️⃣ Create new RoutePlan
+   const newPlan = await RoutePlan.create({
+     startDate,
+     endDate,
+     code: userCode,
+     name,
+     itinerary,
+     status: "approved",
+     approved: true,
+   });
+
+   // 3️⃣ Breakdown date range
+   const start = moment(startDate).tz("Asia/Kolkata").startOf("day");
+   const end = moment(endDate).tz("Asia/Kolkata").endOf("day");
+   const days = [];
+   for (let m = moment(start); m.isSameOrBefore(end); m.add(1, "days")) {
+     days.push({
+       start: m.clone().startOf("day").toDate(),
+       end: m.clone().endOf("day").toDate(),
+     });
+   }
+
+   // 4️⃣ Fetch hierarchy dynamically using user's position
+   const user = await User.findOne({ code: userCode });
+   if (!user || !user.position) {
+     return res.status(400).json({ message: "User position not found." });
+   }
+
+   const hierarchy = await HierarchyEntries.find({
+     hierarchy_name: "default_sales_flow",
+     [user.position]: userCode,
+   });
+
+   const dealerCodes = [...new Set(hierarchy.map((h) => h.dealer))];
+   const mddCodes = [...new Set(hierarchy.map((h) => h.mdd))];
+
+   // 5️⃣ Loop through days & update schedules
+   for (const { start, end } of days) {
+     const existingSchedule = await WeeklyBeatMappingSchedule.findOne({
+       code: userCode,
+       startDate: { $lte: start },
+       endDate: { $gte: start },
+     });
+// 🟡 Debug itinerary
+console.log("Itinerary from requested route:", itinerary);
+
+const baseQuery = {
+ code: { $in: [...dealerCodes, ...mddCodes] },
+ ...(itinerary.district?.length && {
+   district: { $in: itinerary.district },
+ }),
+ ...(itinerary.zone?.length && { zone: { $in: itinerary.zone } }),
+ ...(itinerary.taluka?.length && { taluka: { $in: itinerary.taluka } }),
+};
+
+// 🟡 Debug itinerary towns
+// ✅ Correctly access towns from Map
+const itineraryTownsRaw = itinerary.get("town") || [];
+const itineraryTowns = itineraryTownsRaw.map((t) => t.toLowerCase());
+console.log("Itinerary towns (lowercase):", itineraryTowns);
+
+
+// 🔍 Step 1: find all users matching district/zone/taluka etc
+const allUsers = await User.find(baseQuery);
+console.log("Users matching baseQuery (before town filter):", allUsers.length);
+
+// 🔍 Step 2: manual case-insensitive town filter
+const filteredUsers = allUsers.filter((u) =>
+ itineraryTowns.includes((u.town || "").toLowerCase())
+);
+
+console.log("Filtered users after town match:", filteredUsers.length);
+     const entries = filteredUsers.map((user) => ({
+       code: user.code,
+       name: user.name,
+       latitude: user.latitude || 0,
+       longitude: user.longitude || 0,
+       status: "pending",
+       distance: null,
+       district: user.district || "",
+       taluka: user.taluka || "",
+       town: user.town || "",
+       zone: user.zone || "",
+       position: user.position || "",
+     }));
+
+     if (existingSchedule) {
+       const existingCodes = new Set(
+         existingSchedule.schedule.map((d) => d.code)
+       );
+       const newEntries = entries.filter((e) => !existingCodes.has(e.code));
+       existingSchedule.schedule.push(...newEntries);
+       existingSchedule.total += newEntries.length;
+       existingSchedule.pending += newEntries.length;
+       await existingSchedule.save();
+     } else {
+       await WeeklyBeatMappingSchedule.create({
+         startDate: start,
+         endDate: end,
+         code: userCode,
+         schedule: entries,
+         total: entries.length,
+         done: 0,
+         pending: entries.length,
+       });
+     }
+   }
+
+   // 6️⃣ Delete the requested route (optional)
+   await RequestedRoutes.findByIdAndDelete(requestId);
+
+   // 7️⃣ Notify the user
+   await Notification.create({
+     title: "Route Approved",
+     message: `Your route "${name}" has been approved by admin for ${formatDate(
+       startDate
+     )} to ${formatDate(endDate)}.`,
+     filters: [name, startDate, endDate],
+     targetRole: ["user"],
+   });
+
+   return res.status(200).json({
+     success: true,
+     message: "Requested route approved and converted to RoutePlan.",
+     data: newPlan,
+   });
+ } catch (err) {
+   console.error("Error in approveRequestedRoute:", err);
+   return res.status(500).json({ message: "Internal Server Error" });
+ }
+};

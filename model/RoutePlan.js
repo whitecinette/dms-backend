@@ -25,7 +25,7 @@ const routePlanSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'inactive'],
+      enum: ['active', 'inactive', 'approved'],
       default: 'inactive',
     },
     approved: {
