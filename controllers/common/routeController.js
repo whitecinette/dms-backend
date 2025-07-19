@@ -1538,3 +1538,30 @@ console.log("Filtered users after town match:", filteredUsers.length);
    return res.status(500).json({ message: "Internal Server Error" });
  }
 };
+
+
+// reject route plan by admin
+exports.rejectRequestedRouteByAdmin = async (req, res) => {
+ try {
+   const { requestId } = req.params;
+
+   if (!requestId) {
+     return res.status(400).json({ message: "Missing requestId" });
+   }
+
+   const route = await RequestedRoutes.findById(requestId);
+
+   if (!route) {
+     return res.status(404).json({ message: "RequestedRoute not found" });
+   }
+
+   // Update status to 'rejected'
+   route.status = 'rejected';
+   await route.save();
+
+   res.status(200).json({ message: "Route request rejected successfully", route });
+ } catch (error) {
+   console.error("Error rejecting requested route:", error);
+   res.status(500).json({ message: "Server error while rejecting requested route" });
+ }
+};

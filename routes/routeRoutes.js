@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const upload = require("../helpers/multerHelper");
-const { uploadRoutes, getRouteByUser, addRoutePlanFromSelectedRoutes, requestRoutePlan, getRequestedRoute, getRequestedRouteForAdmin, approveRequestedRoute } = require("../controllers/common/routeController");
+const { uploadRoutes, getRouteByUser, addRoutePlanFromSelectedRoutes, requestRoutePlan, getRequestedRoute, getRequestedRouteForAdmin, approveRequestedRoute, rejectRequestedRouteByAdmin } = require("../controllers/common/routeController");
 const { userAuth } = require("../middlewares/authmiddlewares");
 
 router.post("/upload-routes", upload.single("file"), uploadRoutes);
@@ -13,4 +13,5 @@ router.post("/request-route-plan",userAuth, requestRoutePlan);
 router.get("/get-requested-route", userAuth, getRequestedRoute);
 router.get("/get-requested-route-for-admin", userAuth, getRequestedRouteForAdmin);
 router.post("/requested-route/approve/:requestId", approveRequestedRoute);
+router.post("/reject-requested-route/:requestId", rejectRequestedRouteByAdmin);
 module.exports = router;
