@@ -12,6 +12,6 @@ router.post("/add-route-plan-by-user", userAuth, addRoutePlanFromSelectedRoutes)
 router.post("/request-route-plan",userAuth, requestRoutePlan);
 router.get("/get-requested-route", userAuth, getRequestedRoute);
 router.get("/get-requested-route-for-admin", userAuth, getRequestedRouteForAdmin);
-router.post("/requested-route/approve/:requestId", approveRequestedRoute);
-router.post("/reject-requested-route/:requestId", rejectRequestedRouteByAdmin);
+router.post("/requested-route/approve/:requestId", userAuth, approveRequestedRoute);
+router.post("/reject-requested-route/:requestId", userAuth, rejectRequestedRouteByAdmin);
 module.exports = router;

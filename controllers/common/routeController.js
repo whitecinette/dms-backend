@@ -1396,6 +1396,11 @@ exports.getRequestedRouteForAdmin = async (req, res) => {
 
 exports.approveRequestedRoute = async (req, res) => {
  try {
+  const userRole = req.user.role;
+  // Check if role is one of the allowed roles
+  if (!["admin", "super_admin", "hr"].includes(userRole)) {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
    const { requestId } = req.params;
    // const { code: adminCode, position: adminPosition } = req.user;
 
@@ -1543,6 +1548,11 @@ console.log("Filtered users after town match:", filteredUsers.length);
 // reject route plan by admin
 exports.rejectRequestedRouteByAdmin = async (req, res) => {
  try {
+  const userRole = req.user.role;
+  // Check if role is one of the allowed roles
+  if (!["admin", "super_admin", "hr"].includes(userRole)) {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
    const { requestId } = req.params;
 
    if (!requestId) {
