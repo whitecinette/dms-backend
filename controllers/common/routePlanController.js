@@ -538,11 +538,14 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
     const itineraryTalukas = new Set(
       (itinerary.taluka || []).map((v) => v.toLowerCase().trim())
     );
+    const itineraryTowns = new Set((itinerary.town || []).map((v) => v.toLowerCase().trim()));
+
 
     console.log("🧭 Itinerary to match:", {
       districts: [...itineraryDistricts],
       zones: [...itineraryZones],
       talukas: [...itineraryTalukas],
+      town: [...itineraryTowns],
     });
 
     const dateFilter = {
@@ -565,7 +568,8 @@ exports.deleteRoutePlanAndUpdateBeatMapping = async (req, res) => {
         const match =
           itineraryDistricts.has(district) ||
           itineraryZones.has(zone) ||
-          itineraryTalukas.has(taluka);
+          itineraryTalukas.has(taluka) ||
+          itineraryTowns.has((dealer.town || "").toLowerCase().trim());
 
         if (match) {
           console.log(
