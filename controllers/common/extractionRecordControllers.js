@@ -813,11 +813,13 @@ exports.getDealersWithStatusForExtraction = async (req, res) => {
 exports.getExtractionRecordsForDownload = async (req, res) => {
   try {
     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
+    console.log("download query", req.query)
+    
+    const start = new Date(startDate).setUTCHours(0, 0, 0, 0); // Start of the day: 00:00:00.000
+    const end = new Date(endDate).setUTCHours(23, 59, 59, 999); // End of the day: 23:59:59.999
 
-    const start = startDate
-      ? new Date(startDate)
-      : moment().startOf("month").toDate();
-    const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+    console.log("start date: ", start)
+    console.log("end")
 
     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
     if (smd.length) hierarchyFilter.smd = { $in: smd };
