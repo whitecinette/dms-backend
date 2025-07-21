@@ -182,7 +182,6 @@ exports.getSubordinatesByCode = async (req, res) => {
   }
 };
 
-
 exports.getSubordinatesForUser = async (req, res) => {
   try {
     console.log("Subods reaching");
@@ -562,6 +561,132 @@ exports.getSubordinatesForUser = async (req, res) => {
   // console.log("Smart Phone Subordinate:", subordinates.find(s => s.code === "smart_phone"));
 
     // console.log("Sobords 19 : ", subordinates)
+
+    // === STEP: Date setup for M-1, M-2, M-3 and FTD ===
+    const startOfMonth = new Date(startDate);
+    startOfMonth.setDate(1);
+    startOfMonth.setUTCHours(0, 0, 0, 0);
+
+    const monthWindows = [1, 2, 3].map((offset) => {
+      const mStart = new Date(startOfMonth);
+      mStart.setMonth(mStart.getMonth() - offset);
+      const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
+      mStart.setUTCHours(0, 0, 0, 0);
+      mEnd.setUTCHours(0, 0, 0, 0);
+      return { label: `M-${offset}`, start: mStart, end: mEnd };
+    });
+
+    // === STEP: Aggregate FTD ===
+    const ftdSales = await SalesData.aggregate([
+      {
+        $match: {
+          buyer_code: { $in: allDealerCodes },
+          sales_type: "Sell Out",
+          date: { $eq: startDate },
+        },
+      },
+      {
+        $group: {
+          _id: "$buyer_code",
+          total: {
+            $sum: {
+              $toDouble: `$${
+                filter_type === "value" ? "total_amount" : "quantity"
+              }`,
+            },
+          },
+        },
+      },
+    ]);
+    const ftdMap = Object.fromEntries(ftdSales.map((e) => [e._id, e.total]));
+
+    // === STEP: Monthly totals for M-1, M-2, M-3 ===
+    const monthlyMaps = {}; // { "M-1": {dealerCode: total}, ... }
+    for (const { label, start, end } of monthWindows) {
+      const monthSales = await SalesData.aggregate([
+        {
+          $match: {
+            buyer_code: { $in: allDealerCodes },
+            sales_type: "Sell Out",
+            date: { $gte: start, $lte: end },
+          },
+        },
+        {
+          $group: {
+            _id: "$buyer_code",
+            total: {
+              $sum: {
+                $toDouble: `$${
+                  filter_type === "value" ? "total_amount" : "quantity"
+                }`,
+              },
+            },
+          },
+        },
+      ]);
+      monthlyMaps[label] = Object.fromEntries(
+        monthSales.map((e) => [e._id, e.total])
+      );
+    }
+
+    // === STEP: Contribution group totals ===
+    const groupTotals = {};
+    subordinates.forEach((sub) => {
+      groupTotals[sub.position] = (groupTotals[sub.position] || 0) + (sub.mtd_sell_out || 0);
+    });
+
+    // === STEP: Add new fields to each subordinate ===
+    subordinates.forEach((sub) => {
+      if (!sub.code || !sub.position) return;
+
+      const dealerCodes =
+        sub.position === "dealer"
+          ? [sub.code]
+          : hierarchyEntries
+              .filter(
+                (entry) => entry[sub.position] === sub.code && entry.dealer
+              )
+              .map((entry) => entry.dealer);
+
+      if (sub.position === "dealer") dealerCodes.push(sub.code);
+      const uniqueDealers = [...new Set(dealerCodes)];
+
+      // Monthly sums
+      const monthValues = { "M-1": 0, "M-2": 0, "M-3": 0 };
+      for (const dealer of uniqueDealers) {
+        for (const key of ["M-1", "M-2", "M-3"]) {
+          monthValues[key] += monthlyMaps[key]?.[dealer] || 0;
+        }
+      }
+
+      // FTD
+      const ftd = uniqueDealers.reduce(
+        (sum, d) => sum + (ftdMap[d] || 0),
+        0
+      );
+
+      // Final fields
+      const mtd = sub.mtd_sell_out || 0;
+      const todayDate = endDate.getDate();
+      const ads = mtd / todayDate;
+      const reqAds = (0 - mtd) > 0 ? (0 - mtd) / Math.max(30 - todayDate, 1) : 0;
+      const contribution =
+        groupTotals[sub.position] > 0
+          ? (mtd / groupTotals[sub.position]) * 100
+          : 0;
+
+      Object.assign(sub, {
+        "M-1": monthValues["M-1"],
+        "M-2": monthValues["M-2"],
+        "M-3": monthValues["M-3"],
+        ADS: ads.toFixed(2),
+        TGT: 0,
+        FTD: ftd,
+        "Req. ADS": reqAds.toFixed(2),
+        "Contribution%": contribution.toFixed(2),
+      });
+    });
+
     res
       .status(200)
       .json({ success: true, positions: finalPositions, subordinates });
@@ -570,6 +695,7 @@ exports.getSubordinatesForUser = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
 
 // exports.getSubordinatesForUser = async (req, res) => {
 //   try {
@@ -783,6 +909,84 @@ exports.getSubordinatesForUser = async (req, res) => {
 //     const mtdMap = Object.fromEntries(mtdSales.map((e) => [e._id, e.total]));
 //     const lmtdMap = Object.fromEntries(lmtdSales.map((e) => [e._id, e.total]));
 
+//     // new
+//     // STEP: CATEGORY-WISE SALES AGGREGATION
+//     const mtdSalesRaw = await SalesData.find({
+//       buyer_code: { $in: allDealerCodes },
+//       sales_type: "Sell Out",
+//       date: { $gte: startDate, $lte: endDate },
+//     }, { product_code: 1, total_amount: 1, quantity: 1 });
+
+//     const lmtdSalesRaw = await SalesData.find({
+//       buyer_code: { $in: allDealerCodes },
+//       sales_type: "Sell Out",
+//       date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
+//     }, { product_code: 1, total_amount: 1, quantity: 1 });
+
+//     const allProductCodes = [
+//       ...new Set([
+//         ...mtdSalesRaw.map(s => s.product_code),
+//         ...lmtdSalesRaw.map(s => s.product_code)
+//       ])
+//     ];
+
+//     const productDocs = await Product.find(
+//       { product_code: { $in: allProductCodes } },
+//       { product_code: 1, product_category: 1, _id: 0 }
+//     );
+
+//     const productMap = Object.fromEntries(
+//       productDocs.map(p => [p.product_code, p.product_category || "Uncategorized"])
+//     );
+    
+//     const enrichedMTDSales = mtdSalesRaw.map(sale => ({
+//       ...sale._doc,
+//       category: productMap[sale.product_code] || "Uncategorized"
+//     }));
+    
+//     const enrichedLMTDSales = lmtdSalesRaw.map(sale => ({
+//       ...sale._doc,
+//       category: productMap[sale.product_code] || "Uncategorized"
+//     }));
+//     console.log("Raw (first 5):", enrichedMTDSales.slice(0, 5));
+
+
+//     const mtdCategoryMap = {};
+//     enrichedMTDSales.forEach(sale => {
+//       const value = filter_type === "value" ? sale.total_amount : sale.quantity;
+//       mtdCategoryMap[sale.category] = (mtdCategoryMap[sale.category] || 0) + value;
+//       // console.log("Fin val: ", mtdCategoryMap);
+//     });
+
+//     const lmtdCategoryMap = {};
+//     enrichedLMTDSales.forEach(sale => {
+//       const value = filter_type === "value" ? sale.total_amount : sale.quantity;
+//       lmtdCategoryMap[sale.category] = (lmtdCategoryMap[sale.category] || 0) + value;
+//     });
+
+
+//     const allCategories = new Set([
+//       ...Object.keys(mtdCategoryMap),
+//       ...Object.keys(lmtdCategoryMap),
+//     ]);
+
+//     const categoryWiseSales = [...allCategories].map(cat => {
+//       const mtd = mtdCategoryMap[cat] || 0;
+//       const lmtd = lmtdCategoryMap[cat] || 0;
+//       const growth = lmtd !== 0 ? ((mtd - lmtd) / lmtd) * 100 : 0;
+//       return {
+//         code: cat,
+//         name: cat,
+//         position: "product_category",
+//         mtd_sell_out: mtd,
+//         lmtd_sell_out: lmtd,
+//         sell_out_growth: growth.toFixed(2),
+//       };
+//     });
+
+//     subordinates.push(...categoryWiseSales);
+
+
 //     // console.log("mtdMap: ", mtdMap);
 //     // console.log("lmtdMap: ", lmtdMap);
 
@@ -790,6 +994,8 @@ exports.getSubordinatesForUser = async (req, res) => {
 //       last !== 0 ? ((current - last) / last) * 100 : 0;
 
 //     subordinates.forEach((sub) => {
+//       if (sub.position === "product_category") return;
+
 //       const dealerCodes = hierarchyEntries
 //         .filter((entry) => entry[sub.position] === sub.code && entry.dealer)
 //         .map((entry) => entry.dealer);
@@ -859,12 +1065,16 @@ exports.getSubordinatesForUser = async (req, res) => {
 //     const finalPositions = [
 //       ...new Set([
 //         ...subordinatePositions,
+//         "product_category",
 //         "taluka",
 //         "district",
 //         "town",
 //         "dealer_category",
 //       ]),
 //     ];
+
+//   // console.log("Smart Phone Subordinate:", subordinates.find(s => s.code === "smart_phone"));
+
 //     // console.log("Sobords 19 : ", subordinates)
 //     res
 //       .status(200)
@@ -874,6 +1084,7 @@ exports.getSubordinatesForUser = async (req, res) => {
 //     res.status(500).json({ success: false, message: "Internal server error" });
 //   }
 // };
+
 
 
 exports.getDealersForUser = async (req, res) => {
