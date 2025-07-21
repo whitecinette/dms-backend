@@ -1413,6 +1413,21 @@ exports.approveRequestedRoute = async (req, res) => {
    const { startDate, endDate, code: userCode, name, itinerary } = request;
 
    // 2️⃣ Create new RoutePlan
+       // 🛑 2️⃣ NEW: Prevent duplicate RoutePlan for same user + same route + overlapping dates
+       const duplicate = await RoutePlan.findOne({
+        code: userCode,
+        startDate: { $lte: endDate },
+        endDate: { $gte: startDate },
+        name, // Optional: use if you want to match route name too
+      });
+  
+      if (duplicate) {
+        return res.status(400).json({
+          success: false,
+          message: `A route plan "${name}" already exists for this user between ${duplicate.startDate.toDateString()} and ${duplicate.endDate.toDateString()}.`,
+        });
+      }
+  
    const newPlan = await RoutePlan.create({
      startDate,
      endDate,
@@ -1575,3 +1590,5 @@ exports.rejectRequestedRouteByAdmin = async (req, res) => {
    res.status(500).json({ message: "Server error while rejecting requested route" });
  }
 };
+
+// delete requested route for user
