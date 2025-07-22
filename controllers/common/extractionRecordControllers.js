@@ -321,6 +321,11 @@ exports.getExtractionStatus = async (req, res) => {
 
     const hierarchy = await HierarchyEntries.find(hierarchyFilter);
 
+    // Step 2: Get all extractions within date range
+    const allExtractions = await ExtractionRecord.find({
+      createdAt: { $gte: start, $lte: end },
+    }).distinct("dealer");
+
     const tseToDealers = {};
 
     for (let entry of hierarchy) {
@@ -334,12 +339,6 @@ exports.getExtractionStatus = async (req, res) => {
     for (let tseCode in tseToDealers) {
       const dealers = Array.from(tseToDealers[tseCode]);
 
-      const doneDealers = await ExtractionRecord.distinct("dealer", {
-        dealer: { $in: dealers },
-        uploaded_by: tseCode,
-        createdAt: { $gte: start, $lte: end },
-      });
-
       // Fetch dealer details for all dealers associated with this TSE
       const dealerDetails = await User.find(
         { code: { $in: dealers } },
@@ -350,16 +349,16 @@ exports.getExtractionStatus = async (req, res) => {
       const allDealers = dealers.map((dealerCode) => {
         const dealer = dealerDetails.find((d) => d.code === dealerCode) || {
           code: dealerCode,
-          name: "N/A",
+          name: "",
         };
         return {
           code: dealer.code,
           name: dealer.name,
-          status: doneDealers.includes(dealerCode) ? "done" : "pending",
+          status: allExtractions.includes(dealerCode) ? "done" : "pending",
         };
       });
 
-      const doneCount = doneDealers.length;
+      const doneCount = allDealers.filter(d => d.status === "done").length;
       const totalCount = dealers.length;
       const pendingCount = totalCount - doneCount;
 
@@ -372,7 +371,7 @@ exports.getExtractionStatus = async (req, res) => {
       const user = await User.findOne({ code: tseCode });
 
       results.push({
-        name: user?.name || "N/A",
+        name: user?.name || "",
         code: tseCode,
         total: totalCount,
         done: doneCount,
@@ -389,6 +388,91 @@ exports.getExtractionStatus = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+// exports.getExtractionStatus = async (req, res) => {
+//   try {
+//     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.body;
+
+//     const start = startDate
+//       ? new Date(startDate)
+//       : moment().startOf("month").toDate();
+//     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+
+//     // Step 1: Get relevant hierarchy entries
+//     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
+//     if (smd.length > 0) hierarchyFilter.smd = { $in: smd };
+//     if (asm.length > 0) hierarchyFilter.asm = { $in: asm };
+//     if (mdd.length > 0) hierarchyFilter.mdd = { $in: mdd };
+
+//     const hierarchy = await HierarchyEntries.find(hierarchyFilter);
+
+//     const tseToDealers = {};
+
+//     for (let entry of hierarchy) {
+//       const tseCode = entry.tse;
+//       if (!tseToDealers[tseCode]) tseToDealers[tseCode] = new Set();
+//       tseToDealers[tseCode].add(entry.dealer);
+//     }
+
+//     const results = [];
+
+//     for (let tseCode in tseToDealers) {
+//       const dealers = Array.from(tseToDealers[tseCode]);
+
+//       const doneDealers = await ExtractionRecord.distinct("dealer", {
+//         dealer: { $in: dealers },
+//         uploaded_by: tseCode,
+//         createdAt: { $gte: start, $lte: end },
+//       });
+
+//       // Fetch dealer details for all dealers associated with this TSE
+//       const dealerDetails = await User.find(
+//         { code: { $in: dealers } },
+//         { code: 1, name: 1, _id: 0 }
+//       );
+
+//       // Create allDealers array with status
+//       const allDealers = dealers.map((dealerCode) => {
+//         const dealer = dealerDetails.find((d) => d.code === dealerCode) || {
+//           code: dealerCode,
+//           name: "N/A",
+//         };
+//         return {
+//           code: dealer.code,
+//           name: dealer.name,
+//           status: doneDealers.includes(dealerCode) ? "done" : "pending",
+//         };
+//       });
+
+//       const doneCount = doneDealers.length;
+//       const totalCount = dealers.length;
+//       const pendingCount = totalCount - doneCount;
+
+//       const donePercent =
+//         totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : "0";
+//       const pendingPercent =
+//         totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : "0";
+
+//       // Fetch name from User model
+//       const user = await User.findOne({ code: tseCode });
+
+//       results.push({
+//         name: user?.name || "N/A",
+//         code: tseCode,
+//         total: totalCount,
+//         done: doneCount,
+//         "Done Percent": `${donePercent}%`,
+//         pending: pendingCount,
+//         "Pending Percent": `${pendingPercent}%`,
+//         allDealers,
+//       });
+//     }
+
+//     res.status(200).json({ success: true, data: results });
+//   } catch (error) {
+//     console.error("Error in getExtractionStatus:", error);
+//     res.status(500).json({ success: false, message: "Internal Server Error" });
+//   }
+// };
 
 // exports.getExtractionStatusRoleWise = async (req, res) => {
 //   try {
@@ -813,27 +897,34 @@ exports.getDealersWithStatusForExtraction = async (req, res) => {
 exports.getExtractionRecordsForDownload = async (req, res) => {
   try {
     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.query;
-    console.log("download query", req.query)
-    
-    const start = new Date(startDate).setUTCHours(0, 0, 0, 0); // Start of the day: 00:00:00.000
-    const end = new Date(endDate).setUTCHours(23, 59, 59, 999); // End of the day: 23:59:59.999
+    console.log("download query", req.query);
 
-    console.log("start date: ", start)
-    console.log("end")
+    const start = startDate
+      ? new Date(startDate).setUTCHours(0, 0, 0, 0)
+      : moment().startOf("month").toDate().setUTCHours(0, 0, 0, 0);
+    const end = endDate
+      ? new Date(endDate).setUTCHours(23, 59, 59, 999)
+      : moment().endOf("month").toDate().setUTCHours(23, 59, 59, 999);
+
+    console.log("start date:", start);
+    console.log("end date:", end);
 
     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
     if (smd.length) hierarchyFilter.smd = { $in: smd };
     if (asm.length) hierarchyFilter.asm = { $in: asm };
     if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
 
-    const hierarchyEntries = await HierarchyEntries.find(
-      hierarchyFilter
-    ).lean();
+    const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
     if (!hierarchyEntries.length) {
       return res
         .status(200)
         .json({ message: "No records found", data: [], total: 0 });
     }
+
+    // Get all extractions within date range
+    const allExtractions = await ExtractionRecord.find({
+      createdAt: { $gte: start, $lte: end },
+    }).distinct("dealer");
 
     const tseToDealersMap = {};
     hierarchyEntries.forEach(({ tse, dealer }) => {
@@ -848,7 +939,7 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
       "code name"
     ).lean();
     const userMap = users.reduce((acc, user) => {
-      acc[user.code] = user.name;
+      acc[user.code] = user.name || "";
       return acc;
     }, {});
 
@@ -860,7 +951,7 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
       { code: 1, name: 1, _id: 0 }
     ).lean();
     const dealerMap = dealerDetails.reduce((acc, dealer) => {
-      acc[dealer.code] = dealer.name || "N/A";
+      acc[dealer.code] = dealer.name || "";
       return acc;
     }, {});
 
@@ -870,40 +961,35 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
     for (const tseCode of tseCodes) {
       const dealers = Array.from(tseToDealersMap[tseCode]);
 
-      const doneDealers = await ExtractionRecord.distinct("dealer", {
-        dealer: { $in: dealers },
-        uploaded_by: tseCode,
-        createdAt: { $gte: start, $lte: end },
-      });
-
-      const doneCount = doneDealers.length;
+      const doneCount = dealers.filter((dealer) =>
+        allExtractions.includes(dealer)
+      ).length;
       const totalCount = dealers.length;
       const pendingCount = totalCount - doneCount;
 
       const donePercent =
-        totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : "0.00";
+        totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : "0";
       const pendingPercent =
-        totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : "0.00";
+        totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : "0";
 
       // Create a row for each dealer
       dealers.forEach((dealerCode) => {
         summaryData.push({
-          Name: userMap[tseCode] || "N/A",
+          Name: userMap[tseCode] || "",
           CODE: tseCode,
           TOTAL: totalCount,
           DONE: doneCount,
           "DONE PERCENT": donePercent,
           Pending: pendingCount,
           "PENDING PERCENT": pendingPercent,
-          "DEALER NAME": dealerMap[dealerCode] || "N/A",
+          "DEALER NAME": dealerMap[dealerCode] || "",
           "DEALER CODE": dealerCode,
-          STATUS: doneDealers.includes(dealerCode) ? "Done" : "Pending",
+          STATUS: allExtractions.includes(dealerCode) ? "Done" : "Pending",
         });
       });
 
       const records = await ExtractionRecord.find({
         dealer: { $in: dealers },
-        uploaded_by: tseCode,
         createdAt: { $gte: start, $lte: end },
       })
         .sort({ createdAt: -1 })
@@ -911,11 +997,11 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
 
       records.forEach((record) => {
         recordsData.push({
-          Name: userMap[tseCode] || "N/A",
+          Name: userMap[tseCode] || "",
           CODE: tseCode,
           "DEALER CODE": record.dealer,
-          "DEALER NAME": dealerMap[record.dealer] || "N/A",
-          "DEALER STATUS": doneDealers.includes(record.dealer)
+          "DEALER NAME": dealerMap[record.dealer] || "",
+          "DEALER STATUS": allExtractions.includes(record.dealer)
             ? "Done"
             : "Pending",
           SEGMENT: record.segment,
@@ -957,7 +1043,6 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
       "CODE",
       "DEALER CODE",
       "DEALER NAME",
-      "DEALER STATUS",
       "SEGMENT",
       "BRAND",
       "PRODUCT NAME",
