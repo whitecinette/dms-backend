@@ -1648,3 +1648,36 @@ exports.rejectRequestedRouteByAdmin = async (req, res) => {
 };
 
 // delete requested route for user
+exports.deleteRequestedRoute = async (req, res) => {
+ console.log("enterring delete requested route");
+ try {
+  console.log("in tryy blockk");
+   const { routeId } = req.params;
+   const { code } = req.user;
+
+   const route = await RequestedRoutes.findById(routeId);
+
+   if (!route) {
+     return res.status(404).json({ success: false, message: "Requested route not found" });
+   }
+
+   if (route.code !== code) {
+     return res.status(403).json({ success: false, message: "You are not authorized to delete this route" });
+   }
+
+   if (route.status !== "requested") {
+     return res.status(400).json({ success: false, message: "Only routes with 'requested' status can be deleted" });
+   }
+
+   await route.deleteOne();
+
+   return res.status(200).json({
+     success: true,
+     message: "Requested route deleted successfully",
+     deletedId: routeId,
+   });
+ } catch (err) {
+   console.error("❌ Error deleting requested route:", err);
+   return res.status(500).json({ success: false, message: "Server error" });
+ }
+};
