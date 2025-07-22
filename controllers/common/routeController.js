@@ -1017,7 +1017,8 @@ exports.requestRoutePlan = async (req, res) => {
      code,
      name,
      startDate: { $gte: startDate, $lt: moment(startDate).add(1, 'day').toDate() },
-     endDate: { $gte: endDate, $lt: moment(endDate).add(1, 'day').toDate() }
+     endDate: { $gte: endDate, $lt: moment(endDate).add(1, 'day').toDate() },
+     status: { $ne: "rejected" } 
 });
 
 if (existingRequest) {
