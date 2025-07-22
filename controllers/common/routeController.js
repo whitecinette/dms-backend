@@ -1168,9 +1168,11 @@ exports.getRequestedRoute = async (req, res) => {
 // };
 exports.getRequestedRouteForAdmin = async (req, res) => {
  try {
-   const { startDate, endDate, status } = req.query;
+   const { startDate, endDate, status, approved, search, itinerary: itineraryParam,} = req.query;
 
    const query = {};
+
+   console.log("req route req.query: ", req.query)
 
    // 🟡 Optional status filter (requested/approved/rejected/inactive etc.)
    if (status) {
@@ -1188,6 +1190,48 @@ exports.getRequestedRouteForAdmin = async (req, res) => {
      query.startDate = { $lte: todayEnd };
      query.endDate = { $gte: todayStart };
    }
+
+   if (approved) query.approved = approved === "true";
+
+  if (
+    itineraryParam &&
+    itineraryParam.trim() !== "" &&
+    itineraryParam !== "[]"
+  ) {
+    try {
+      const itinerary = JSON.parse(itineraryParam); // e.g., { "taluka": ["Dausa (M)"] }
+
+      // Validate itinerary input
+      if (
+        typeof itinerary !== "object" ||
+        Array.isArray(itinerary) ||
+        Object.keys(itinerary).length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid itinerary filter format",
+        });
+      }
+
+      // Build query for itinerary map
+      Object.entries(itinerary).forEach(([key, values]) => {
+        if (Array.isArray(values) && values.length > 0) {
+          query[`itinerary.${key}`] = {
+            $in: values.map((val) => val.trim()),
+          };
+        } else if (typeof values === "string" && values.trim() !== "") {
+          query[`itinerary.${key}`] = { $in: [values.trim()] };
+        }
+      });
+    } catch (err) {
+      console.warn("Invalid itinerary JSON:", err.message);
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid itinerary filter format" });
+    }
+  }
+
+  console.log("req route query: ", query)
 
    // 📦 Fetch all requested routes
    const requestedRoutes = await RequestedRoutes.find(query).sort({ createdAt: -1 });
@@ -1239,9 +1283,21 @@ exports.getRequestedRouteForAdmin = async (req, res) => {
      };
    });
 
+   const filtered = search
+      ? finalData.filter((r) => {
+          const term = search.toLowerCase();
+          return (
+            r.code?.toLowerCase().includes(term) ||
+            r.name?.toLowerCase().includes(term) ||
+            r.EmpName?.toLowerCase().includes(term) ||
+            r.position?.toLowerCase().includes(term)
+          );
+        })
+      : finalData;
+
    return res.status(200).json({
      success: true,
-     data: finalData,
+     data: filtered,
    });
  } catch (error) {
    console.error("Error getting requested route for admin:", error);

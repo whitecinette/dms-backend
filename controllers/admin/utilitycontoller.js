@@ -78,8 +78,8 @@ function getCurrentPeriod() {
     };
 }
 
-function formatQ3(q3Target, q3Ach, q3AchPercent, q3RequiredAds) {
-    return `Target Q3'25: ${q3Target} | Achievement: ${q3Ach} | Achievement %: ${q3AchPercent}% | Required ADS: ${q3RequiredAds}`;
+function formatQ3(q3Target, q3Ach, q3AchPercent, q3RequiredAds, name) {
+    return `Target ${name}: ${q3Target} | Achievement: ${q3Ach} | Achievement %: ${q3AchPercent}% | Required ADS: ${q3RequiredAds}`;
 }
 
 function calculateMetrics(target, achievement, daysLeft) {
@@ -143,10 +143,10 @@ function generateRow(original, currentMonth, currentDate) {
         "User Id": sanitizeCsvField(original["User Id"] || ""),
         City: sanitizeCsvField(original["City"] || ""),
         Area: sanitizeCsvField(original["Area"] || ""),
-        Jul: formatQ3(rowData.jul.target, rowData.jul.achievement, julMetrics.achPercent, julMetrics.requiredAds),
-        Aug: formatQ3(rowData.aug.target, rowData.aug.achievement, augMetrics.achPercent, augMetrics.requiredAds),
-        Sep: formatQ3(rowData.sep.target, rowData.sep.achievement, sepMetrics.achPercent, sepMetrics.requiredAds),
-        "Q325": formatQ3(rowData.q3.target, rowData.q3.achievement, q3Metrics.achPercent, q3Metrics.requiredAds),
+        Jul: formatQ3(rowData.jul.target, rowData.jul.achievement, julMetrics.achPercent, julMetrics.requiredAds, "Jul"),
+        Aug: formatQ3(rowData.aug.target, rowData.aug.achievement, augMetrics.achPercent, augMetrics.requiredAds, "Aug"),
+        Sep: formatQ3(rowData.sep.target, rowData.sep.achievement, sepMetrics.achPercent, sepMetrics.requiredAds, "Sep"),
+        "Q325": formatQ3(rowData.q3.target, rowData.q3.achievement, q3Metrics.achPercent, q3Metrics.requiredAds, "Q3'25"),
     };
 }
 
