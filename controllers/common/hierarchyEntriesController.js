@@ -433,7 +433,7 @@ exports.getSubordinatesForUser = async (req, res) => {
       ...sale._doc,
       category: productMap[sale.product_code] || "Uncategorized"
     }));
-    console.log("Raw (first 5):", enrichedMTDSales.slice(0, 5));
+    // console.log("Raw (first 5):", enrichedMTDSales.slice(0, 5));
 
 
     const mtdCategoryMap = {};

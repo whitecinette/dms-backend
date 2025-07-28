@@ -865,7 +865,7 @@ exports.getBeatMappingReport = async (req, res) => {
       routes
     } = req.body;
 
-    console.log("Routesss: ", routes);
+    console.log("Routesss: ", routes, code);
 
     if (!startDate || !endDate) {
       return res.status(400).json({ error: "Start and End date are required" });
