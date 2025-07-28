@@ -388,91 +388,6 @@ exports.getExtractionStatus = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
-// exports.getExtractionStatus = async (req, res) => {
-//   try {
-//     const { startDate, endDate, smd = [], asm = [], mdd = [] } = req.body;
-
-//     const start = startDate
-//       ? new Date(startDate)
-//       : moment().startOf("month").toDate();
-//     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
-
-//     // Step 1: Get relevant hierarchy entries
-//     const hierarchyFilter = { hierarchy_name: "default_sales_flow" };
-//     if (smd.length > 0) hierarchyFilter.smd = { $in: smd };
-//     if (asm.length > 0) hierarchyFilter.asm = { $in: asm };
-//     if (mdd.length > 0) hierarchyFilter.mdd = { $in: mdd };
-
-//     const hierarchy = await HierarchyEntries.find(hierarchyFilter);
-
-//     const tseToDealers = {};
-
-//     for (let entry of hierarchy) {
-//       const tseCode = entry.tse;
-//       if (!tseToDealers[tseCode]) tseToDealers[tseCode] = new Set();
-//       tseToDealers[tseCode].add(entry.dealer);
-//     }
-
-//     const results = [];
-
-//     for (let tseCode in tseToDealers) {
-//       const dealers = Array.from(tseToDealers[tseCode]);
-
-//       const doneDealers = await ExtractionRecord.distinct("dealer", {
-//         dealer: { $in: dealers },
-//         uploaded_by: tseCode,
-//         createdAt: { $gte: start, $lte: end },
-//       });
-
-//       // Fetch dealer details for all dealers associated with this TSE
-//       const dealerDetails = await User.find(
-//         { code: { $in: dealers } },
-//         { code: 1, name: 1, _id: 0 }
-//       );
-
-//       // Create allDealers array with status
-//       const allDealers = dealers.map((dealerCode) => {
-//         const dealer = dealerDetails.find((d) => d.code === dealerCode) || {
-//           code: dealerCode,
-//           name: "N/A",
-//         };
-//         return {
-//           code: dealer.code,
-//           name: dealer.name,
-//           status: doneDealers.includes(dealerCode) ? "done" : "pending",
-//         };
-//       });
-
-//       const doneCount = doneDealers.length;
-//       const totalCount = dealers.length;
-//       const pendingCount = totalCount - doneCount;
-
-//       const donePercent =
-//         totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : "0";
-//       const pendingPercent =
-//         totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : "0";
-
-//       // Fetch name from User model
-//       const user = await User.findOne({ code: tseCode });
-
-//       results.push({
-//         name: user?.name || "N/A",
-//         code: tseCode,
-//         total: totalCount,
-//         done: doneCount,
-//         "Done Percent": `${donePercent}%`,
-//         pending: pendingCount,
-//         "Pending Percent": `${pendingPercent}%`,
-//         allDealers,
-//       });
-//     }
-
-//     res.status(200).json({ success: true, data: results });
-//   } catch (error) {
-//     console.error("Error in getExtractionStatus:", error);
-//     res.status(500).json({ success: false, message: "Internal Server Error" });
-//   }
-// };
 
 // exports.getExtractionStatusRoleWise = async (req, res) => {
 //   try {
@@ -483,7 +398,6 @@ exports.getExtractionStatus = async (req, res) => {
 //       return res.status(400).json({ success: false, message: "User authentication required" });
 //     }
 
-//     // Default to ["tse"] if roles array is empty or not provided
 //     if (!Array.isArray(roles) || roles.length === 0) {
 //       roles = ["tse"];
 //     }
@@ -494,32 +408,27 @@ exports.getExtractionStatus = async (req, res) => {
 //     const results = [];
 
 //     for (let role of roles) {
-//       // Get all users with this role
 //       const users = await User.find({ position: role });
 
 //       for (let user of users) {
 //         const actorCode = user.code;
 
-//         // Build hierarchy filter for the actor
 //         const hierarchyFilter = {
 //           hierarchy_name: "default_sales_flow",
 //           [role]: actorCode
 //         };
 
-//         // Apply data scoping if user is not admin
 //         if (userRole !== "admin") {
 //           hierarchyFilter[userPosition] = userCode;
 //         }
 
 //         const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
-
 //         const dealerSet = new Set();
 //         for (let entry of hierarchyEntries) {
 //           if (entry.dealer) dealerSet.add(entry.dealer);
 //         }
 
 //         const dealers = Array.from(dealerSet);
-
 //         if (dealers.length === 0) continue;
 
 //         const doneDealers = await ExtractionRecord.distinct("dealer", {
@@ -530,7 +439,6 @@ exports.getExtractionStatus = async (req, res) => {
 //         const totalCount = dealers.length;
 //         const doneCount = doneDealers.length;
 //         const pendingCount = totalCount - doneCount;
-
 //         const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 //         const pendingPercent = 100 - donePercent;
 
@@ -547,7 +455,53 @@ exports.getExtractionStatus = async (req, res) => {
 //       }
 //     }
 
-//     res.status(200).json({ success: true, data: results });
+//     // 👇 Add current user's own data as selfData (separate section)
+//     let selfData = null;
+
+//     const selfFilter = {
+//       hierarchy_name: "default_sales_flow",
+//       [userPosition]: userCode
+//     };
+
+//     const selfEntries = await HierarchyEntries.find(selfFilter);
+//     const selfDealers = new Set();
+
+//     for (let entry of selfEntries) {
+//       if (entry.dealer) selfDealers.add(entry.dealer);
+//     }
+
+//     const selfDealerList = Array.from(selfDealers);
+
+//     if (selfDealerList.length > 0) {
+//       const selfDoneDealers = await ExtractionRecord.distinct("dealer", {
+//         dealer: { $in: selfDealerList },
+//         createdAt: { $gte: start, $lte: end },
+//       });
+
+//       const total = selfDealerList.length;
+//       const done = selfDoneDealers.length;
+//       const pending = total - done;
+//       const donePct = total > 0 ? Math.round((done / total) * 100) : 0;
+//       const pendingPct = 100 - donePct;
+
+//       selfData = {
+//         name: req.user.name || "You",
+//         code: userCode,
+//         position: userPosition.toUpperCase(),
+//         total: total,
+//         done: done,
+//         "Done Percent": `${donePct}%`,
+//         pending: pending,
+//         "Pending Percent": `${pendingPct}%`
+//       };
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       data: results,
+//       selfData: selfData // 👈 attach separately
+//     });
+
 //   } catch (error) {
 //     console.error("Error in getExtractionStatusRoleWise:", error);
 //     res.status(500).json({ success: false, message: "Internal Server Error" });
@@ -563,6 +517,9 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
       return res.status(400).json({ success: false, message: "User authentication required" });
     }
 
+    const blockedRoles = ['tse', 'dealer'];
+    const isRestricted = blockedRoles.includes(userRole.toLowerCase()) || blockedRoles.includes(userPosition.toLowerCase());
+
     if (!Array.isArray(roles) || roles.length === 0) {
       roles = ["tse"];
     }
@@ -572,55 +529,58 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
 
     const results = [];
 
-    for (let role of roles) {
-      const users = await User.find({ position: role });
+    // ✅ Only fetch others' data if NOT blocked
+    if (!isRestricted) {
+      for (let role of roles) {
+        const users = await User.find({ position: role });
 
-      for (let user of users) {
-        const actorCode = user.code;
+        for (let user of users) {
+          const actorCode = user.code;
 
-        const hierarchyFilter = {
-          hierarchy_name: "default_sales_flow",
-          [role]: actorCode
-        };
+          const hierarchyFilter = {
+            hierarchy_name: "default_sales_flow",
+            [role]: actorCode
+          };
 
-        if (userRole !== "admin") {
-          hierarchyFilter[userPosition] = userCode;
+          if (userRole !== "admin") {
+            hierarchyFilter[userPosition] = userCode;
+          }
+
+          const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
+          const dealerSet = new Set();
+          for (let entry of hierarchyEntries) {
+            if (entry.dealer) dealerSet.add(entry.dealer);
+          }
+
+          const dealers = Array.from(dealerSet);
+          if (dealers.length === 0) continue;
+
+          const doneDealers = await ExtractionRecord.distinct("dealer", {
+            dealer: { $in: dealers },
+            createdAt: { $gte: start, $lte: end },
+          });
+
+          const totalCount = dealers.length;
+          const doneCount = doneDealers.length;
+          const pendingCount = totalCount - doneCount;
+          const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+          const pendingPercent = 100 - donePercent;
+
+          results.push({
+            name: user.name || "N/A",
+            code: actorCode,
+            position: role.toUpperCase(),
+            total: totalCount,
+            done: doneCount,
+            "Done Percent": `${donePercent}%`,
+            pending: pendingCount,
+            "Pending Percent": `${pendingPercent}%`
+          });
         }
-
-        const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
-        const dealerSet = new Set();
-        for (let entry of hierarchyEntries) {
-          if (entry.dealer) dealerSet.add(entry.dealer);
-        }
-
-        const dealers = Array.from(dealerSet);
-        if (dealers.length === 0) continue;
-
-        const doneDealers = await ExtractionRecord.distinct("dealer", {
-          dealer: { $in: dealers },
-          createdAt: { $gte: start, $lte: end },
-        });
-
-        const totalCount = dealers.length;
-        const doneCount = doneDealers.length;
-        const pendingCount = totalCount - doneCount;
-        const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-        const pendingPercent = 100 - donePercent;
-
-        results.push({
-          name: user.name || "N/A",
-          code: actorCode,
-          position: role.toUpperCase(),
-          total: totalCount,
-          done: doneCount,
-          "Done Percent": `${donePercent}%`,
-          pending: pendingCount,
-          "Pending Percent": `${pendingPercent}%`
-        });
       }
     }
 
-    // 👇 Add current user's own data as selfData (separate section)
+    // ✅ Always calculate selfData, even if blocked
     let selfData = null;
 
     const selfFilter = {
@@ -661,15 +621,15 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
       };
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      data: results,
-      selfData: selfData // 👈 attach separately
+      data: results,      // empty if TSE/Dealer
+      selfData: selfData  // always included if available
     });
 
   } catch (error) {
     console.error("Error in getExtractionStatusRoleWise:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
