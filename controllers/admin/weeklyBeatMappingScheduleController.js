@@ -955,10 +955,52 @@ exports.getBeatMappingReport = async (req, res) => {
     const done = filtered.filter((d) => d.status === "done").length;
     const pending = total - done;
 
+        // ===== Overall (current month) counts =====
+    const firstDayOfMonth = moment().tz("Asia/Kolkata").startOf("month").startOf("day").toDate();
+    const lastDayOfMonth = moment().tz("Asia/Kolkata").endOf("month").endOf("day").toDate();
+
+    const overallSchedules = await WeeklyBeatMappingSchedule.find({
+      code: userCode,
+      startDate: { $gte: firstDayOfMonth },
+      endDate: { $lte: lastDayOfMonth },
+    });
+
+    const overallDealerMap = {};
+
+    for (const entry of overallSchedules) {
+      for (const dealer of entry.schedule) {
+        const dCode = dealer.code;
+
+        if (!overallDealerMap[dCode]) {
+          overallDealerMap[dCode] = {
+            code: dCode,
+            name: dealer.name,
+            status: "pending",
+            doneCount: 0,
+          };
+        }
+
+        if (dealer.status === "done") {
+          overallDealerMap[dCode].doneCount += 1;
+          overallDealerMap[dCode].status = "done";
+        }
+      }
+    }
+
+    const overallResult = Object.values(overallDealerMap);
+
+    const ovTotal = overallResult.length;
+    const ovDone = overallResult.filter((d) => d.status === "done").length;
+    const ovPending = ovTotal - ovDone;
+
+
     return res.status(200).json({
       total,
       done,
       pending,
+      ovTotal,
+      ovDone,
+      ovPending,
       data: filtered,
     });
   } catch (error) {
