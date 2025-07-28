@@ -862,7 +862,10 @@ exports.getBeatMappingReport = async (req, res) => {
       town = [],
       travel = [],
       code, // only for admin
+      routes
     } = req.body;
+
+    console.log("Routesss: ", routes);
 
     if (!startDate || !endDate) {
       return res.status(400).json({ error: "Start and End date are required" });
@@ -963,6 +966,123 @@ exports.getBeatMappingReport = async (req, res) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+// exports.getBeatMappingReport = async (req, res) => {
+//   try {
+//     let {
+//       startDate,
+//       endDate,
+//       status = [],
+//       zone = [],
+//       district = [],
+//       taluka = [],
+//       town = [],
+//       travel = [],
+//       code, // only for admin
+//       routes
+//     } = req.body;
+
+//     console.log("Routesss: ", routes);
+
+//     if (!startDate || !endDate) {
+//       return res.status(400).json({ error: "Start and End date are required" });
+//     }
+
+//     startDate = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
+//     endDate = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+
+//     const userCode = req.user.role === "admin" ? code : req.user.code;
+
+//     if (!userCode) {
+//       return res.status(400).json({ error: "User code is missing" });
+//     }
+
+//     // Fetch all schedules in date range
+//     const schedules = await WeeklyBeatMappingSchedule.find({
+//       code: userCode,
+//       startDate: { $gte: startDate },
+//       endDate: { $lte: endDate },
+//     });
+
+//     const dealerMap = {}; // key: code
+
+//     // Consolidate data
+//     for (const entry of schedules) {
+//       for (const dealer of entry.schedule) {
+//         const dCode = dealer.code;
+
+//         if (!dealerMap[dCode]) {
+//           dealerMap[dCode] = {
+//             code: dCode,
+//             name: dealer.name,
+//             zone: dealer.zone || "Unknown",
+//             district: dealer.district || "Unknown",
+//             taluka: dealer.taluka || "Unknown",
+//             town: dealer.town || "Unknown",
+//             position: dealer.position || "dealer",
+//             visits: 0,
+//             doneCount: 0,
+//             totalAppearances: 0,
+//             latitude: parseLatLong(dealer.latitude),
+//             longitude: parseLatLong(dealer.longitude),
+//           };
+//         }
+
+//         dealerMap[dCode].totalAppearances += 1;
+//         if (dealer.status === "done") {
+//           dealerMap[dCode].doneCount += 1;
+//         }
+//       }
+//     }
+
+//     // Prepare response
+//     const result = Object.values(dealerMap).map((d) => {
+//       const isDone = d.doneCount > 0;
+//       return {
+//         code: d.code,
+//         name: d.name,
+//         zone: d.zone,
+//         district: d.district,
+//         taluka: d.taluka,
+//         town: d.town,
+//         position: d.position,
+//         status: isDone ? "done" : "pending",
+//         visits: isDone ? d.doneCount : 0,
+//         latitude: d.latitude,
+//         longitude: d.longitude,
+//       };
+//     });
+
+//     // Apply filters (if any)
+//     const filtered = result.filter((entry) => {
+//       const matchStatus = !status.length || status.includes(entry.status);
+//       const matchZone = !zone.length || zone.includes(entry.zone);
+//       const matchDistrict =
+//         !district.length || district.includes(entry.district);
+//       const matchTaluka = !taluka.length || taluka.includes(entry.taluka);
+//       const matchTown = !town.length || town.includes(entry.town);
+//       // Travel filter can be added here later if defined
+//       return (
+//         matchStatus && matchZone && matchDistrict && matchTaluka && matchTown
+//       );
+//     });
+
+//     // Count summary
+//     const total = filtered.length;
+//     const done = filtered.filter((d) => d.status === "done").length;
+//     const pending = total - done;
+
+//     return res.status(200).json({
+//       total,
+//       done,
+//       pending,
+//       data: filtered,
+//     });
+//   } catch (error) {
+//     console.error("Error in getBeatMappingReport:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// };
 
 exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
   try {
