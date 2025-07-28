@@ -1915,3 +1915,192 @@ exports.getWeeklyBeatMappingScheduleForAdmin = async (req, res) => {
     });
   }
 };
+
+
+// exports.getBeatMappingOverviewForAdminApp = async (req, res) => {
+//   try {
+//     let { startDate, endDate, positions = [] } = req.body;
+
+//     if (!startDate || !endDate) {
+//       return res.status(400).json({ error: "Start and End date are required" });
+//     }
+
+//     positions = positions.length ? positions : ['asm'];
+
+//     endDate = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+//     const firstDayOfMonth = moment().tz("Asia/Kolkata").startOf("month").startOf("day").toDate();
+//     const lastDayOfMonth = moment().tz("Asia/Kolkata").endOf("month").endOf("day").toDate();
+
+//     // Get users by position
+//     const users = await User.find({ position: { $in: positions } });
+//     const userCodes = users.map(u => u.code);
+
+//     // 🔹 Fetch schedules using only endDate logic
+//     const allSchedules = await WeeklyBeatMappingSchedule.find({
+//       code: { $in: userCodes },
+//       endDate: { $lte: endDate }
+//     });
+
+//     const allMonthSchedules = await WeeklyBeatMappingSchedule.find({
+//       code: { $in: userCodes },
+//       endDate: { $lte: lastDayOfMonth }
+//     });
+
+//     const result = [];
+
+//     for (const user of users) {
+//       const userCode = user.code;
+
+//       // Filter schedules for this user
+//       const userSchedules = allSchedules.filter(s => s.code === userCode);
+//       const userMonthSchedules = allMonthSchedules.filter(s => s.code === userCode);
+
+//       // === Current Range Count ===
+//       const dealerMap = {};
+//       for (const entry of userSchedules) {
+//         for (const dealer of entry.schedule) {
+//           const dCode = dealer.code;
+//           if (!dealerMap[dCode]) {
+//             dealerMap[dCode] = { done: dealer.status === 'done' };
+//           } else if (dealer.status === 'done') {
+//             dealerMap[dCode].done = true;
+//           }
+//         }
+//       }
+
+//       const total = Object.keys(dealerMap).length;
+//       const done = Object.values(dealerMap).filter(d => d.done).length;
+
+//       // === Overview (Monthly) Count ===
+//       const ovDealerMap = {};
+//       for (const entry of userMonthSchedules) {
+//         for (const dealer of entry.schedule) {
+//           const dCode = dealer.code;
+//           if (!ovDealerMap[dCode]) {
+//             ovDealerMap[dCode] = { done: dealer.status === 'done' };
+//           } else if (dealer.status === 'done') {
+//             ovDealerMap[dCode].done = true;
+//           }
+//         }
+//       }
+
+//       const ovTotal = Object.keys(ovDealerMap).length;
+//       const ovDone = Object.values(ovDealerMap).filter(d => d.done).length;
+
+//       result.push({
+//         code: user.code,
+//         name: user.name,
+//         position: user.position,
+//         total,
+//         done,
+//         pending: total - done,
+//         ovTotal,
+//         ovDone,
+//         ovPending: ovTotal - ovDone,
+//       });
+//     }
+
+//     return res.status(200).json({ data: result });
+
+//   } catch (error) {
+//     console.error("Error in getBeatMappingOverviewForAdminApp:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// };
+
+
+exports.getBeatMappingOverviewForAdminApp = async (req, res) => {
+  try {
+    let { startDate, endDate, positions = [] } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "Start and End date are required" });
+    }
+
+    positions = positions.length ? positions : ['asm'];
+
+    // Parse and set range
+    const start = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
+    const end = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+    const monthStart = moment(start).startOf("month").startOf("day").toDate();
+    const monthEnd = moment(start).endOf("month").endOf("day").toDate();
+
+    // 🔹 Step 1: Get users
+    const users = await User.find({ position: { $in: positions } }).lean();
+    const userCodes = users.map(u => u.code);
+
+    // 🔹 Step 2: Fetch schedules in parallel
+    const [rangeSchedules, monthSchedules] = await Promise.all([
+      WeeklyBeatMappingSchedule.find({
+        code: { $in: userCodes },
+        endDate: { $gte: start, $lte: end }
+      }).lean(),
+
+      WeeklyBeatMappingSchedule.find({
+        code: { $in: userCodes },
+        endDate: { $gte: monthStart, $lte: monthEnd }
+      }).lean(),
+    ]);
+
+    const result = [];
+
+    for (const user of users) {
+      const userCode = user.code;
+
+      // Filter for this user
+      const userSchedules = rangeSchedules.filter(s => s.code === userCode);
+      const userMonthSchedules = monthSchedules.filter(s => s.code === userCode);
+
+      // 🔸 Date-range dealers (Today)
+      const dealerMap = new Map();
+      for (const entry of userSchedules) {
+        for (const dealer of entry.schedule) {
+          if (!dealerMap.has(dealer.code)) {
+            dealerMap.set(dealer.code, dealer.status === 'done');
+          } else if (dealer.status === 'done') {
+            dealerMap.set(dealer.code, true);
+          }
+        }
+      }
+      const total = dealerMap.size;
+      const done = [...dealerMap.values()].filter(Boolean).length;
+
+      // 🔸 Month overview dealers
+      const ovDealerMap = new Map();
+      for (const entry of userMonthSchedules) {
+        for (const dealer of entry.schedule) {
+          if (!ovDealerMap.has(dealer.code)) {
+            ovDealerMap.set(dealer.code, dealer.status === 'done');
+          } else if (dealer.status === 'done') {
+            ovDealerMap.set(dealer.code, true);
+          }
+        }
+      }
+      const ovTotal = ovDealerMap.size;
+      const ovDone = [...ovDealerMap.values()].filter(Boolean).length;
+
+      result.push({
+        code: user.code,
+        name: user.name,
+        position: user.position,
+        total,
+        done,
+        pending: total - done,
+        ovTotal,
+        ovDone,
+        ovPending: ovTotal - ovDone,
+      });
+    }
+
+    return res.status(200).json({ data: result });
+
+  } catch (error) {
+    console.error("Error in getBeatMappingOverviewForAdminApp:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+
+
+
