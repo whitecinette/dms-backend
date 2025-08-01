@@ -113,6 +113,46 @@ exports.getDealerDropdownForExtraction = async (req, res) => {
 };
 
 // Rakshita
+// exports.addExtractionRecordsFromApp = async (req, res) => {
+//   try {
+//     const { code } = req.user; // Extracted from token (uploadedBy)
+//     const { dealer, products } = req.body;
+
+//     if (!code || !dealer || !Array.isArray(products) || products.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Missing required fields: code, dealerCode, or products",
+//       });
+//     }
+
+//     const extractionEntries = products.map((product) => ({
+//       uploaded_by: code,
+//       dealer: dealer,
+//       brand: product.brand,
+//       product_name: product.product_name,
+//       product_code: product.product_code || "", // fallback if needed
+//       price: product.price,
+//       quantity: product.quantity,
+//       amount: product.price * product.quantity,
+//       segment: product.segment || "",
+//       product_category: product.product_category || "",
+//     }));
+
+//     await ExtractionRecord.insertMany(extractionEntries);
+
+//     res.status(201).json({
+//       success: true,
+//       message: "Extraction records saved successfully.",
+//     });
+//   } catch (error) {
+//     console.error("Error in addExtractionRecordsFromApp:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   }
+// };
+
 exports.addExtractionRecordsFromApp = async (req, res) => {
   try {
     const { code } = req.user; // Extracted from token (uploadedBy)
@@ -137,6 +177,23 @@ exports.addExtractionRecordsFromApp = async (req, res) => {
       segment: product.segment || "",
       product_category: product.product_category || "",
     }));
+
+        // Hierarchy-based authorization check for TSEs
+    if (req.user.position === 'tse') {
+      const hierarchyEntry = await HierarchyEntries.findOne({
+        hierarchy_name: 'default_sales_flow',
+        tse: code,
+        dealer: dealer,
+      });
+
+      if (!hierarchyEntry || hierarchyEntry.mdd !== '4782323') {
+        return res.status(201).json({
+          success: true,
+          message: "Sorry you're not authorized to fill extraction data",
+        });
+      }
+    }
+
 
     await ExtractionRecord.insertMany(extractionEntries);
 
