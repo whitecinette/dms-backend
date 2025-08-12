@@ -1161,19 +1161,24 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
 
 // exports.markDealerDone = async (req, res) => {
 //   try {
-//     console.log("Done rach")
+//     console.log("Done rach");
 //     const { dealerCode, distance } = req.body;
+//     const {userLat, userLng, dealerLat, dealerLng} = req.body;
+//     console.log("COORDS: ", userLat, userLng, dealerLat, dealerLng)
 //     const userCode = req.user.code;
+//     console.log("Distance: ", distance);
 
 //     if (!dealerCode || distance === undefined) {
-//       return res.status(400).json({ message: "dealerCode and distance are required " });
+//       return res
+//         .status(400)
+//         .json({ message: "dealerCode and distance are required" });
 //     }
 
 //     // ✅ Distance check: should not be more than 0.2 km (200 meters)
 //     if (distance > 0.2) {
 //       return res
 //         .status(400)
-//         .json({ message: "You are more than 200 meters away from the dealer" });
+//         .json({ message: `You are more than 200 meters (${distance}m) away from the dealer` });
 //     }
 
 //     const nowIST = moment().tz("Asia/Kolkata");
@@ -1188,7 +1193,7 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
 //       return res.status(404).json({ message: "No active schedule found" });
 //     }
 
-//     const dealer = scheduleDoc.schedule.find(d => d.code === dealerCode);
+//     const dealer = scheduleDoc.schedule.find((d) => d.code === dealerCode);
 
 //     if (!dealer) {
 //       return res.status(404).json({ message: "Dealer not found in schedule" });
@@ -1218,10 +1223,10 @@ exports.getDropdownValuesForBeatMappingFilters = async (req, res) => {
 exports.markDealerDone = async (req, res) => {
   try {
     console.log("Done rach");
-    const { dealerCode, distance } = req.body;
-    const {userLat, userLng, dealerLat, dealerLng} = req.body;
-    console.log("COORDS: ", userLat, userLng, dealerLat, dealerLng)
+    const { dealerCode, distance, userLat, userLng, dealerLat, dealerLng } = req.body;
     const userCode = req.user.code;
+
+    console.log("COORDS: ", userLat, userLng, dealerLat, dealerLng);
     console.log("Distance: ", distance);
 
     if (!dealerCode || distance === undefined) {
@@ -1234,7 +1239,7 @@ exports.markDealerDone = async (req, res) => {
     if (distance > 0.2) {
       return res
         .status(400)
-        .json({ message: `You are more than 200 meters (${distance}m) away from the dealer` });
+        .json({ message: `You are more than 200 meters (${distance}km) away from the dealer` });
     }
 
     const nowIST = moment().tz("Asia/Kolkata");
@@ -1259,11 +1264,15 @@ exports.markDealerDone = async (req, res) => {
       return res.status(200).json({ message: "Already marked as done" });
     }
 
+    // ✅ Mark done, add distance and timestamp
     dealer.status = "done";
-    dealer.distance = distance;
+    dealer.distance = String(distance);              // ensure string per schema
+    dealer.set('markedDoneAt', nowIST.toDate());     // ensure new field persists
 
     scheduleDoc.done += 1;
     scheduleDoc.pending -= 1;
+
+    scheduleDoc.markModified('schedule');
 
     await scheduleDoc.save();
 
@@ -1275,6 +1284,8 @@ exports.markDealerDone = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+
 
 //get Employee schedules by code
 exports.getEmployeeSchedulesByCode = async (req, res) => {
