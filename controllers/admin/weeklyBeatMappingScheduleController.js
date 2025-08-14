@@ -13,6 +13,10 @@ const bcrypt = require("bcrypt");
 const moment = require("moment-timezone");
 const RoutePlan = require("../../model/RoutePlan");
 
+// helper near the top of the file (reuse moment already imported)
+const toIST = (d) => (d ? moment.utc(d).tz("Asia/Kolkata").format() : null);
+
+
 // add weekly beat mapping
 exports.addWeeklyBeatMappingSchedule = async (req, res) => {
   try {
@@ -908,6 +912,8 @@ exports.getBeatMappingReport = async (req, res) => {
             totalAppearances: 0,
             latitude: parseLatLong(dealer.latitude),
             longitude: parseLatLong(dealer.longitude),
+
+            latestMarkedDoneAt: dealer.markedDoneAt,
           };
         }
 
@@ -921,6 +927,7 @@ exports.getBeatMappingReport = async (req, res) => {
     // Prepare response
     const result = Object.values(dealerMap).map((d) => {
       const isDone = d.doneCount > 0;
+      console.log("time: ", toIST(d.latestMarkedDoneAt));
       return {
         code: d.code,
         name: d.name,
@@ -933,8 +940,12 @@ exports.getBeatMappingReport = async (req, res) => {
         visits: isDone ? d.doneCount : 0,
         latitude: d.latitude,
         longitude: d.longitude,
+
+        markedDoneAtIST: isDone ? toIST(d.latestMarkedDoneAt) : null,
       };
     });
+
+    
 
     // Apply filters (if any)
     const filtered = result.filter((entry) => {
