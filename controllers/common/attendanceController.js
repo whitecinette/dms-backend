@@ -2699,3 +2699,252 @@ exports.getAddedAttendanceByAdmin = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+
+// controllers/attendanceGeo.controller.js
+
+exports.getAttendanceGeoLatest = async (req, res) => {
+  try {
+    const { role } = req.user || {};
+    const {
+      firmCodes,        // eg: "RAJ, MP, GJ"
+      date,
+      month,
+      year = new Date().getFullYear(),
+      page = 1,
+      limit = 200,      // map usually wants many; tweak as you wish
+      search = "",
+      status = "",
+      firms = [],
+      tag,
+    } = req.query;
+
+    // -------------------------------
+    // 1) Resolve firmCodes -> MetaData(attendance:true) -> user codes
+    // -------------------------------
+    let userCodes = [];
+    let totalEligibleUsers = 0;
+    if (firmCodes) {
+      const firmCodesArray = firmCodes.split(",").map((c) => c.trim()).filter(Boolean);
+      if (!firmCodesArray.length) {
+        return res.status(400).json({ message: "firmCodes must be a comma-separated list." });
+      }
+
+      const metaDataUsers = await MetaData.find({
+        firm_code: { $in: firmCodesArray },
+        attendance: true,
+      }, { code: 1 }).lean();
+
+      userCodes = metaDataUsers.map(m => (m.code || "").trim());
+      totalEligibleUsers = userCodes.length;
+
+      if (totalEligibleUsers === 0) {
+        return res.status(200).json({
+          message: "No users with attendance:true for provided firmCodes.",
+          totalEligibleUsers,
+          currentPage: Number(page),
+          totalRecords: 0,
+          totalPages: 0,
+          plottedCount: 0,
+          data: [],
+          stats: { byStatus: {} },
+        });
+      }
+    }
+
+    // -------------------------------
+    // 2) Firm hierarchy + role-based employee scope
+    // -------------------------------
+    let firmPositions = [];
+    const firmIds = Array.isArray(firms) ? firms : (firms ? [firms] : []);
+    if (firmIds.length) {
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firmIds } }, { hierarchy: 1 }).lean();
+      if (!firmData.length) return res.status(400).json({ message: "Invalid firm IDs." });
+      firmPositions = firmData.flatMap(f => Array.isArray(f.hierarchy) ? f.hierarchy : []);
+    }
+
+    const employeeFilter = { status: "active" };
+    if (role === "super_admin" || role === "admin") {
+      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+    } else if (role === "hr") {
+      employeeFilter.role = { $in: ["employee"] };
+    } else {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    if (firmPositions.length) {
+      employeeFilter.position = { $in: firmPositions };
+    }
+    if (tag) {
+      const tagArray = Array.isArray(tag) ? tag : [tag];
+      employeeFilter.tags = { $in: tagArray };
+    }
+    if (firmCodes) {
+      employeeFilter.code = { $in: userCodes };
+    }
+
+    // -------------------------------
+    // 3) Fetch employees + search (code or name)
+    // -------------------------------
+    const employees = await User.find(employeeFilter, { code: 1, name: 1, position: 1 }).lean();
+    if (!employees.length) {
+      return res.status(200).json({
+        message: "No employees found for the given scope.",
+        totalEligibleUsers: firmCodes ? totalEligibleUsers : 0,
+        currentPage: Number(page),
+        totalRecords: 0,
+        totalPages: 0,
+        plottedCount: 0,
+        data: [],
+        stats: { byStatus: {} },
+      });
+    }
+
+    const employeeMap = new Map(
+      employees.map(e => [e.code.trim().toLowerCase(), { name: e.name || e.code, position: e.position || "Unknown" }])
+    );
+
+    const filteredCodes = employees
+      .map(e => e.code)
+      .filter(code => {
+        const q = (search || "").trim().toLowerCase();
+        if (!q) return true;
+        const norm = code.trim().toLowerCase();
+        const name = (employeeMap.get(norm)?.name || "").toLowerCase();
+        return norm.includes(q) || name.includes(q);
+      });
+
+    if (!filteredCodes.length) {
+      return res.status(200).json({
+        message: "No employees match the search.",
+        totalEligibleUsers: firmCodes ? totalEligibleUsers : employees.length,
+        currentPage: Number(page),
+        totalRecords: 0,
+        totalPages: 0,
+        plottedCount: 0,
+        data: [],
+        stats: { byStatus: {} },
+      });
+    }
+
+    // -------------------------------
+    // 4) Build date filter
+    // -------------------------------
+    let dateFilter = {};
+    if (date) {
+      const start = new Date(date); start.setHours(0,0,0,0);
+      const end   = new Date(date); end.setHours(23,59,59,999);
+      dateFilter = { $gte: start, $lte: end };
+    } else if (month && year) {
+      const start = new Date(Date.UTC(Number(year), Number(month) - 1, 1, 0, 0, 0, 0));
+      const end   = new Date(Date.UTC(Number(year), Number(month), 0, 23, 59, 59, 999));
+      dateFilter = { $gte: start, $lte: end };
+    }
+
+    // -------------------------------
+    // 5) Fetch ONLY geo-coded attendance
+    //    prefer punchOut coords; else punchIn
+    // -------------------------------
+    const geoFilter = {
+      code: { $in: filteredCodes },
+      ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
+      $or: [
+        { punchOutLatitude: { $ne: null }, punchOutLongitude: { $ne: null } },
+        { punchInLatitude: { $ne: null }, punchInLongitude: { $ne: null } },
+      ],
+    };
+
+    if (status) {
+      geoFilter.status = status; // note: "Absent" will naturally drop because it has no coords
+    }
+
+    // Sort to let us keep "latest" easily (prefer out > in; then by times; then update recency)
+    const raw = await Attendance.find(geoFilter).sort({
+      date: 1,
+      punchOut: -1,
+      punchIn: -1,
+      updatedAt: -1,
+    }).lean();
+
+    // -------------------------------
+    // 6) Deduplicate for map:
+    //   - if 'date' provided   → keep latest per user (code) for that day
+    //   - if 'month+year'      → keep latest per user per day
+    // -------------------------------
+    const pickKey = (rec) => {
+      const day = new Date(rec.date).toISOString().slice(0, 10);
+      const code = rec.code.trim().toLowerCase();
+      return date ? code : `${code}-${day}`;
+    };
+
+    const bestByKey = new Map();
+    for (const r of raw) {
+      const k = pickKey(r);
+      if (!bestByKey.has(k)) bestByKey.set(k, r);
+      // already sorted to latest first, so first seen wins
+    }
+
+    let records = Array.from(bestByKey.values());
+
+    // -------------------------------
+    // 7) Shape payload for map + attach name/position + prefer punchOut coords
+    // -------------------------------
+    const payload = records.map((r) => {
+      const norm = r.code.trim().toLowerCase();
+      const emp = employeeMap.get(norm) || {};
+      const hasOut = r.punchOutLatitude != null && r.punchOutLongitude != null;
+
+      const latitude  = hasOut ? r.punchOutLatitude  : r.punchInLatitude;
+      const longitude = hasOut ? r.punchOutLongitude : r.punchInLongitude;
+
+      return {
+        _id: r._id,
+        code: r.code,
+        name: emp.name || r.code,
+        position: emp.position || "Unknown",
+        date: r.date,
+        status: r.status,
+        punchIn: r.punchIn || null,
+        punchOut: r.punchOut || null,
+        punchInImage: r.punchInImage || null,
+        punchOutImage: r.punchOutImage || null,
+        punchInName: r.punchInName || r.punchInCode || null,
+        punchOutName: r.punchOutName || r.punchOutCode || null,
+        hoursWorked: r.hoursWorked ?? null,
+        latitude: typeof latitude === "object" && latitude?.$numberDecimal ? Number(latitude.$numberDecimal) : latitude,
+        longitude: typeof longitude === "object" && longitude?.$numberDecimal ? Number(longitude.$numberDecimal) : longitude,
+        distance: r.distance ?? null,
+      };
+    })
+    // ensure coords exist after normalization
+    .filter(p => typeof p.latitude === "number" && typeof p.longitude === "number");
+
+    // quick status stats (for overlay bars etc.)
+    const byStatus = {};
+    for (const p of payload) byStatus[p.status] = (byStatus[p.status] || 0) + 1;
+
+    // -------------------------------
+    // 8) Pagination (optional for map UI)
+    // -------------------------------
+    const totalRecords = payload.length;
+    const totalPages = Math.ceil(totalRecords / Number(limit));
+    const startIdx = (Number(page) - 1) * Number(limit);
+    const pageData = payload.slice(startIdx, startIdx + Number(limit));
+
+    return res.status(200).json({
+      message: "Geo attendance fetched successfully",
+      scopeSize: filteredCodes.length,
+      totalEligibleUsers: firmCodes ? totalEligibleUsers : filteredCodes.length,
+      currentPage: Number(page),
+      totalRecords,
+      totalPages,
+      plottedCount: pageData.length,
+      stats: { byStatus },
+      data: pageData,
+    });
+  } catch (err) {
+    console.error("getAttendanceGeoLatest error:", err);
+    return res.status(500).json({ message: "Error fetching geo attendance", error: err.message });
+  }
+};
+

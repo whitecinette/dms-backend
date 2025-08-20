@@ -15,7 +15,8 @@ const {
   deleteAttendanceByID,
   getJaipurDealers,
   addAttendanceByAdmin,
-  getAddedAttendanceByAdmin
+  getAddedAttendanceByAdmin,
+  getAttendanceGeoLatest
 } = require("../controllers/common/attendanceController");
 const {
   userAuth,
@@ -42,6 +43,8 @@ router.get("/get-all-attendance", getAttendance);
 router.get("/get-attendance-by-date/:date", userAuth, getAttendanceByDate);
 router.get("/get-latest-attendance-by-date", userAuth, getLatestAttendance);
 router.put("/edit-attendance/:id", userAuth, editAttendanceByID);
+
+router.get("/attendance/geo-latest", userAuth, getAttendanceGeoLatest);
 router.get(
   "/download-all-attendance",
   adminOrSuperAdminAuth,
