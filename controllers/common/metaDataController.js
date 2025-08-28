@@ -332,6 +332,9 @@ exports.bulkUpsertMetadata = async (req, res) => {
     const conflicts = [];
     const filePath = req.file.path;
 
+    // 🚫 Reserved fields that should never come from CSV
+    const reservedFields = ["_id", "__v", "createdat", "updatedat", "createdAt", "updatedAt"];
+
     fs.createReadStream(filePath)
       .pipe(
         csvParser({
@@ -343,6 +346,9 @@ exports.bulkUpsertMetadata = async (req, res) => {
         const processedRow = {};
 
         for (const key in row) {
+          const normalizedKey = key.toLowerCase();
+          if (reservedFields.includes(normalizedKey)) continue; // 🚫 skip reserved fields
+
           let value = row[key]?.trim();
           if (value && value.toLowerCase() === "true") {
             processedRow[key] = true;
@@ -365,7 +371,6 @@ exports.bulkUpsertMetadata = async (req, res) => {
       })
       .on("end", async () => {
         try {
-          // 🔹 fetch existing metadata in bulk
           const codes = results.map((r) => r.code);
           const existingDocs = await MetaData.find({ code: { $in: codes } }).lean();
           const existingMap = new Map(
@@ -418,9 +423,10 @@ exports.bulkUpsertMetadata = async (req, res) => {
           });
         } catch (err) {
           console.error("❌ Bulk upsert error:", err);
-          res
-            .status(500)
-            .json({ success: false, message: "Failed to upsert metadata" });
+          res.status(500).json({
+            success: false,
+            message: "Failed to upsert metadata",
+          });
         }
       })
       .on("error", (err) => {
@@ -444,6 +450,7 @@ exports.bulkUpsertMetadata = async (req, res) => {
 
 
 
+
 exports.downloadMetadata = async (req, res) => {
   try {
     const data = await MetaData.find().lean();
@@ -461,6 +468,29 @@ exports.downloadMetadata = async (req, res) => {
   } catch (error) {
     console.error("❌ CSV export error:", error);
     res.status(500).json({ message: "Failed to export metadata" });
+  }
+};
+
+//do not touch
+exports.cleanExtraTimestamps = async (req, res) => {
+  try {
+    const result = await MetaData.updateMany(
+      {},
+      { $unset: { createdat: "", updatedat: "" } } // 🚀 remove these fields
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Extra fields cleaned successfully",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.error("❌ Error cleaning metadata:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to clean metadata",
+      error: error.message,
+    });
   }
 };
 
