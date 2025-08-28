@@ -51,3 +51,80 @@ exports.getAllUsersToSelect = async (req, res) => {
   }
 };
 
+
+
+exports.bulkUploadUserTypeConfigs = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV file is required" });
+    }
+
+    const results = [];
+    const filePath = path.join(__dirname, "../uploads", req.file.filename);
+
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on("data", (row) => {
+        results.push(row);
+      })
+      .on("end", async () => {
+        try {
+          const grouped = {};
+
+          // Group CSV rows
+          results.forEach((row) => {
+            const key = `${row.type_name}_${row.firm_code}_${row.flow_name}`;
+            if (!grouped[key]) {
+              grouped[key] = {
+                typeName: row.type_name,
+                firmCode: row.firm_code,
+                flowName: row.flow_name,
+                userCodes: [],
+                extraConfigs: {}
+              };
+            }
+
+            if (row.user_code) grouped[key].userCodes.push(row.user_code);
+
+            if (row.extra_field_1 && row.extra_field_1.trim() !== "") {
+              grouped[key].extraConfigs["extra_field_1"] = row.extra_field_1;
+            }
+          });
+
+          const bulkOps = Object.values(grouped).map((payload) => ({
+            updateOne: {
+              filter: {
+                firmCode: payload.firmCode,
+                typeName: payload.typeName,
+                flowName: payload.flowName,
+              },
+              update: {
+                $set: {
+                  extraConfigs: payload.extraConfigs,
+                  updatedAt: new Date(),
+                },
+                $addToSet: {
+                  userCodes: { $each: payload.userCodes }, // ensures no duplicate codes
+                },
+              },
+              upsert: true, // create if not exists
+            },
+          }));
+
+          const result = await UserTypesAndConfigs.bulkWrite(bulkOps);
+
+          return res.status(201).json({
+            message: "Bulk configs uploaded successfully",
+            result,
+          });
+        } catch (err) {
+          console.error("Error saving bulk configs:", err);
+          return res.status(500).json({ message: "Failed to process CSV" });
+        }
+      });
+  } catch (error) {
+    console.error("Bulk upload error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
