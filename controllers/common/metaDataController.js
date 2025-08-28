@@ -4,6 +4,7 @@ const fs = require('fs');
 const moment = require('moment'); // or use native Date
 const MetaData = require('../../model/MetaData');
 const Attendance = require('../../model/Attendance');
+const ActorCodes = require('../../model/ActorCode');
 
 exports.uploadMetadata = async (req, res) => {
  try {
@@ -107,233 +108,6 @@ exports.uploadMetadata = async (req, res) => {
    res.status(500).json({ message: "Something went wrong", error: error.message });
  }
 };
-
-// exports.getEmployeesForAttendanceCount = async (req, res) => {
-//  try {
-//    // 1. Get all employees where attendance = true
-//    const eligibleEmployees = await MetaData.find({ attendance: true });
-//    const employeeCodes = eligibleEmployees.map(emp => emp.code);
-
-//    // 2. Use query date if provided, else default to today
-//    const selectedDate = req.query.date
-//      ? moment(req.query.date, 'YYYY-MM-DD')
-//      : moment(); // today
-
-//    const startOfDay = selectedDate.startOf('day').toDate();
-//    const endOfDay = selectedDate.endOf('day').toDate();
-
-//    // 3. Fetch all attendance for selected date
-//    const todayAttendance = await Attendance.find({
-//      code: { $in: employeeCodes },
-//      date: { $gte: startOfDay, $lte: endOfDay },
-//    });
-
-//    // 4. Create a map of attendance by code
-//    const attendanceMap = {};
-//    todayAttendance.forEach((record) => {
-//      attendanceMap[record.code] = record.status;
-//    });
-
-//    // 5. Classify employees by status
-//    const allEmployees = [];
-//    let presentCount = 0;
-//    let absentCount = 0;
-//    let leaveCount = 0;
-//    let halfDayCount = 0;
-//    let pendingCount = 0;
-
-//    for (const emp of eligibleEmployees) {
-//      const code = emp.code;
-//      const status = attendanceMap[code] || "Absent"; // default to Absent
-
-//      const employeeWithStatus = {
-//        ...emp._doc,
-//        status,
-//      };
-
-//      if (status === "Present") presentCount++;
-//      else if (status === "Leave") leaveCount++;
-//      else if (status === "Half Day") halfDayCount++;
-//      else if (status === "Pending") pendingCount++;
-//      else absentCount++;
-
-//      allEmployees.push(employeeWithStatus);
-//    }
-
-//    res.status(200).json({
-//      success: true,
-//      date: selectedDate.format('YYYY-MM-DD'),
-//      total: allEmployees.length,
-//      presentCount,
-//      absentCount,
-//      leaveCount,
-//      halfDayCount,
-//      pendingCount,
-//      data: allEmployees,
-//    });
-
-//  } catch (error) {
-//    console.error("Fetch error:", error);
-//    res.status(500).json({
-//      success: false,
-//      message: 'Failed to fetch employees for attendance',
-//      error: error.message,
-//    });
-//  }
-// };
-
-
-// exports.getEmployeesForAttendanceCount = async (req, res) => {
-//  try {
-//    // 1. Get all employees where attendance = true
-//    const eligibleEmployees = await MetaData.find({ attendance: true });
-//    const employeeCodes = eligibleEmployees.map(emp => emp.code);
-
-//    // 2. Use query date if provided, else default to today
-//    const selectedDate = req.query.date
-//      ? moment(req.query.date, 'YYYY-MM-DD')
-//      : moment(); // today
-
-//    const startOfDay = selectedDate.startOf('day').toDate();
-//    const endOfDay = selectedDate.endOf('day').toDate();
-
-//    // 3. Fetch all attendance for selected date
-//    const todayAttendance = await Attendance.find({
-//      code: { $in: employeeCodes },
-//      date: { $gte: startOfDay, $lte: endOfDay },
-//    });
-
-//    // 4. Create a map of attendance by code
-//    const attendanceMap = {};
-//    todayAttendance.forEach((record) => {
-//      attendanceMap[record.code] = record.status;
-//    });
-
-//    // 5. Classify employees by status
-//    const allEmployees = [];
-//    let presentCount = 0;
-//    let absentCount = 0;
-//    let leaveCount = 0;
-//    let halfDayCount = 0;
-//    let pendingCount = 0;
-
-//    for (const emp of eligibleEmployees) {
-//      const code = emp.code;
-//      const status = attendanceMap[code] || "Absent"; // default to Absent
-
-//      const employeeWithStatus = {
-//        ...emp._doc,
-//        status,
-//      };
-
-//      if (status === "Present") presentCount++;
-//      else if (status === "Leave") leaveCount++;
-//      else if (status === "Half Day") halfDayCount++;
-//      else if (status === "Pending") pendingCount++;
-//      else absentCount++;
-
-//      allEmployees.push(employeeWithStatus);
-//    }
-
-//    // ---------------------------------------------
-//    // ✅ 6. Weekly Data (for Line Chart)
-//    // ---------------------------------------------
-// // ---------------------------------------------
-// // ✅ 6. Weekly Data (for Line Chart - Current Week Auto)
-// // ---------------------------------------------
-// let weeklyChartData = [];
-
-// const baseDate = selectedDate.clone(); // either query date or today
-
-// // Get current week range: Monday to Sunday
-// const startDate = baseDate.clone().startOf('isoWeek').startOf('day'); // Monday
-// const endDate = baseDate.clone().endOf('isoWeek').endOf('day');       // Sunday
-
-// const weeklyAttendance = await Attendance.find({
-//   code: { $in: employeeCodes },
-//   date: { $gte: startDate.toDate(), $lte: endDate.toDate() },
-// });
-
-// // Group by date
-// const groupedByDate = {};
-
-// weeklyAttendance.forEach((record) => {
-//   const dateStr = moment(record.date).format('YYYY-MM-DD');
-//   if (!groupedByDate[dateStr]) {
-//     groupedByDate[dateStr] = {
-//       date: dateStr,
-//       Present: 0,
-//       Absent: 0,
-//       Leave: 0,
-//       'Half Day': 0,
-//       Pending: 0,
-//     };
-//   }
-//   groupedByDate[dateStr][record.status] =
-//     (groupedByDate[dateStr][record.status] || 0) + 1;
-// });
-
-// // Fill missing dates with 0 counts
-// // Fill missing dates with 0 counts
-// const current = startDate.clone();
-// while (current.isSameOrBefore(endDate)) {
-//   const dateStr = current.format('YYYY-MM-DD');
-
-//   if (!groupedByDate[dateStr]) {
-//     groupedByDate[dateStr] = {
-//       date: dateStr,
-//       Present: 0,
-//       Absent: 0,
-//       Leave: 0,
-//       'Half Day': 0,
-//       Pending: 0,
-//     };
-//   }
-
-//   // 👇 Add Absent logic based on total - others
-//   const present = groupedByDate[dateStr].Present || 0;
-//   const leave = groupedByDate[dateStr].Leave || 0;
-//   const halfDay = groupedByDate[dateStr]['Half Day'] || 0;
-//   const pending = groupedByDate[dateStr].Pending || 0;
-//   const total = employeeCodes.length;
-
-//   groupedByDate[dateStr].Absent = total - (present + leave + halfDay + pending);
-
-//   current.add(1, 'day');
-// }
-
-
-// // Final sorted array
-// weeklyChartData = Object.values(groupedByDate).sort((a, b) =>
-//   a.date.localeCompare(b.date)
-// );
-
-
-//    // ---------------------------------------------
-//    // ✅ Final Response
-//    // ---------------------------------------------
-//    res.status(200).json({
-//      success: true,
-//      date: selectedDate.format('YYYY-MM-DD'),
-//      total: allEmployees.length,
-//      presentCount,
-//      absentCount,
-//      leaveCount,
-//      halfDayCount,
-//      pendingCount,
-//      data: allEmployees,
-//      weeklyChart: weeklyChartData, // 👉 for frontend chart
-//    });
-
-//  } catch (error) {
-//    console.error("Fetch error:", error);
-//    res.status(500).json({
-//      success: false,
-//      message: 'Failed to fetch employees for attendance',
-//      error: error.message,
-//    });
-//  }
-// };
 
 exports.getEmployeesForAttendanceCount = async (req, res) => {
  try {
@@ -461,44 +235,89 @@ exports.getEmployeesForAttendanceCount = async (req, res) => {
  }
 };
 
-// Update metadata 
-// exports.updateMetadata = async (req, res) => {
-//  try {
-//    const { code, ...rest } = req.body;
+exports.listMetadata = async (req, res) => {
+  try {
+    const { search, position, role, page = 1, limit = 50 } = req.query;
+    const skip = (page - 1) * limit;
 
-//    if (!code) {
-//      return res.status(400).json({ message: "Employee code is required" });
-//    }
+    const match = {};
 
-//    const existing = await MetaData.findOne({ code: code.trim() });
+    // 🔎 Universal search across code, name, firm_code
+    if (search) {
+      const regex = { $regex: search, $options: "i" };
+      match.$or = [{ code: regex }, { name: regex }, { firm_code: regex }];
+    }
 
-//    if (existing) {
-//      let shouldUpdate = false;
+    const pipeline = [
+      { $match: match },
 
-//      for (const key in rest) {
-//        const oldVal = existing[key]?.toString().trim().toLowerCase() || "";
-//        const newVal = rest[key]?.toString().trim().toLowerCase() || "";
+      // Lookup ActorCodes
+      {
+        $lookup: {
+          from: "actorcodes",
+          localField: "code",
+          foreignField: "code",
+          as: "actorInfo",
+        },
+      },
+      { $unwind: { path: "$actorInfo", preserveNullAndEmptyArrays: true } },
 
-//        if (oldVal !== newVal) {
-//          existing[key] = rest[key]; // Update only changed field
-//          shouldUpdate = true;
-//        }
-//      }
+      // Lookup Firms
+      {
+        $lookup: {
+          from: "firms",
+          localField: "firm_code",
+          foreignField: "code",
+          as: "firmInfo",
+        },
+      },
+      { $unwind: { path: "$firmInfo", preserveNullAndEmptyArrays: true } },
+    ];
 
-//      if (shouldUpdate) {
-//        await existing.save();
-//        return res.status(200).json({ message: "Metadata updated", code });
-//      } else {
-//        return res.status(200).json({ message: "No changes detected", code });
-//      }
-//    } else {
-//      // Create new metadata if not exists
-//      const newEntry = new MetaData({ code: code.trim(), ...rest });
-//      await newEntry.save();
-//      return res.status(201).json({ message: "New metadata entry created", code });
-//    }
-//  } catch (error) {
-//    console.error("Update by code error:", error);
-//    res.status(500).json({ message: "Internal server error", error: error.message });
-//  }
-// };
+    // Apply filters
+    if (role) pipeline.push({ $match: { "actorInfo.role": role } });
+    if (position) pipeline.push({ $match: { "actorInfo.position": position } });
+
+    // Pagination
+    pipeline.push({ $skip: parseInt(skip) });
+    pipeline.push({ $limit: parseInt(limit) });
+
+    // Project clean response
+    pipeline.push({
+      $project: {
+        _id: 1,
+        code: 1,
+        name: 1,
+        firm_code: 1,
+        firm_name: "$firmInfo.name",
+        attendance: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        role: "$actorInfo.role",
+        position: "$actorInfo.position",
+      },
+    });
+
+    const data = await MetaData.aggregate(pipeline);
+
+    const totalCount = await MetaData.countDocuments(match);
+
+    res.status(200).json({
+      success: true,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: totalCount,
+      totalPages: Math.ceil(totalCount / limit),
+      data,
+    });
+  } catch (error) {
+    console.error("❌ Error listing metadata:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to list metadata",
+      error: error.message,
+    });
+  }
+};
+
+
