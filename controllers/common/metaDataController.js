@@ -5,6 +5,7 @@ const moment = require('moment'); // or use native Date
 const MetaData = require('../../model/MetaData');
 const Attendance = require('../../model/Attendance');
 const ActorCodes = require('../../model/ActorCode');
+const { Parser } = require("json2csv");
 
 exports.uploadMetadata = async (req, res) => {
  try {
@@ -317,6 +318,149 @@ exports.listMetadata = async (req, res) => {
       message: "Failed to list metadata",
       error: error.message,
     });
+  }
+};
+
+exports.bulkUpsertMetadata = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV file is required" });
+    }
+
+    const results = [];
+    const seenCodes = new Set();
+    const conflicts = [];
+    const filePath = req.file.path;
+
+    fs.createReadStream(filePath)
+      .pipe(
+        csvParser({
+          mapHeaders: ({ header }) =>
+            header.toLowerCase().trim().replace(/\s+/g, "_"),
+        })
+      )
+      .on("data", (row) => {
+        const processedRow = {};
+
+        for (const key in row) {
+          let value = row[key]?.trim();
+          if (value && value.toLowerCase() === "true") {
+            processedRow[key] = true;
+          } else if (value && value.toLowerCase() === "false") {
+            processedRow[key] = false;
+          } else if (value) {
+            processedRow[key] = value;
+          }
+        }
+
+        const code = processedRow.code?.toLowerCase();
+        if (!code) return;
+
+        if (seenCodes.has(code)) {
+          conflicts.push(processedRow);
+        } else {
+          seenCodes.add(code);
+          results.push(processedRow);
+        }
+      })
+      .on("end", async () => {
+        try {
+          // 🔹 fetch existing metadata in bulk
+          const codes = results.map((r) => r.code);
+          const existingDocs = await MetaData.find({ code: { $in: codes } }).lean();
+          const existingMap = new Map(
+            existingDocs.map((doc) => [doc.code.toLowerCase(), doc])
+          );
+
+          const bulkOps = [];
+          let trulyUpdatedCount = 0;
+
+          for (const row of results) {
+            const existing = existingMap.get(row.code.toLowerCase());
+
+            if (!existing) {
+              // New doc
+              bulkOps.push({ insertOne: { document: row } });
+            } else {
+              // Compare fields for changes
+              let hasChanges = false;
+              for (const key of Object.keys(row)) {
+                if (row[key] != existing[key]) {
+                  hasChanges = true;
+                  break;
+                }
+              }
+
+              if (hasChanges) {
+                bulkOps.push({
+                  updateOne: {
+                    filter: { code: row.code },
+                    update: { $set: row },
+                  },
+                });
+                trulyUpdatedCount++;
+              }
+            }
+          }
+
+          if (bulkOps.length > 0) {
+            await MetaData.bulkWrite(bulkOps);
+          }
+
+          fs.unlinkSync(filePath);
+
+          res.status(200).json({
+            success: true,
+            message: "Bulk upsert completed",
+            inserted: bulkOps.filter((op) => op.insertOne).length,
+            modified: trulyUpdatedCount, // ✅ only count *real* updates
+            conflicts,
+          });
+        } catch (err) {
+          console.error("❌ Bulk upsert error:", err);
+          res
+            .status(500)
+            .json({ success: false, message: "Failed to upsert metadata" });
+        }
+      })
+      .on("error", (err) => {
+        console.error("CSV parse error:", err);
+        res.status(500).json({
+          success: false,
+          message: "CSV parsing failed",
+          error: err.message,
+        });
+      });
+  } catch (error) {
+    console.error("Upload error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+
+
+
+exports.downloadMetadata = async (req, res) => {
+  try {
+    const data = await MetaData.find().lean();
+
+    if (!data.length) {
+      return res.status(404).json({ message: "No metadata found" });
+    }
+
+    const parser = new Parser();
+    const csv = parser.parse(data);
+
+    res.header("Content-Type", "text/csv");
+    res.attachment("metadata_export.csv");
+    return res.send(csv);
+  } catch (error) {
+    console.error("❌ CSV export error:", error);
+    res.status(500).json({ message: "Failed to export metadata" });
   }
 };
 
