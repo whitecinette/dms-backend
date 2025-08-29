@@ -288,16 +288,14 @@ exports.downloadPayroll = async (req, res) => {
     const actorMap = new Map(actors.map(a => [a.code, a]));
     const firmMap = new Map(firms.map(f => [f.code, f.name]));
 
-    // collect all dynamic addition/deduction names
-    const allAdditions = new Set();
-    const allDeductions = new Set();
+    // collect all dynamic field names (additions + deductions together)
+    const allDynamicCols = new Set();
     payrolls.forEach(p => {
-      (p.additions || []).forEach(a => allAdditions.add(a.name));
-      (p.deductions || []).forEach(d => allDeductions.add(d.name));
+      (p.additions || []).forEach(a => allDynamicCols.add(a.name));
+      (p.deductions || []).forEach(d => allDynamicCols.add(d.name));
     });
 
-    const additionCols = Array.from(allAdditions);
-    const deductionCols = Array.from(allDeductions);
+    const dynamicCols = Array.from(allDynamicCols);
 
     // core fields
     const fields = [
@@ -305,8 +303,7 @@ exports.downloadPayroll = async (req, res) => {
       "firmCode", "firmName",
       "basic_salary", "days_present", "working_days",
       "gross_salary", "net_salary", "status",
-      ...additionCols,
-      ...deductionCols
+      ...dynamicCols
     ];
 
     // format rows
@@ -326,15 +323,13 @@ exports.downloadPayroll = async (req, res) => {
         status: p.status,
       };
 
-      // additions
-      additionCols.forEach(name => {
-        const found = (p.additions || []).find(a => a.name === name);
-        row[name] = found ? found.amount : "";
-      });
-      // deductions
-      deductionCols.forEach(name => {
-        const found = (p.deductions || []).find(d => d.name === name);
-        row[name] = found ? found.amount : "";
+      dynamicCols.forEach(name => {
+        const add = (p.additions || []).find(a => a.name === name);
+        const ded = (p.deductions || []).find(d => d.name === name);
+
+        if (add) row[name] = add.amount;               // positive
+        else if (ded) row[name] = -Math.abs(ded.amount); // negative
+        else row[name] = "";
       });
 
       return row;
@@ -352,7 +347,6 @@ exports.downloadPayroll = async (req, res) => {
     res.status(500).json({ success: false, message: "Download failed", error: err.message });
   }
 };
-
 
 exports.uploadPayrollThroughCSV = async (req, res) => {
   try {
@@ -382,7 +376,6 @@ exports.uploadPayrollThroughCSV = async (req, res) => {
           cleanedHeaders = Object.keys(row).map((h) =>
             h.trim().replace(/\s+/g, "_").toLowerCase()
           );
-          console.log("Headers: ", cleanedHeaders);
           isFirstRow = false;
         }
 
@@ -393,13 +386,7 @@ exports.uploadPayrollThroughCSV = async (req, res) => {
 
           // convert numeric fields
           if (
-            [
-              "basic_salary",
-              "days_present",
-              "working_days",
-              "gross_salary",
-              "net_salary",
-            ].includes(header)
+            ["basic_salary", "days_present", "working_days", "gross_salary", "net_salary"].includes(header)
           ) {
             value = parseFloat(value) || 0;
           }
@@ -412,60 +399,52 @@ exports.uploadPayrollThroughCSV = async (req, res) => {
       .on("end", async () => {
         try {
           if (results.length === 0) {
-            return res
-              .status(400)
-              .json({ success: false, message: "No valid data found in CSV." });
+            return res.status(400).json({ success: false, message: "No valid data found in CSV." });
           }
 
-          let newCount = 0,
-            updatedCount = 0;
+          let newCount = 0, updatedCount = 0, unchangedCount = 0;
 
           for (const row of results) {
             const code = row.code;
             if (!code) continue;
 
-            // split dynamic additions/deductions
+            // split dynamic additions/deductions based on sign
             const additions = [];
             const deductions = [];
+
             Object.keys(row).forEach((key) => {
               if (
                 ![
-                  "code",
-                  "employeename",
-                  "position",
-                  "firmcode",
-                  "firmname",
-                  "basic_salary",
-                  "days_present",
-                  "working_days",
-                  "gross_salary",
-                  "net_salary",
-                  "status",
+                  "code", "employeename", "position", "firmcode", "firmname",
+                  "basic_salary", "days_present", "working_days",
+                  "gross_salary", "net_salary", "status"
                 ].includes(key)
               ) {
-                const val = parseFloat(row[key]) || 0;
-                if (val > 0) {
-                  if (
-                    key.includes("deduction") ||
-                    key.includes("penalty") ||
-                    key.includes("fine")
-                  ) {
-                    deductions.push({ name: key, amount: val });
-                  } else {
-                    additions.push({ name: key, amount: val });
-                  }
+                const val = parseFloat(row[key]);
+                if (!isNaN(val) && val !== 0) {
+                  if (val > 0) additions.push({ name: key, amount: val, remark: "" });
+                  else deductions.push({ name: key, amount: Math.abs(val), remark: "" });
                 }
               }
             });
 
+            // recalc salaries
+            const basic = row.basic_salary || 0;
+            const days_present = row.days_present || 0;
+            const working_days = row.working_days || 0;
+            const perDay = working_days > 0 ? basic / working_days : 0;
+
+            const gross_salary = perDay * days_present + additions.reduce((a, b) => a + b.amount, 0);
+            const net_salary = gross_salary - deductions.reduce((a, b) => a + b.amount, 0);
+
             const updateDoc = {
               code,
               firmCode: row.firmcode,
-              basic_salary: row.basic_salary || 0,
-              working_days: row.working_days || 0,
-              days_present: row.days_present || 0,
-              gross_salary: row.gross_salary || 0,
-              net_salary: row.net_salary || 0,
+              basic_salary: basic,
+              working_days,
+              days_present,
+              gross_salary,
+              net_salary,
               status: row.status || "generated",
               additions,
               deductions,
@@ -473,17 +452,42 @@ exports.uploadPayrollThroughCSV = async (req, res) => {
               year,
             };
 
-            // upsert
-            const existing = await Payroll.findOneAndUpdate(
-              { code, month, year },
-              { $set: updateDoc },
-              { upsert: true, new: true }
-            );
+            // fetch existing
+            let existing = await Payroll.findOne({ code, month, year });
 
-            if (existing.createdAt && existing.createdAt.getTime() === existing.updatedAt.getTime()) {
+            if (!existing) {
+              await Payroll.create(updateDoc);
               newCount++;
             } else {
-              updatedCount++;
+              // compare serialized version
+              const oldDoc = JSON.stringify({
+                basic_salary: existing.basic_salary,
+                working_days: existing.working_days,
+                days_present: existing.days_present,
+                gross_salary: existing.gross_salary,
+                net_salary: existing.net_salary,
+                status: existing.status,
+                additions: existing.additions,
+                deductions: existing.deductions,
+              });
+
+              const newDoc = JSON.stringify({
+                basic_salary: updateDoc.basic_salary,
+                working_days: updateDoc.working_days,
+                days_present: updateDoc.days_present,
+                gross_salary: updateDoc.gross_salary,
+                net_salary: updateDoc.net_salary,
+                status: updateDoc.status,
+                additions: updateDoc.additions,
+                deductions: updateDoc.deductions,
+              });
+
+              if (oldDoc !== newDoc) {
+                await Payroll.updateOne({ _id: existing._id }, { $set: updateDoc });
+                updatedCount++;
+              } else {
+                unchangedCount++;
+              }
             }
           }
 
@@ -492,6 +496,7 @@ exports.uploadPayrollThroughCSV = async (req, res) => {
             message: "Payroll data processed successfully",
             new: newCount,
             updated: updatedCount,
+            unchanged: unchangedCount,
             total: results.length,
           });
         } catch (error) {
@@ -504,6 +509,42 @@ exports.uploadPayrollThroughCSV = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+exports.getPayrollSummary = async (req, res) => {
+  try {
+    let { month, year, codes } = req.body;
+    if (!month || !year || !Array.isArray(codes)) {
+      return res.status(400).json({ success: false, message: "month, year and codes[] required" });
+    }
+
+    month = parseInt(month);
+    year = parseInt(year);
+
+    // fetch only selected employees
+    const payrolls = await Payroll.find({
+      month,
+      year,
+      code: { $in: codes }
+    }).select("code net_salary").lean();
+
+    const selectedCount = payrolls.length;
+    const totalAmount = payrolls.reduce((sum, p) => sum + (p.net_salary || 0), 0);
+
+    return res.status(200).json({
+      success: true,
+      selectedCount,
+      totalAmount,
+      details: payrolls   // optional: return each employee net too
+    });
+
+  } catch (err) {
+    console.error("❌ Payroll summary error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
+
 
 
 
