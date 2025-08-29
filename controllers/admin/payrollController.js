@@ -7,6 +7,10 @@ const Travel = require("../../model/Travel");
 const Payroll = require("../../model/Payroll");
 const ActorCode = require("../../model/ActorCode");
 const Firm = require("../../model/Firm");
+const csvParser = require("csv-parser");
+const { Parser } = require("json2csv");
+const { Readable } = require("stream");
+
 
 exports.bulkGeneratePayroll = async (req, res) => {
   try {
@@ -255,4 +259,251 @@ exports.getAllPayrolls = async (req, res) => {
     });
   }
 };
+
+
+
+// =====================
+// 1. DOWNLOAD PAYROLL
+// =====================
+exports.downloadPayroll = async (req, res) => {
+  try {
+    let { month, year } = req.query;
+    if (!month || !year) {
+      return res.status(400).json({ success: false, message: "month and year required" });
+    }
+    month = parseInt(month);
+    year = parseInt(year);
+
+    // fetch payrolls
+    const payrolls = await Payroll.find({ month, year }).lean();
+    if (!payrolls.length) {
+      return res.status(404).json({ success: false, message: "No payroll data found" });
+    }
+
+    // map actor & firm info
+    const codes = payrolls.map(p => p.code);
+    const firmCodes = payrolls.map(p => p.firmCode);
+    const actors = await ActorCode.find({ code: { $in: codes } }).select("code name position").lean();
+    const firms = await Firm.find({ code: { $in: firmCodes } }).select("code name").lean();
+    const actorMap = new Map(actors.map(a => [a.code, a]));
+    const firmMap = new Map(firms.map(f => [f.code, f.name]));
+
+    // collect all dynamic addition/deduction names
+    const allAdditions = new Set();
+    const allDeductions = new Set();
+    payrolls.forEach(p => {
+      (p.additions || []).forEach(a => allAdditions.add(a.name));
+      (p.deductions || []).forEach(d => allDeductions.add(d.name));
+    });
+
+    const additionCols = Array.from(allAdditions);
+    const deductionCols = Array.from(allDeductions);
+
+    // core fields
+    const fields = [
+      "code", "employeeName", "position",
+      "firmCode", "firmName",
+      "basic_salary", "days_present", "working_days",
+      "gross_salary", "net_salary", "status",
+      ...additionCols,
+      ...deductionCols
+    ];
+
+    // format rows
+    const data = payrolls.map(p => {
+      const actor = actorMap.get(p.code) || {};
+      const row = {
+        code: p.code,
+        employeeName: actor.name || "N/A",
+        position: actor.position || "N/A",
+        firmCode: p.firmCode,
+        firmName: firmMap.get(p.firmCode) || "N/A",
+        basic_salary: p.basic_salary,
+        days_present: p.days_present,
+        working_days: p.working_days,
+        gross_salary: p.gross_salary,
+        net_salary: p.net_salary,
+        status: p.status,
+      };
+
+      // additions
+      additionCols.forEach(name => {
+        const found = (p.additions || []).find(a => a.name === name);
+        row[name] = found ? found.amount : "";
+      });
+      // deductions
+      deductionCols.forEach(name => {
+        const found = (p.deductions || []).find(d => d.name === name);
+        row[name] = found ? found.amount : "";
+      });
+
+      return row;
+    });
+
+    // convert to CSV
+    const parser = new Parser({ fields });
+    const csvData = parser.parse(data);
+
+    res.header("Content-Type", "text/csv");
+    res.attachment(`payroll_${month}_${year}.csv`);
+    return res.send(csvData);
+  } catch (err) {
+    console.error("❌ Payroll download error:", err);
+    res.status(500).json({ success: false, message: "Download failed", error: err.message });
+  }
+};
+
+
+exports.uploadPayrollThroughCSV = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    let { month, year } = req.body;
+    if (!month || !year) {
+      return res.status(400).json({ success: false, message: "month and year required" });
+    }
+    month = parseInt(month);
+    year = parseInt(year);
+
+    let results = [];
+    const stream = new Readable();
+    stream.push(req.file.buffer);
+    stream.push(null);
+
+    let isFirstRow = true;
+    let cleanedHeaders = [];
+
+    stream
+      .pipe(csvParser())
+      .on("data", (row) => {
+        if (isFirstRow) {
+          cleanedHeaders = Object.keys(row).map((h) =>
+            h.trim().replace(/\s+/g, "_").toLowerCase()
+          );
+          console.log("Headers: ", cleanedHeaders);
+          isFirstRow = false;
+        }
+
+        let payrollEntry = {};
+        cleanedHeaders.forEach((header, index) => {
+          const originalKey = Object.keys(row)[index];
+          let value = row[originalKey]?.trim?.() ?? "";
+
+          // convert numeric fields
+          if (
+            [
+              "basic_salary",
+              "days_present",
+              "working_days",
+              "gross_salary",
+              "net_salary",
+            ].includes(header)
+          ) {
+            value = parseFloat(value) || 0;
+          }
+
+          payrollEntry[header] = value;
+        });
+
+        results.push(payrollEntry);
+      })
+      .on("end", async () => {
+        try {
+          if (results.length === 0) {
+            return res
+              .status(400)
+              .json({ success: false, message: "No valid data found in CSV." });
+          }
+
+          let newCount = 0,
+            updatedCount = 0;
+
+          for (const row of results) {
+            const code = row.code;
+            if (!code) continue;
+
+            // split dynamic additions/deductions
+            const additions = [];
+            const deductions = [];
+            Object.keys(row).forEach((key) => {
+              if (
+                ![
+                  "code",
+                  "employeename",
+                  "position",
+                  "firmcode",
+                  "firmname",
+                  "basic_salary",
+                  "days_present",
+                  "working_days",
+                  "gross_salary",
+                  "net_salary",
+                  "status",
+                ].includes(key)
+              ) {
+                const val = parseFloat(row[key]) || 0;
+                if (val > 0) {
+                  if (
+                    key.includes("deduction") ||
+                    key.includes("penalty") ||
+                    key.includes("fine")
+                  ) {
+                    deductions.push({ name: key, amount: val });
+                  } else {
+                    additions.push({ name: key, amount: val });
+                  }
+                }
+              }
+            });
+
+            const updateDoc = {
+              code,
+              firmCode: row.firmcode,
+              basic_salary: row.basic_salary || 0,
+              working_days: row.working_days || 0,
+              days_present: row.days_present || 0,
+              gross_salary: row.gross_salary || 0,
+              net_salary: row.net_salary || 0,
+              status: row.status || "generated",
+              additions,
+              deductions,
+              month,
+              year,
+            };
+
+            // upsert
+            const existing = await Payroll.findOneAndUpdate(
+              { code, month, year },
+              { $set: updateDoc },
+              { upsert: true, new: true }
+            );
+
+            if (existing.createdAt && existing.createdAt.getTime() === existing.updatedAt.getTime()) {
+              newCount++;
+            } else {
+              updatedCount++;
+            }
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: "Payroll data processed successfully",
+            new: newCount,
+            updated: updatedCount,
+            total: results.length,
+          });
+        } catch (error) {
+          console.error("Error inserting payroll data:", error);
+          res.status(500).json({ success: false, message: "Internal server error" });
+        }
+      });
+  } catch (error) {
+    console.error("Error in uploadPayrollThroughCSV:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
 

@@ -1,10 +1,18 @@
 const express = require("express");
-const { bulkGeneratePayroll, getAllPayrolls } = require("../controllers/admin/payrollController");
+const { bulkGeneratePayroll, getAllPayrolls, downloadPayroll, uploadPayrollThroughCSV } = require("../controllers/admin/payrollController");
 const router = express.Router();
+const { upload } = require('../services/fileUpload');
 
 // 🔹 Bulk Payroll Upsert (Generate/Update payroll for firms)
 router.post("/payroll/bulk-generate", bulkGeneratePayroll);
 router.get("/get-all-payrolls", getAllPayrolls);
+
+router.get("/payroll/download", downloadPayroll);
+
+router.put(
+  "/payroll/upload/csv",
+  upload.single("file"), uploadPayrollThroughCSV
+);
 
 
 module.exports = router;
