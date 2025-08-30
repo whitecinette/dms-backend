@@ -1264,8 +1264,553 @@ exports.getExtractionRecordsForDownload = async (req, res) => {
 const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
 const locationLevels = ["zone", "district", "town"];
 
+// exports.getExtractionReportForAdmin = async (req, res) => {
+//   try {
+//     console.log("Extracton fo admin");
+//     const {
+//       startDate,
+//       endDate,
+//       segment,
+//       brand,
+//       metric = "volume",
+//       view = "default",
+//     } = req.query;
+//     console.log("report", req.query);
+
+//     // Helper: Parse a date string like "2025-07-01" as IST and return UTC Date
+//     function parseISTDate(dateStr) {
+//       const [year, month, day] = dateStr.split("T")[0].split("-").map(Number);
+//       // Create IST date at midnight
+//       const istDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+//       const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+//       // Convert IST to UTC by subtracting offset
+//       return new Date(istDate.getTime() - IST_OFFSET_MS);
+//     }
+
+//     // Parse start and end dates, ignoring time
+//     let start, end;
+//     if (startDate) {
+//       start = parseISTDate(startDate);
+//     } else {
+//       const now = new Date();
+//       const y = now.getUTCFullYear();
+//       const m = now.getUTCMonth() + 1;
+//       start = parseISTDate(`${y}-${String(m).padStart(2, "0")}-01`);
+//     }
+
+//     if (endDate) {
+//       end = parseISTDate(endDate);
+//       // Set end date to end of day in UTC
+//       end.setUTCHours(23, 59, 59, 999);
+//     } else {
+//       const now = new Date();
+//       const y = now.getUTCFullYear();
+//       const m = now.getUTCMonth() + 1;
+//       const lastDay = new Date(y, m, 0).getDate();
+//       end = parseISTDate(`${y}-${String(m).padStart(2, "0")}-${lastDay}`);
+//       end.setUTCHours(23, 59, 59, 999);
+//     }
+
+//     // Step 2: Get all matching dealers from hierarchy and location filters
+//     const hierarchyFilters = {};
+//     hierarchyLevels.forEach((level) => {
+//       if (req.query[level]) {
+//         // Handle multiple values by splitting on comma
+//         const values = Array.isArray(req.query[level]) 
+//           ? req.query[level] 
+//           : req.query[level].split(',').map(v => v.trim());
+//         hierarchyFilters[level] = { $in: values };
+//       }
+//     });
+
+//     const locationFilters = {};
+//     locationLevels.forEach((level) => {
+//       if (req.query[level]) {
+//         // Handle multiple values by splitting on comma
+//         const values = Array.isArray(req.query[level]) 
+//           ? req.query[level] 
+//           : req.query[level].split(',').map(v => v.trim());
+//         locationFilters[level] = { $in: values };
+//       }
+//     });
+
+//     // First approach: Get dealers that match BOTH hierarchy AND location filters
+//     let dealerFilter = [];
+    
+//     if (Object.keys(hierarchyFilters).length > 0 || Object.keys(locationFilters).length > 0) {
+//       // Get initial set of dealers from hierarchy if filters exist
+//       let hierarchyDealers = [];
+//       if (Object.keys(hierarchyFilters).length > 0) {
+//         const matchingHierarchy = await HierarchyEntries.find({
+//           hierarchy_name: "default_sales_flow",
+//           ...hierarchyFilters,
+//         });
+//         hierarchyDealers = matchingHierarchy.map(entry => entry.dealer).filter(Boolean);
+//       }
+      
+//       // Get initial set of dealers from location if filters exist
+//       let locationDealers = [];
+//       if (Object.keys(locationFilters).length > 0) {
+//         const locationQuery = locationFilters;
+//         const matchingLocations = await User.find(locationQuery);
+//         locationDealers = matchingLocations.map(location => location.code).filter(Boolean);
+//       }
+      
+//       // Combine based on which filters were provided
+//       if (Object.keys(hierarchyFilters).length > 0 && Object.keys(locationFilters).length > 0) {
+//         // Intersection - dealers must be in BOTH sets
+//         const hierarchySet = new Set(hierarchyDealers);
+//         dealerFilter = locationDealers.filter(dealer => hierarchySet.has(dealer));
+        
+//         // If both filters are provided but no dealers match, return empty response
+//         if (dealerFilter.length === 0) {
+//           return res.status(200).json({
+//             metricUsed: metric,
+//             viewUsed: view,
+//             data: [],
+//             dealerFilter: [],
+//             message: "No dealers found matching both hierarchy and location filters"
+//           });
+//         }
+//       } else if (Object.keys(hierarchyFilters).length > 0) {
+//         // Only hierarchy filters
+//         dealerFilter = hierarchyDealers;
+        
+//         // If hierarchy filters are provided but no dealers match, return empty response
+//         if (dealerFilter.length === 0) {
+//           return res.status(200).json({
+//             metricUsed: metric,
+//             viewUsed: view,
+//             data: [],
+//             dealerFilter: [],
+//             message: "No dealers found matching hierarchy filters"
+//           });
+//         }
+//       } else {
+//         // Only location filters
+//         dealerFilter = locationDealers;
+        
+//         // If location filters are provided but no dealers match, return empty response
+//         if (dealerFilter.length === 0) {
+//           return res.status(200).json({
+//             metricUsed: metric,
+//             viewUsed: view,
+//             data: [],
+//             dealerFilter: [],
+//             message: "No dealers found matching location filters"
+//           });
+//         }
+//       }
+//     }
+
+//     console.log("Dealer filters:", dealerFilter.length);
+
+//     // Step 3: Brand List
+//     const brands = [
+//       "Samsung",
+//       "Vivo",
+//       "Oppo",
+//       "Xiaomi",
+//       "Apple",
+//       "OnePlus",
+//       "Realme",
+//       "Motorola",
+//     ];
+
+//     const priceClassMap = {
+//       0: "<6k",
+//       1: "6-10k",
+//       2: "10-15k",
+//       3: "15-20k",
+//       4: "20-30k",
+//       5: "30-40k",
+//       6: "40-70k",
+//       7: "70-100k",
+//       8: "100k+",
+//     };
+
+//     console.log("Samsun dates: ", start, end)
+
+//     // Step 4: Aggregation for Samsung from SalesData
+//     const samsungMatchStage = {
+//       date: { $gte: start, $lte: end },
+//       sales_type: "Sell Out",
+//     };
+//     if (segment) {
+//       samsungMatchStage.segment = segment.replace(/[<>\+kK\s]/g, "");
+//     }
+//     if (dealerFilter.length > 0) {
+//       samsungMatchStage.buyer_code = { $in: dealerFilter };
+//     }
+
+//     // const samsungPipeline = [
+//     //   { $match: samsungMatchStage },
+//     //   {
+//     //     $project: {
+//     //       brand: "Samsung",
+//     //       priceClassOrder: {
+//     //         $switch: {
+//     //           branches: [
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000],
+//     //               },
+//     //               then: 0,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000],
+//     //               },
+//     //               then: 1,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000],
+//     //               },
+//     //               then: 2,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000],
+//     //               },
+//     //               then: 3,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000],
+//     //               },
+//     //               then: 4,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000],
+//     //               },
+//     //               then: 5,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000],
+//     //               },
+//     //               then: 6,
+//     //             },
+//     //             {
+//     //               case: {
+//     //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000],
+//     //               },
+//     //               then: 7,
+//     //             },
+//     //           ],
+//     //           default: 8,
+//     //         },
+//     //       },
+//     //       value: {
+//     //         $cond: {
+//     //           if: { $eq: [metric, "value"] },
+//     //           then: {
+//     //             $ifNull: [
+//     //               "$amount",
+//     //               { $multiply: ["$total_amount", "$quantity"] },
+//     //             ],
+//     //           },
+//     //           else: "$quantity",
+//     //         },
+//     //       },
+//     //     },
+//     //   },
+//     //   {
+//     //     $group: {
+//     //       _id: {
+//     //         priceClassOrder: "$priceClassOrder",
+//     //         brand: "$brand",
+//     //       },
+//     //       total: { $sum: "$value" },
+//     //     },
+//     //   },
+//     //   {
+//     //     $group: {
+//     //       _id: "$_id.priceClassOrder",
+//     //       brands: {
+//     //         $push: {
+//     //           brand: "$_id.brand",
+//     //           total: "$total",
+//     //         },
+//     //       },
+//     //     },
+//     //   },
+//     // ];
+
+//     const samsungPipeline = [
+//       { $match: samsungMatchStage },
+//       {
+//         $project: {
+//           brand: "Samsung",
+//           priceClassOrder: {
+//             $switch: {
+//               branches: [
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000] }, then: 0 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000] }, then: 1 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000] }, then: 2 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000] }, then: 3 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000] }, then: 4 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000] }, then: 5 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000] }, then: 6 },
+//                 { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000] }, then: 7 },
+//               ],
+//               default: 8,
+//             },
+//           },
+//           value: {
+//             $cond: {
+//               if: { $eq: [metric, "value"] },
+//               then: "$amount",   // ✅ only amount
+//               else: "$quantity", // ✅ quantity for volume
+//             },
+//           },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: {
+//             priceClassOrder: "$priceClassOrder",
+//             brand: "$brand",
+//           },
+//           total: { $sum: "$value" },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: "$_id.priceClassOrder",
+//           brands: {
+//             $push: {
+//               brand: "$_id.brand",
+//               total: "$total",
+//             },
+//           },
+//         },
+//       },
+//     ];
+
+//     const samsungData = await SalesData.aggregate(samsungPipeline);
+//     console.log("Samsung data:", JSON.stringify(samsungData, null, 2));
+
+//     // Step 5: Aggregation for other brands from ExtractionRecord
+//     const otherBrandsMatchStage = {
+//       createdAt: { $gte: start, $lte: end },
+//       brand: { $ne: "samsung" },
+//     };
+//     if (segment) {
+//       otherBrandsMatchStage.segment = segment.replace(/[<>\+kK\s]/g, "");
+//     }
+//     if (brand && brand !== "Samsung") {
+//       otherBrandsMatchStage.brand = { $regex: `^${brand}$`, $options: "i" };
+//     }
+//     if (dealerFilter.length > 0) {
+//       otherBrandsMatchStage.dealer = { $in: dealerFilter };
+//     }
+
+//     const otherBrandsPipeline = [
+//       { $match: otherBrandsMatchStage },
+//       {
+//         $project: {
+//           brand: {
+//             $cond: {
+//               if: {
+//                 $in: [
+//                   { $toLower: "$brand" },
+//                   brands.map((b) => b.toLowerCase()),
+//                 ],
+//               },
+//               then: {
+//                 $arrayElemAt: [
+//                   brands,
+//                   {
+//                     $indexOfArray: [
+//                       brands.map((b) => b.toLowerCase()),
+//                       { $toLower: "$brand" },
+//                     ],
+//                   },
+//                 ],
+//               },
+//               else: "Others",
+//             },
+//           },
+//           priceClassOrder: {
+//             $switch: {
+//               branches: [
+//                 { case: { $lt: ["$price", 6000] }, then: 0 },
+//                 { case: { $lt: ["$price", 10000] }, then: 1 },
+//                 { case: { $lt: ["$price", 15000] }, then: 2 },
+//                 { case: { $lt: ["$price", 20000] }, then: 3 },
+//                 { case: { $lt: ["$price", 30000] }, then: 4 },
+//                 { case: { $lt: ["$price", 40000] }, then: 5 },
+//                 { case: { $lt: ["$price", 70000] }, then: 6 },
+//                 { case: { $lt: ["$price", 100000] }, then: 7 },
+//               ],
+//               default: 8,
+//             },
+//           },
+//           value: {
+//             $cond: {
+//               if: { $eq: [metric, "value"] },
+//               then: {
+//                 $ifNull: ["$amount", { $multiply: ["$price", "$quantity"] }],
+//               },
+//               else: "$quantity",
+//             },
+//           },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: {
+//             priceClassOrder: "$priceClassOrder",
+//             brand: "$brand",
+//           },
+//           total: { $sum: "$value" },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: "$_id.priceClassOrder",
+//           brands: {
+//             $push: {
+//               brand: "$_id.brand",
+//               total: "$total",
+//             },
+//           },
+//         },
+//       },
+//     ];
+
+//     const otherBrandsData = await ExtractionRecord.aggregate(otherBrandsPipeline);
+
+//     // Step 6: Combine and sort data
+//     const aggregatedData = [];
+//     const priceClasses = Object.keys(priceClassMap).map(Number);
+
+//     // Initialize aggregatedData for all price classes
+//     priceClasses.forEach((priceClass) => {
+//       aggregatedData.push({
+//         _id: priceClass,
+//         brands: [],
+//       });
+//     });
+
+//     // Merge Samsung data
+//     samsungData.forEach((entry) => {
+//       const index = aggregatedData.findIndex(
+//         (item) => item._id === Number(entry._id)
+//       );
+//       if (index >= 0) {
+//         aggregatedData[index].brands = entry.brands;
+//       } else {
+//         console.log("No matching price class for Samsung data:", entry);
+//       }
+//     });
+
+//     // Merge other brands data
+//     otherBrandsData.forEach((entry) => {
+//       const index = aggregatedData.findIndex(
+//         (item) => item._id === Number(entry._id)
+//       );
+//       if (index >= 0) {
+//         aggregatedData[index].brands = aggregatedData[index].brands.concat(
+//           entry.brands
+//         );
+//       } else {
+//         console.log("No matching price class for other brands data:", entry);
+//         aggregatedData.push({ _id: Number(entry._id), brands: entry.brands });
+//       }
+//     });
+
+//     // Sort by priceClassOrder
+//     aggregatedData.sort((a, b) => a._id - b._id);
+
+//     // Step 7: Final response formatting
+//     const response = aggregatedData.map((entry) => {
+//       const row = {
+//         "Price Class": priceClassMap[entry._id],
+//         "Rank of Samsung": null,
+//       };
+
+//       brands.concat("Others").forEach((b) => {
+//         row[b] = 0;
+//       });
+
+//       entry.brands.forEach((b) => {
+//         if (brands.includes(b.brand) || b.brand === "Others") {
+//           row[b.brand] = b.total;
+//         } else {
+//           console.log("Unexpected brand in response mapping:", b.brand);
+//         }
+//       });
+
+//       const sortedBrands = Object.entries(row)
+//         .filter(([key]) => brands.includes(key) || key === "Others")
+//         .sort(([, a], [, b]) => b - a);
+
+//       const samsungIndex = sortedBrands.findIndex(([b]) => b === "Samsung");
+//       row["Rank of Samsung"] = samsungIndex >= 0 ? samsungIndex + 1 : null;
+
+//       row["Total"] = sortedBrands.reduce((sum, [, val]) => sum + val, 0);
+
+//       if (view === "share" && row["Total"] > 0) {
+//         brands.concat("Others").forEach((b) => {
+//           row[b] = ((row[b] / row["Total"]) * 100).toFixed(2) + "%";
+//         });
+//         row["Total"] = "100.00";
+//       }
+
+//       return row;
+//     });
+
+//     // Step 8: Add Total Row
+//     const totalRow = { "Price Class": "Total", "Rank of Samsung": null };
+//     brands.concat("Others").forEach((b) => {
+//       totalRow[b] = response.reduce(
+//         (sum, row) => sum + (parseFloat(row[b]) || 0),
+//         0
+//       );
+//     });
+//     totalRow["Total"] = brands
+//       .concat("Others")
+//       .reduce((sum, b) => sum + totalRow[b], 0);
+
+//     // Calculate Samsung rank for total row
+//     const sortedTotalBrands = Object.entries(totalRow)
+//       .filter(([key]) => brands.includes(key) || key === "Others")
+//       .sort(([, a], [, b]) => b - a);
+//     const samsungTotalIndex = sortedTotalBrands.findIndex(
+//       ([b]) => b === "Samsung"
+//     );
+//     totalRow["Rank of Samsung"] =
+//       samsungTotalIndex >= 0 ? samsungTotalIndex + 1 : null;
+
+//     if (view === "share" && totalRow["Total"] > 0) {
+//       brands.concat("Others").forEach((b) => {
+//         totalRow[b] =
+//           ((totalRow[b] / totalRow["Total"]) * 100).toFixed(2) + "%";
+//       });
+//       totalRow["Total"] = "100.00";
+//     }
+
+//     response.push(totalRow);
+
+//     return res.status(200).json({
+//       metricUsed: metric,
+//       viewUsed: view,
+//       data: response,
+//       dealerFilter,
+//     });
+//   } catch (error) {
+//     console.error("Error in getExtractionReport:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// };
+
 exports.getExtractionReportForAdmin = async (req, res) => {
   try {
+    console.log("Extracton fo admin");
     const {
       startDate,
       endDate,
@@ -1428,6 +1973,8 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       8: "100k+",
     };
 
+    console.log("Samsun dates: ", start, end)
+
     // Step 4: Aggregation for Samsung from SalesData
     const samsungMatchStage = {
       date: { $gte: start, $lte: end },
@@ -1440,6 +1987,102 @@ exports.getExtractionReportForAdmin = async (req, res) => {
       samsungMatchStage.buyer_code = { $in: dealerFilter };
     }
 
+    // const samsungPipeline = [
+    //   { $match: samsungMatchStage },
+    //   {
+    //     $project: {
+    //       brand: "Samsung",
+    //       priceClassOrder: {
+    //         $switch: {
+    //           branches: [
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000],
+    //               },
+    //               then: 0,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000],
+    //               },
+    //               then: 1,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000],
+    //               },
+    //               then: 2,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000],
+    //               },
+    //               then: 3,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000],
+    //               },
+    //               then: 4,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000],
+    //               },
+    //               then: 5,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000],
+    //               },
+    //               then: 6,
+    //             },
+    //             {
+    //               case: {
+    //                 $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000],
+    //               },
+    //               then: 7,
+    //             },
+    //           ],
+    //           default: 8,
+    //         },
+    //       },
+    //       value: {
+    //         $cond: {
+    //           if: { $eq: [metric, "value"] },
+    //           then: {
+    //             $ifNull: [
+    //               "$amount",
+    //               { $multiply: ["$total_amount", "$quantity"] },
+    //             ],
+    //           },
+    //           else: "$quantity",
+    //         },
+    //       },
+    //     },
+    //   },
+    //   {
+    //     $group: {
+    //       _id: {
+    //         priceClassOrder: "$priceClassOrder",
+    //         brand: "$brand",
+    //       },
+    //       total: { $sum: "$value" },
+    //     },
+    //   },
+    //   {
+    //     $group: {
+    //       _id: "$_id.priceClassOrder",
+    //       brands: {
+    //         $push: {
+    //           brand: "$_id.brand",
+    //           total: "$total",
+    //         },
+    //       },
+    //     },
+    //   },
+    // ];
+
     const samsungPipeline = [
       { $match: samsungMatchStage },
       {
@@ -1448,54 +2091,14 @@ exports.getExtractionReportForAdmin = async (req, res) => {
           priceClassOrder: {
             $switch: {
               branches: [
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000],
-                  },
-                  then: 0,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000],
-                  },
-                  then: 1,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000],
-                  },
-                  then: 2,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000],
-                  },
-                  then: 3,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000],
-                  },
-                  then: 4,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000],
-                  },
-                  then: 5,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000],
-                  },
-                  then: 6,
-                },
-                {
-                  case: {
-                    $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000],
-                  },
-                  then: 7,
-                },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 6000] }, then: 0 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 10000] }, then: 1 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 15000] }, then: 2 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 20000] }, then: 3 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 30000] }, then: 4 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 40000] }, then: 5 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 70000] }, then: 6 },
+                { case: { $lt: [{ $divide: ["$total_amount", "$quantity"] }, 100000] }, then: 7 },
               ],
               default: 8,
             },
@@ -1503,13 +2106,8 @@ exports.getExtractionReportForAdmin = async (req, res) => {
           value: {
             $cond: {
               if: { $eq: [metric, "value"] },
-              then: {
-                $ifNull: [
-                  "$amount",
-                  { $multiply: ["$total_amount", "$quantity"] },
-                ],
-              },
-              else: "$quantity",
+              then: "$total_amount",   // ✅ only amount
+              else: "$quantity", // ✅ quantity for volume
             },
           },
         },
@@ -1537,6 +2135,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
     ];
 
     const samsungData = await SalesData.aggregate(samsungPipeline);
+    console.log("Samsung data:", JSON.stringify(samsungData, null, 2));
 
     // Step 5: Aggregation for other brands from ExtractionRecord
     const otherBrandsMatchStage = {
@@ -1753,232 +2352,7 @@ exports.getExtractionReportForAdmin = async (req, res) => {
   }
 };
 
-// exports.getExtractionReportForAdmin = async (req, res) => {
-//   try {
-//     const { startDate, endDate, segment, brand, metric = 'volume' } = req.query;
 
-//     // Step 1: Build match dates
-//     const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-//     const end = endDate ? new Date(endDate) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
-
-//     // Step 2: Get all matching dealers from hierarchy
-//     const hierarchyFilters = {};
-//     hierarchyLevels.forEach(level => {
-//       if (req.query[level]) {
-//         hierarchyFilters[level] = req.query[level];
-//       }
-//     });
-
-//     const matchingDealersSet = new Set();
-//     if (Object.keys(hierarchyFilters).length > 0) {
-//       const matchingHierarchy = await HierarchyEntries.find({
-//         hierarchy_name: "default_sales_flow",
-//         ...hierarchyFilters
-//       });
-//       matchingHierarchy.forEach(entry => {
-//         if (entry.dealer) {
-//           matchingDealersSet.add(entry.dealer);
-//         }
-//       });
-//     }
-
-//     const dealerFilter = [...matchingDealersSet];
-//     const matchStage = {
-//       createdAt: { $gte: start, $lte: end }
-//     };
-//     if (segment) matchStage.segment = segment;
-//     if (brand) matchStage.brand = brand;
-//     if (dealerFilter.length > 0) {
-//       matchStage.dealer = { $in: dealerFilter };
-//     }
-
-//     // Step 3: Brand List
-//     const brands = ['Samsung', 'Vivo', 'Oppo', 'Xiaomi', 'Apple', 'OnePlus', 'Realme', 'Motorola'];
-
-//     const priceClassMap = {
-//       0: "<6k", 1: "6-10k", 2: "10-15k", 3: "15-20k",
-//       4: "20-30k", 5: "30-40k", 6: "40-70k", 7: "70-100k", 8: "100k+"
-//     };
-
-//     // Step 4: Aggregation
-//     const aggregationPipeline = [
-//       { $match: matchStage },
-//       {
-//         $project: {
-//           brand: {
-//             $cond: {
-//               if: { $in: [{ $toLower: "$brand" }, brands.map(b => b.toLowerCase())] },
-//               then: {
-//                 $concat: [
-//                   { $toUpper: { $substrCP: ["$brand", 0, 1] } },
-//                   {
-//                     $substrCP: [
-//                       { $toLower: "$brand" },
-//                       1,
-//                       { $subtract: [{ $strLenCP: "$brand" }, 1] }
-//                     ]
-//                   }
-//                 ]
-//               },
-//               else: "Others"
-//             }
-//           },
-//           priceClassOrder: {
-//             $switch: {
-//               branches: [
-//                 { case: { $lt: ["$price", 6000] }, then: 0 },
-//                 { case: { $lt: ["$price", 10000] }, then: 1 },
-//                 { case: { $lt: ["$price", 15000] }, then: 2 },
-//                 { case: { $lt: ["$price", 20000] }, then: 3 },
-//                 { case: { $lt: ["$price", 30000] }, then: 4 },
-//                 { case: { $lt: ["$price", 40000] }, then: 5 },
-//                 { case: { $lt: ["$price", 70000] }, then: 6 },
-//                 { case: { $lt: ["$price", 100000] }, then: 7 }
-//               ],
-//               default: 8
-//             }
-//           },
-//           value: {
-//             $cond: {
-//               if: { $eq: [metric, "value"] },
-//               then: { $ifNull: ["$amount", { $multiply: ["$price", "$quantity"] }] },
-//               else: "$quantity"
-//             }
-//           }
-//         }
-//       },
-//       {
-//         $group: {
-//           _id: {
-//             priceClassOrder: "$priceClassOrder",
-//             brand: "$brand"
-//           },
-//           total: { $sum: "$value" }
-//         }
-//       },
-//       {
-//         $group: {
-//           _id: "$_id.priceClassOrder",
-//           brands: {
-//             $push: {
-//               brand: "$_id.brand",
-//               total: "$total"
-//             }
-//           }
-//         }
-//       },
-//       { $sort: { "_id": 1 } }
-//     ];
-
-//     const aggregatedData = await ExtractionRecord.aggregate(aggregationPipeline);
-
-//     // Step 5: Final response formatting
-//     const response = aggregatedData.map(entry => {
-//       const row = {
-//         "Price Class": priceClassMap[entry._id],
-//         "Rank of Samsung": null
-//       };
-
-//       brands.concat("Others").forEach(b => {
-//         row[b] = 0;
-//       });
-
-//       entry.brands.forEach(b => {
-//         row[b.brand] = b.total;
-//       });
-
-//       const sortedBrands = Object.entries(row)
-//         .filter(([key]) => brands.includes(key) || key === "Others")
-//         .sort(([, a], [, b]) => b - a);
-
-//       const samsungIndex = sortedBrands.findIndex(([b]) => b === "Samsung");
-//       row["Rank of Samsung"] = samsungIndex >= 0 ? samsungIndex + 1 : null;
-
-//       row["Total"] = sortedBrands.reduce((sum, [, val]) => sum + val, 0);
-//       return row;
-//     });
-
-//     // Step 6: Grand Total Row
-//     const grandTotalRow = { "Price Class": "Total", "Rank of Samsung": null };
-//     brands.concat("Others").forEach(b => {
-//       grandTotalRow[b] = response.reduce((sum, row) => sum + (row[b] || 0), 0);
-//     });
-//     grandTotalRow["Total"] = brands.concat("Others").reduce((sum, b) => sum + grandTotalRow[b], 0);
-//     response.push(grandTotalRow);
-
-//     return res.status(200).json({
-//       metricUsed: metric,
-//       data: response
-//     });
-
-//   } catch (error) {
-//     console.error("Error in getExtractionReport:", error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// };
-//  exports.getHierarchyFilters = async (req, res) => {
-//    try {
-//     console.log("hiii")
-//      const hierarchyName = "default_sales_flow";
-//      const hierarchyLevels = ["smd", "asm", "mdd", "tse", "dealer"];
-
-//      // Step 1: Collect all query filters
-//      const filters = { hierarchy_name: hierarchyName };
-//      hierarchyLevels.forEach((level) => {
-//        if (req.query[level]) {
-//          filters[level] = req.query[level];
-//        }
-//      });
-
-//      // Step 2: Find all hierarchy entries that match all filters
-//      const hierarchyEntries = await HierarchyEntries.find(filters);
-
-//      // Step 3: Collect all unique codes from these entries
-//      const codeSet = new Set();
-//      hierarchyEntries.forEach((entry) => {
-//        hierarchyLevels.forEach((level) => {
-//          if (entry[level]) {
-//            codeSet.add(entry[level]);
-//          }
-//        });
-//      });
-
-//      const allCodes = [...codeSet];
-
-//      // Step 4: Get names for these codes
-//      const actorCodes = await ActorCode.find({ code: { $in: allCodes } });
-//      const codeNameMap = {};
-//      actorCodes.forEach((actor) => {
-//        codeNameMap[actor.code] = actor.name;
-//      });
-
-//      // Step 5: Group by hierarchy level
-//      const grouped = {};
-//      const uniqueSet = {};
-//      hierarchyLevels.forEach((level) => {
-//        grouped[level] = [];
-//        uniqueSet[level] = new Set();
-//      });
-
-//      hierarchyEntries.forEach((entry) => {
-//        hierarchyLevels.forEach((level) => {
-//          const code = entry[level];
-//          if (code && !uniqueSet[level].has(code)) {
-//            uniqueSet[level].add(code);
-//            grouped[level].push({
-//              code,
-//              name: codeNameMap[code] || null,
-//            });
-//          }
-//        });
-//      });
-
-//      return res.status(200).json(grouped);
-//    } catch (error) {
-//      console.error("Error in getHierarchyFilters:", error);
-//      return res.status(500).json({ error: "Internal Server Error" });
-//    }
-//  };
 
 exports.getHierarchyFilters = async (req, res) => {
   try {
