@@ -110,32 +110,35 @@ exports.bulkGeneratePayroll = async (req, res) => {
       const netSalary = grossSalary; // no leave deductions anymore
 
       // ✅ Bulk upsert
-      payrollDocs.push({
+        payrollDocs.push({
         updateOne: {
-          filter: { code, month, year },
-          update: {
+            filter: { code, month, year },
+            update: {
             $set: {
-              code,
-              firmCode,
-              basic_salary: basicSalary,
-              working_days: workingDays,
-              days_present: daysPresent,
-              leaves: totalLeaves,
-              hours_worked: hoursWorked,
-              additions,
-              deductions: [], // no leave deduction now
-              month,
-              year,
-              gross_salary: grossSalary,
-              net_salary: netSalary,
-              status: "generated",
-              generated_by: req.user?.id || "system",
-              leaves_adjustment: 0
+                code,
+                firmCode,
+                basic_salary: basicSalary,
+                working_days: workingDays,
+                days_present: daysPresent,
+                leaves: totalLeaves,
+                hours_worked: hoursWorked,
+                additions,
+                deductions: [],
+                month,
+                year,
+                gross_salary: grossSalary,
+                net_salary: netSalary,
+                status: "generated",
+                generated_by: req.user?.id || "system"
+            },
+            $setOnInsert: {
+                leaves_adjustment: 0   // ✅ only if doc doesn’t exist
             }
-          },
-          upsert: true
+            },
+            upsert: true
         }
-      });
+        });
+
     }
 
     if (payrollDocs.length > 0) {
