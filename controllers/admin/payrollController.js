@@ -103,7 +103,7 @@ exports.bulkGeneratePayroll = async (req, res) => {
       });
 
       // ✅ Salary calculation (proportional to attendance only)
-      const dailyRate = basicSalary / workingDays;
+      const dailyRate = basicSalary / 30;
       const salaryEarned = dailyRate * daysPresent;
 
       const grossSalary = salaryEarned + additions.reduce((a, b) => a + b.amount, 0);
@@ -129,7 +129,8 @@ exports.bulkGeneratePayroll = async (req, res) => {
               gross_salary: grossSalary,
               net_salary: netSalary,
               status: "generated",
-              generated_by: req.user?.id || "system"
+              generated_by: req.user?.id || "system",
+              leaves_adjustment: 0
             }
           },
           upsert: true

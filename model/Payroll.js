@@ -29,6 +29,8 @@ const PayrollSchema = new mongoose.Schema({
     enum: ["draft", "generated", "approved", "paid"], 
     default: "draft" 
   },
+
+  leaves_adjustment: {type: Number},
   payout_date: { type: Date },
   payment_mode: { type: String, trim: true },
   remarks: { type: String, trim: true, default: "No remarks provided" }, // ✅ payroll-level remark
