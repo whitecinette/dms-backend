@@ -11,12 +11,321 @@ const csvParser = require("csv-parser");
 const { Parser } = require("json2csv");
 const { Readable } = require("stream");
 
+// punch out considered in payroll generate
+// exports.bulkGeneratePayroll = async (req, res) => {
+//   try {
+//     let { firmCodes, month, year } = req.body;
+
+//     // Default → last month
+//     if (!month || !year) {
+//       const lastMonth = moment().subtract(1, "month");
+//       month = lastMonth.month() + 1;
+//       year = lastMonth.year();
+//     }
+
+//     if (!firmCodes || !firmCodes.length) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "firmCodes are required"
+//       });
+//     }
+
+//     const startDate = new Date(year, month - 1, 1);
+//     const endDate = new Date(year, month, 0);
+
+//     // Count working days (exclude Sundays)
+//     let workingDays = 0;
+//     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+//       if (d.getDay() !== 0) workingDays++; // Sunday = 0
+//     }
+
+//     // 1. Get employees
+//     const employees = await MetaData.find({ firm_code: { $in: firmCodes } }).lean();
+
+//     // 2. Load firm metadata map
+//     const firmSettings = await FirmMetaData.find({ firmCode: { $in: firmCodes } }).lean();
+//     const firmMap = new Map(firmSettings.map(f => [f.firmCode, f]));
+
+//     let payrollDocs = [];
+
+//     for (const emp of employees) {
+//       const code = emp.code;
+//       const firmCode = emp.firm_code;
+//       const firmConfig = firmMap.get(firmCode) || {};
+
+//       const basicSalary = emp.basic_salary || 0;
+
+//       // 3. Attendance
+//       const attendanceRecords = await Attendance.find({
+//         code,
+//         date: { $gte: startDate, $lte: endDate }
+//       }).lean();
+
+//       let daysPresent = 0;
+//       let hoursWorked = 0;
+
+//       attendanceRecords.forEach(rec => {
+//         if (firmConfig.punchoutConsidered === false) {
+//           if (rec.punchIn) daysPresent++;
+//         } else {
+//           if (rec.punchIn && rec.punchOut) daysPresent++;
+//         }
+//         hoursWorked += rec.hoursWorked || 0;
+//       });
+
+//       // 4. Leaves (only for reporting, not deductions now)
+//       const leaves = await Leave.find({
+//         code,
+//         fromDate: { $lte: endDate },
+//         toDate: { $gte: startDate },
+//         status: "approved"
+//       }).lean();
+
+//       let totalLeaves = 0;
+//       leaves.forEach(l => {
+//         totalLeaves += l.totalDays || 0;
+//       });
+
+//       // 5. Expenses (approved)
+//       const expenses = await Travel.find({
+//         code,
+//         createdAt: { $gte: startDate, $lte: endDate },
+//         status: "approved"
+//       }).lean();
+
+//       let additions = [];
+//       expenses.forEach(exp => {
+//         additions.push({
+//           name: `${exp.billType} Expenses`,
+//           amount: exp.amount || 0,
+//           remark: exp.remarks || ""
+//         });
+//       });
+
+//       // ✅ Salary calculation (proportional to attendance only)
+//       const dailyRate = basicSalary / 30;
+//       const salaryEarned = dailyRate * daysPresent;
+
+//       const grossSalary = salaryEarned + additions.reduce((a, b) => a + b.amount, 0);
+//       const netSalary = grossSalary; // no leave deductions anymore
+
+//       // ✅ Bulk upsert
+//         payrollDocs.push({
+//         updateOne: {
+//             filter: { code, month, year },
+//             update: {
+//             $set: {
+//                 code,
+//                 firmCode,
+//                 basic_salary: basicSalary,
+//                 working_days: workingDays,
+//                 days_present: daysPresent,
+//                 leaves: totalLeaves,
+//                 hours_worked: hoursWorked,
+//                 additions,
+//                 deductions: [],
+//                 month,
+//                 year,
+//                 gross_salary: grossSalary,
+//                 net_salary: netSalary,
+//                 status: "generated",
+//                 generated_by: req.user?.id || "system"
+//             },
+//             $setOnInsert: {
+//                 leaves_adjustment: 0   // ✅ only if doc doesn’t exist
+//             }
+//             },
+//             upsert: true
+//         }
+//         });
+
+//     }
+
+//     if (payrollDocs.length > 0) {
+//       const result = await Payroll.bulkWrite(payrollDocs);
+//       return res.status(200).json({
+//         success: true,
+//         message: "Payroll generated successfully",
+//         result
+//       });
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "No employees found",
+//       result: {}
+//     });
+//   } catch (error) {
+//     console.error("❌ Payroll generation error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to generate payroll",
+//       error: error.message
+//     });
+//   }
+// };
+
+// exports.bulkGeneratePayroll = async (req, res) => {
+//   try {
+//     let { firmCodes, month, year } = req.body;
+
+//     if (!month || !year) {
+//       const lastMonth = moment().subtract(1, "month");
+//       month = lastMonth.month() + 1;
+//       year = lastMonth.year();
+//     }
+
+//     if (!firmCodes || !firmCodes.length) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "firmCodes are required"
+//       });
+//     }
+
+//     const startDate = new Date(year, month - 1, 1);
+//     const endDate = new Date(year, month, 0);
+
+//     // Count working days (exclude Sundays)
+//     let workingDays = 0;
+//     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+//       if (d.getDay() !== 0) workingDays++;
+//     }
+
+//     const employees = await MetaData.find({ firm_code: { $in: firmCodes } }).lean();
+//     const firmSettings = await FirmMetaData.find({ firmCode: { $in: firmCodes } }).lean();
+//     const firmMap = new Map(firmSettings.map(f => [f.firmCode, f]));
+
+//     let payrollDocs = [];
+
+//     for (const emp of employees) {
+//       const code = emp.code;
+//       const firmCode = emp.firm_code;
+//       const firmConfig = firmMap.get(firmCode) || {};
+
+//       const basicSalary = emp.basic_salary || 0;
+
+//       // Attendance
+//       const attendanceRecords = await Attendance.find({
+//         code,
+//         date: { $gte: startDate, $lte: endDate }
+//       }).lean();
+
+//       let daysPresent = 0;
+//       let hoursWorked = 0;
+
+//       attendanceRecords.forEach(rec => {
+//         // ✅ Temporarily ignore punchOut — just punchIn = present
+//         if (rec.punchIn) {
+//           daysPresent++;
+//         }
+//         hoursWorked += rec.hoursWorked || 0;
+//       });
+
+//       // Leaves
+//       const leaves = await Leave.find({
+//         code,
+//         fromDate: { $lte: endDate },
+//         toDate: { $gte: startDate },
+//         status: "approved"
+//       }).lean();
+
+//       let totalLeaves = 0;
+//       leaves.forEach(l => {
+//         totalLeaves += l.totalDays || 0;
+//       });
+
+//       // Expenses
+//       const expenses = await Travel.find({
+//         code,
+//         createdAt: { $gte: startDate, $lte: endDate },
+//         status: "approved"
+//       }).lean();
+
+//       let additions = [];
+//       expenses.forEach(exp => {
+//         additions.push({
+//           name: `${exp.billType} Expenses`,
+//           amount: exp.amount || 0,
+//           remark: exp.remarks || ""
+//         });
+//       });
+
+//      // Salary calc
+//       const dailyRate = basicSalary / 30;
+//       const salaryEarned = dailyRate * daysPresent;
+
+//       // Count Sundays in the month
+//       let sundayCount = 0;
+//       for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+//         if (d.getDay() === 0) sundayCount++; // Sunday = 0
+//       }
+
+//       // Get existing payroll doc (to keep leave_adjustment if exists)
+//       const existingPayroll = await Payroll.findOne({ code, month, year }).lean();
+//       const leaveAdjustment = existingPayroll?.leaves_adjustment || 0;
+
+//       // Salary calculation
+//       const grossSalary = salaryEarned + additions.reduce((a, b) => a + b.amount, 0);
+//       const netSalary = grossSalary + (dailyRate * sundayCount) - (dailyRate * leaveAdjustment);
+
+//       payrollDocs.push({
+//         updateOne: {
+//           filter: { code, month, year },
+//           update: {
+//             $set: {
+//               code,
+//               firmCode,
+//               basic_salary: basicSalary,
+//               working_days: workingDays,
+//               days_present: daysPresent,
+//               leaves: totalLeaves,
+//               hours_worked: hoursWorked,
+//               additions,
+//               deductions: [],
+//               month,
+//               year,
+//               gross_salary: grossSalary,
+//               net_salary: netSalary,
+//               status: "generated",
+//               generated_by: req.user?.id || "system"
+//             },
+//             $setOnInsert: {
+//               leaves_adjustment: 0 // only if new doc
+//             }
+//           },
+//           upsert: true
+//         }
+//       });
+//     }
+
+//     if (payrollDocs.length > 0) {
+//       const result = await Payroll.bulkWrite(payrollDocs);
+//       return res.status(200).json({
+//         success: true,
+//         message: "Payroll generated successfully",
+//         result
+//       });
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "No employees found",
+//       result: {}
+//     });
+//   } catch (error) {
+//     console.error("❌ Payroll generation error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to generate payroll",
+//       error: error.message
+//     });
+//   }
+// };
 
 exports.bulkGeneratePayroll = async (req, res) => {
   try {
     let { firmCodes, month, year } = req.body;
 
-    // Default → last month
     if (!month || !year) {
       const lastMonth = moment().subtract(1, "month");
       month = lastMonth.month() + 1;
@@ -36,13 +345,10 @@ exports.bulkGeneratePayroll = async (req, res) => {
     // Count working days (exclude Sundays)
     let workingDays = 0;
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      if (d.getDay() !== 0) workingDays++; // Sunday = 0
+      if (d.getDay() !== 0) workingDays++;
     }
 
-    // 1. Get employees
     const employees = await MetaData.find({ firm_code: { $in: firmCodes } }).lean();
-
-    // 2. Load firm metadata map
     const firmSettings = await FirmMetaData.find({ firmCode: { $in: firmCodes } }).lean();
     const firmMap = new Map(firmSettings.map(f => [f.firmCode, f]));
 
@@ -55,7 +361,7 @@ exports.bulkGeneratePayroll = async (req, res) => {
 
       const basicSalary = emp.basic_salary || 0;
 
-      // 3. Attendance
+      // Attendance
       const attendanceRecords = await Attendance.find({
         code,
         date: { $gte: startDate, $lte: endDate }
@@ -65,15 +371,14 @@ exports.bulkGeneratePayroll = async (req, res) => {
       let hoursWorked = 0;
 
       attendanceRecords.forEach(rec => {
-        if (firmConfig.punchoutConsidered === false) {
-          if (rec.punchIn) daysPresent++;
-        } else {
-          if (rec.punchIn && rec.punchOut) daysPresent++;
+        // ✅ Temporarily ignore punchOut — just punchIn = present
+        if (rec.punchIn) {
+          daysPresent++;
         }
         hoursWorked += rec.hoursWorked || 0;
       });
 
-      // 4. Leaves (only for reporting, not deductions now)
+      // Leaves
       const leaves = await Leave.find({
         code,
         fromDate: { $lte: endDate },
@@ -86,7 +391,7 @@ exports.bulkGeneratePayroll = async (req, res) => {
         totalLeaves += l.totalDays || 0;
       });
 
-      // 5. Expenses (approved)
+      // Expenses
       const expenses = await Travel.find({
         code,
         createdAt: { $gte: startDate, $lte: endDate },
@@ -102,43 +407,71 @@ exports.bulkGeneratePayroll = async (req, res) => {
         });
       });
 
-      // ✅ Salary calculation (proportional to attendance only)
+        // week offs/sundays
+        const daysInMonth = new Date(year, month, 0).getDate(); // total days in month
+        let weekOffs = 0;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+        const day = new Date(year, month - 1, d).getDay();
+        if (day === 0) weekOffs++; // Sunday = 0
+        }
+
+      // Salary calc
       const dailyRate = basicSalary / 30;
-      const salaryEarned = dailyRate * daysPresent;
+      
 
-      const grossSalary = salaryEarned + additions.reduce((a, b) => a + b.amount, 0);
-      const netSalary = grossSalary; // no leave deductions anymore
+      // Absent = workingDays - daysPresent
+      const absentDays = workingDays - daysPresent;
 
-      // ✅ Bulk upsert
-        payrollDocs.push({
+      // Get existing payroll doc (to keep leave_adjustment if exists)
+      const existingPayroll = await Payroll.findOne({ code, month, year }).lean();
+      const leaveAdjustment = existingPayroll?.leaves_adjustment || 0;
+
+      // Total leaves = approved leaves + absent - adjustment
+      const effectiveLeaves = absentDays + leaveAdjustment;
+      
+
+      // Expenses = additions
+      const additionsTotal = additions.reduce((a, b) => a + b.amount, 0);
+
+      // (later we can add real deductions; for now keep [])
+      const deductions = [];
+      const deductionsTotal = deductions.reduce((a, b) => a + b.amount, 0);
+
+      // ✅ Final salary
+      const netSalary = basicSalary - (dailyRate * effectiveLeaves) + additionsTotal + deductionsTotal;
+
+      // grossSalary can represent before adjustments (basic + additions - leaves)
+      const grossSalary = basicSalary  - (dailyRate * (absentDays));
+
+      payrollDocs.push({
         updateOne: {
-            filter: { code, month, year },
-            update: {
+          filter: { code, month, year },
+          update: {
             $set: {
-                code,
-                firmCode,
-                basic_salary: basicSalary,
-                working_days: workingDays,
-                days_present: daysPresent,
-                leaves: totalLeaves,
-                hours_worked: hoursWorked,
-                additions,
-                deductions: [],
-                month,
-                year,
-                gross_salary: grossSalary,
-                net_salary: netSalary,
-                status: "generated",
-                generated_by: req.user?.id || "system"
+              code,
+              firmCode,
+              basic_salary: basicSalary,
+              working_days: workingDays,
+              days_present: daysPresent,
+              leaves: totalLeaves,
+              hours_worked: hoursWorked,
+              additions,
+              deductions: [],
+              month,
+              year,
+              gross_salary: grossSalary,
+              net_salary: netSalary,
+              status: "generated",
+              generated_by: req.user?.id || "system"
             },
             $setOnInsert: {
-                leaves_adjustment: 0   // ✅ only if doc doesn’t exist
+              leaves_adjustment: 0 // only if new doc
             }
-            },
-            upsert: true
+          },
+          upsert: true
         }
-        });
-
+      });
     }
 
     if (payrollDocs.length > 0) {
@@ -164,6 +497,7 @@ exports.bulkGeneratePayroll = async (req, res) => {
     });
   }
 };
+
 
 exports.getAllPayrolls = async (req, res) => {
   try {
@@ -548,6 +882,113 @@ exports.getPayrollSummary = async (req, res) => {
 };
 
 
+exports.getLeavesInfo = async (req, res) => {
+  try {
+    const { month, year, firmCode } = req.query;
+
+    if (!month || !year) {
+      return res.status(400).json({
+        success: false,
+        message: "month and year are required"
+      });
+    }
+
+    const query = firmCode ? { firm_code: firmCode } : {};
+    const employees = await MetaData.find(query).lean();
+
+    if (!employees.length) {
+      return res.status(404).json({ success: false, message: "No employees found" });
+    }
+
+    const codes = employees.map(e => e.code);
+    const payrolls = await Payroll.find({
+      code: { $in: codes },
+      month: Number(month),
+      year: Number(year)
+    }).lean();
+
+    const payrollMap = new Map(payrolls.map(p => [p.code, p]));
+
+    const results = employees.map(emp => {
+      const payroll = payrollMap.get(emp.code) || {};
+      return {
+        code: emp.code,
+        name: emp.name,
+        allowed_leaves: emp.allowed_leaves || 0,
+        leaves_balance: emp.leaves_balance || 0,
+        leaves_adjustment: payroll.leaves_adjustment || 0
+      };
+    });
+
+    res.json({ success: true, data: results });
+  } catch (error) {
+    console.error("❌ Leaves info error:", error);
+    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
+
+exports.updateLeaveAdjustment = async (req, res) => {
+  try {
+    const { code, month, year, adjustment } = req.body;
+
+    if (!code || !month || !year || adjustment === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "code, month, year and adjustment are required"
+      });
+    }
+
+    // Find existing payroll
+    const payroll = await Payroll.findOne({ code, month, year });
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: "Payroll not found" });
+    }
+
+    // Update leave_adjustment
+    payroll.leaves_adjustment = adjustment;
+
+    // --- Recalculate salary using SAME formula as bulkGeneratePayroll ---
+    const basicSalary = payroll.basic_salary || 0;
+    const dailyRate = basicSalary / 30;
+
+    // Absent = workingDays - daysPresent
+    const absentDays = (payroll.working_days || 0) - (payroll.days_present || 0);
+
+    // Total leaves = absent + approved leaves - adjustment
+    const effectiveLeaves = absentDays + adjustment;
+
+    // Additions / Deductions
+    const additionsTotal = (payroll.additions || []).reduce((a, b) => a + (b.amount || 0), 0);
+    const deductionsTotal = (payroll.deductions || []).reduce((a, b) => a + (b.amount || 0), 0);
+
+    // Final salaries
+    const netSalary = basicSalary - (dailyRate * effectiveLeaves) + additionsTotal + deductionsTotal;
+    const grossSalary = basicSalary - (dailyRate * absentDays);
+
+    payroll.net_salary = Math.round(netSalary);
+    payroll.gross_salary = Math.round(grossSalary);
+    payroll.updatedAt = new Date();
+
+    await payroll.save();
+
+    res.json({
+      success: true,
+      message: "Leave adjustment updated and payroll recalculated",
+      data: {
+        code: payroll.code,
+        month: payroll.month,
+        year: payroll.year,
+        leaves_adjustment: payroll.leaves_adjustment,
+        gross_salary: payroll.gross_salary,
+        net_salary: payroll.net_salary
+      }
+    });
+  } catch (error) {
+    console.error("❌ updateLeaveAdjustment error:", error);
+    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
 
 
 
