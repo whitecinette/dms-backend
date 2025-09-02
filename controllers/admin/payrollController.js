@@ -990,6 +990,80 @@ exports.updateLeaveAdjustment = async (req, res) => {
   }
 };
 
+exports.bulkUpdateLeaves = async (req, res) => {
+  try {
+    const { updates } = req.body;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ success: false, message: "updates array is required" });
+    }
+
+    let payrollOps = [];
+    let metaOps = [];
+
+    for (const u of updates) {
+      // --- Payroll updates ---
+      if (u.month && u.year && u.leaves_adjustment !== undefined) {
+        payrollOps.push(async () => {
+          const payroll = await Payroll.findOne({ code: u.code, month: u.month, year: u.year });
+          if (payroll) {
+            payroll.leaves_adjustment = u.leaves_adjustment;
+
+            // same recalculation as updateLeaveAdjustment
+            const basicSalary = payroll.basic_salary || 0;
+            const dailyRate = basicSalary / 30;
+            const absentDays = (payroll.working_days || 0) - (payroll.days_present || 0);
+            const effectiveLeaves = absentDays + u.leaves_adjustment;
+
+            const additionsTotal = (payroll.additions || []).reduce((a, b) => a + (b.amount || 0), 0);
+            const deductionsTotal = (payroll.deductions || []).reduce((a, b) => a + (b.amount || 0), 0);
+
+            payroll.net_salary = Math.round(
+              basicSalary - (dailyRate * effectiveLeaves) + additionsTotal + deductionsTotal
+            );
+            payroll.gross_salary = Math.round(
+              basicSalary - (dailyRate * absentDays)
+            );
+
+            payroll.updatedAt = new Date();
+            await payroll.save();
+          }
+        });
+      }
+
+      // --- Metadata updates ---
+      let metaFields = {};
+      if (u.allowed_leaves !== undefined) metaFields.allowed_leaves = u.allowed_leaves;
+      if (u.leaves_balance !== undefined) metaFields.leaves_balance = u.leaves_balance;
+
+      if (Object.keys(metaFields).length > 0) {
+        metaOps.push({
+          updateOne: {
+            filter: { code: u.code },
+            update: { $set: metaFields }
+          }
+        });
+      }
+    }
+
+    // Run all payroll ops in parallel
+    await Promise.all(payrollOps.map(fn => fn()));
+
+    // Bulk update metadata if any
+    if (metaOps.length > 0) {
+      await MetaData.bulkWrite(metaOps);
+    }
+
+    res.json({
+      success: true,
+      message: "Leaves updated successfully for multiple users"
+    });
+  } catch (err) {
+    console.error("❌ bulkUpdateLeaves error:", err);
+    res.status(500).json({ success: false, message: "Internal server error", error: err.message });
+  }
+};
+
 
 
 

@@ -495,3 +495,46 @@ exports.cleanExtraTimestamps = async (req, res) => {
 };
 
 
+exports.bulkUpdateLeavesConfig = async (req, res) => {
+  try {
+    const { updates } = req.body;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Updates array is required"
+      });
+    }
+
+    // Build bulk operations
+    const bulkOps = updates.map((u) => {
+      let setFields = {};
+      if (u.allowed_leaves !== undefined) setFields.allowed_leaves = u.allowed_leaves;
+      if (u.leaves_balance !== undefined) setFields.leaves_balance = u.leaves_balance;
+
+      return {
+        updateOne: {
+          filter: { code: u.code },
+          update: { $set: setFields }
+        }
+      };
+    });
+
+    const result = await MetaData.bulkWrite(bulkOps);
+
+    res.json({
+      success: true,
+      message: "Leaves configuration updated for multiple employees",
+      result
+    });
+  } catch (error) {
+    console.error("❌ bulkUpdateLeavesConfig error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+
