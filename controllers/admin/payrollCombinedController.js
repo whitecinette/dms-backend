@@ -129,6 +129,7 @@ exports.getAttendanceMatrix = async (req, res) => {
         code: user.code,
         position: user.position,
         firm: firmName,
+        firm_code: firmMap[user.code] || null,
         days: dailyStatus,
       });
     }
