@@ -1,5 +1,5 @@
 const express = require("express");
-const { bulkGeneratePayroll, getAllPayrolls, downloadPayroll, uploadPayrollThroughCSV, getPayrollSummary, getLeavesInfo, updateLeaveAdjustment, bulkUpdateLeaves } = require("../controllers/admin/payrollController");
+const { bulkGeneratePayroll, getAllPayrolls, downloadPayroll, uploadPayrollThroughCSV, getPayrollSummary, getLeavesInfo, updateLeaveAdjustment, bulkUpdateLeaves, getUserExpenses } = require("../controllers/admin/payrollController");
 const router = express.Router();
 const { upload } = require('../services/fileUpload');
 
@@ -20,6 +20,8 @@ router.get("/leaves-info", getLeavesInfo);
 router.put("/leave-adjustment", updateLeaveAdjustment);
 
 router.put("/leaves/bulk-update", bulkUpdateLeaves);
+
+router.get("/expenses", getUserExpenses);
 
 
 

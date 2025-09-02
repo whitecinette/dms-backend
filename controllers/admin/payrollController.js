@@ -10,6 +10,7 @@ const Firm = require("../../model/Firm");
 const csvParser = require("csv-parser");
 const { Parser } = require("json2csv");
 const { Readable } = require("stream");
+const User = require("../../model/User");
 
 // punch out considered in payroll generate
 // exports.bulkGeneratePayroll = async (req, res) => {
@@ -1063,6 +1064,121 @@ exports.bulkUpdateLeaves = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error", error: err.message });
   }
 };
+
+
+exports.getUserExpenses = async (req, res) => {
+  try {
+    console.log("Expem")
+    let { month, year } = req.query;
+
+    if (!month || !year) {
+      return res.status(400).json({ success: false, message: "Month and year are required" });
+    }
+
+    month = Number(month);
+    year = Number(year);
+
+    // Months: current, -1, -2
+    const months = [
+      { year, month }, // current
+      getPrevMonth(year, month, 1), // m-1
+      getPrevMonth(year, month, 2), // m-2
+    ];
+
+    // Fetch payrolls for these months
+    const payrolls = await Payroll.find({
+      $or: months.map(({ year, month }) => ({ year, month })),
+    }).lean();
+
+    // Build map for user metadata
+    const codes = [...new Set(payrolls.map(p => p.code))];
+    const users = await User.find({ code: { $in: codes } }).lean();
+    const metadata = await MetaData.find({ code: { $in: codes } }).lean();
+    const firms = await Firm.find({}).lean();
+
+    const userMap = {};
+    for (const u of users) userMap[u.code] = u.name;
+    const firmMap = {};
+    for (const m of metadata) firmMap[m.code] = m.firm_code;
+    const firmNameMap = {};
+    for (const f of firms) firmNameMap[f.code] = f.name;
+
+    // Group payrolls by code
+    const result = [];
+    for (const code of codes) {
+      const userName = userMap[code] || "Unknown";
+      const firmCode = firmMap[code] || null;
+      const firmName = firmNameMap[firmCode] || "N/A";
+
+      const expenses = { additions: {}, deductions: {} };
+
+      for (let i = 0; i < months.length; i++) {
+        const { year, month } = months[i];
+        const key = i === 0 ? "current" : i === 1 ? "m1" : "m2";
+
+        const payroll = payrolls.find(p => p.code === code && p.year === year && p.month === month);
+
+        expenses.additions[key] = {
+          total: payroll?.additions?.reduce((sum, a) => sum + (a.amount || 0), 0) || 0,
+          list: payroll?.additions || [],
+        };
+
+        expenses.deductions[key] = {
+          total: payroll?.deductions?.reduce((sum, d) => sum + (d.amount || 0), 0) || 0,
+          list: payroll?.deductions || [],
+        };
+      }
+
+      result.push({
+        code,
+        name: userName,
+        firmCode,
+        firmName,
+        totalAdditions: {
+          current: expenses.additions.current.total,
+          m1: expenses.additions.m1.total,
+          m2: expenses.additions.m2.total,
+        },
+        totalDeductions: {
+          current: expenses.deductions.current.total,
+          m1: expenses.deductions.m1.total,
+          m2: expenses.deductions.m2.total,
+        },
+        additions: {
+          current: expenses.additions.current.list,
+          m1: expenses.additions.m1.list,
+          m2: expenses.additions.m2.list,
+        },
+        deductions: {
+          current: expenses.deductions.current.list,
+          m1: expenses.deductions.m1.list,
+          m2: expenses.deductions.m2.list,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "User expenses fetched successfully",
+      data: result,
+    });
+  } catch (err) {
+    console.error("❌ Error in getUserExpenses:", err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+// Helper function
+function getPrevMonth(year, month, offset) {
+  let newMonth = month - offset;
+  let newYear = year;
+  if (newMonth <= 0) {
+    newMonth += 12;
+    newYear -= 1;
+  }
+  return { year: newYear, month: newMonth };
+}
+
 
 
 
