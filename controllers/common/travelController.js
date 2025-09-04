@@ -6,11 +6,13 @@ const ActorCode = require("../../model/ActorCode");
 const User = require("../../model/User");
 const { emitWarning } = require("process");
 const path = require("path");
+const MetaData = require("../../model/MetaData");
+const Firm = require("../../model/Firm");
 
 exports.uploadBills = async (req, res) => {
   try {
     const { code } = req.user;
-    const { billType, isGenerated, remarks, amount } = req.body;
+    const { billType, isGenerated, remarks, amount, billDate } = req.body;
 
     if (!req.files || req.files.length === 0) {
       return res
@@ -67,6 +69,7 @@ exports.uploadBills = async (req, res) => {
       isGenerated: isGenerated || false,
       remarks: remarks || "",
       code: code,
+      billDate: billDate ? new Date(billDate) : new Date(),
     });
 
     await newBill.save();
@@ -127,27 +130,48 @@ exports.getTravelBills = async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Add employee name from ActorCode
+    // Add employee + firm details
     let formattedBills = await Promise.all(
       bills.map(async (bill) => {
         const actor = await ActorCode.findOne(
           { code: bill.code },
           "name"
         ).lean();
+
+        const meta = await MetaData.findOne(
+          { code: bill.code },
+          "firm_code system_code"
+        ).lean();
+
+
+      let firmName = null;
+      if (meta?.firm_code) {
+        const firm = await Firm.findOne(
+          { code: meta.firm_code },
+          "name" // ✅ this is the field you want
+        ).lean();
+        firmName = firm?.name || null;
+      }
+
         return {
           ...bill,
+          billDate: bill.billDate, // already stored in Travel
           employeeName: actor?.name || "Unknown",
           employeeCode: bill.code,
+          firmCode: meta?.firm_code || null,
+          firmName: firmName || "Unknown Firm",
+          system_code: meta?.system_code || null,
         };
       })
     );
 
-    // Post-pagination search (optional)
+    // Post-pagination search
     if (search) {
       formattedBills = formattedBills.filter(
         (bill) =>
           bill.employeeName?.toLowerCase().includes(search.toLowerCase()) ||
-          bill.employeeCode?.toLowerCase().includes(search.toLowerCase())
+          bill.employeeCode?.toLowerCase().includes(search.toLowerCase()) ||
+          bill.firmName?.toLowerCase().includes(search.toLowerCase())
       );
     }
 
@@ -164,6 +188,91 @@ exports.getTravelBills = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+
+
+// exports.getTravelBills = async (req, res) => {
+//   try {
+//     const { role } = req.user;
+//     let {
+//       search,
+//       status,
+//       billType,
+//       fromDate,
+//       toDate,
+//       page = 1,
+//       limit = 10,
+//     } = req.query;
+
+//     page = parseInt(page);
+//     limit = parseInt(limit);
+//     const skip = (page - 1) * limit;
+
+//     const query = {};
+
+//     // HR can only see employee bills
+//     if (role === "hr") {
+//       const employees = await User.find({ role: "employee" }, "code").lean();
+//       const employeeCodes = employees.map((emp) => emp.code);
+//       query.code = { $in: employeeCodes };
+//     }
+
+//     // Apply filters
+//     if (status) query.status = status;
+//     if (billType) query.billType = billType;
+//     if (fromDate && toDate) {
+//       query.createdAt = {
+//         $gte: new Date(fromDate),
+//         $lte: new Date(toDate),
+//       };
+//     }
+
+//     // Get total records
+//     const totalCount = await Travel.countDocuments(query);
+
+//     // Fetch paginated bills
+//     const bills = await Travel.find(query)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(limit)
+//       .lean();
+
+//     // Add employee name from ActorCode
+//     let formattedBills = await Promise.all(
+//       bills.map(async (bill) => {
+//         const actor = await ActorCode.findOne(
+//           { code: bill.code },
+//           "name"
+//         ).lean();
+//         return {
+//           ...bill,
+//           employeeName: actor?.name || "Unknown",
+//           employeeCode: bill.code,
+//         };
+//       })
+//     );
+
+//     // Post-pagination search (optional)
+//     if (search) {
+//       formattedBills = formattedBills.filter(
+//         (bill) =>
+//           bill.employeeName?.toLowerCase().includes(search.toLowerCase()) ||
+//           bill.employeeCode?.toLowerCase().includes(search.toLowerCase())
+//       );
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Travel bills retrieved successfully",
+//       currentPage: page,
+//       totalPages: Math.ceil(totalCount / limit),
+//       totalRecords: totalCount,
+//       bills: formattedBills,
+//     });
+//   } catch (error) {
+//     console.error("Error retrieving travel bills:", error);
+//     res.status(500).json({ success: false, message: "Internal Server Error" });
+//   }
+// };
 
 exports.getBillsForEmp = async (req, res) => {
   try {

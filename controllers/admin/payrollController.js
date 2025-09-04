@@ -82,20 +82,24 @@ exports.bulkGeneratePayroll = async (req, res) => {
       });
 
       // Expenses
-      const expenses = await Travel.find({
-        code,
-        createdAt: { $gte: startDate, $lte: endDate },
-        status: "approved"
-      }).lean();
+      // const expenses = await Travel.find({
+      //   code,
+      //   createdAt: { $gte: startDate, $lte: endDate },
+      //   status: "approved"
+      // }).lean();
+
+      // let additions = [];
+
+      // expenses.forEach(exp => {
+      //   additions.push({
+      //     name: `${exp.billType} Expenses`,
+      //     amount: exp.amount || 0,
+      //     remark: exp.remarks || ""
+      //   });
+      // });
 
       let additions = [];
-      expenses.forEach(exp => {
-        additions.push({
-          name: `${exp.billType} Expenses`,
-          amount: exp.amount || 0,
-          remark: exp.remarks || ""
-        });
-      });
+
 
         // week offs/sundays
         const daysInMonth = new Date(year, month, 0).getDate(); // total days in month

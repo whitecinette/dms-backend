@@ -9,7 +9,10 @@ const TravelBillSchema = new mongoose.Schema(
   },  
     billType: {
       type: String,
-      enum: ['Restaurant', 'Travel', 'Hotel', 'Transport', 'Fuel', 'Other'],
+      required: true,
+    },
+    billDate: {
+      type: Date,
       required: true,
     },
     billImages: {
