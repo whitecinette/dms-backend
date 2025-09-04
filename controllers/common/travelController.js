@@ -8,6 +8,7 @@ const { emitWarning } = require("process");
 const path = require("path");
 const MetaData = require("../../model/MetaData");
 const Firm = require("../../model/Firm");
+const Payroll = require("../../model/Payroll");
 
 exports.uploadBills = async (req, res) => {
   try {
@@ -327,7 +328,6 @@ exports.editTravelBill = async (req, res) => {
     const { status } = req.body;
     const { id } = req.params;
 
-    // Validate required inputs
     if (!status || !id) {
       return res.status(400).json({
         success: false,
@@ -344,16 +344,10 @@ exports.editTravelBill = async (req, res) => {
       });
     }
 
-    // Prepare update object
-    const updateData = {
-      status,
-      updatedAt: new Date(),
-    };
-
-    // Find and update in one operation
+    // Update bill status
     const bill = await Travel.findByIdAndUpdate(
       id,
-      { $set: updateData },
+      { $set: { status, updatedAt: new Date() } },
       { new: true, runValidators: true }
     );
 
@@ -363,6 +357,51 @@ exports.editTravelBill = async (req, res) => {
         status: "error",
         message: "Travel bill not found",
       });
+    }
+
+    // ✅ If status is "approved", update payroll additions + net salary
+    if (status === "approved") {
+      const billDate = new Date(bill.billDate);
+      const year = billDate.getUTCFullYear();
+      const month = billDate.getUTCMonth() + 1; // JS months are 0-based
+
+      const code = bill.code;
+      const payroll = await Payroll.findOne({ code, month, year });
+
+      if (payroll) {
+        // normalize billType → lowercase with underscores
+        const additionName = bill.billType.toLowerCase().replace(/\s+/g, "_");
+
+        let additions = payroll.additions || [];
+        let existing = additions.find((a) => a.name === additionName);
+
+        if (existing) {
+          existing.amount += bill.amount;
+        } else {
+          additions.push({
+            name: additionName,
+            amount: bill.amount,
+            remark: bill.remarks || "",
+          });
+        }
+
+        payroll.additions = additions;
+
+        // ✅ Recalculate only netSalary
+        const basicSalary = payroll.basic_salary || 0;
+        const dailyRate = basicSalary / 30;
+        const absentDays = (payroll.working_days || 0) - (payroll.days_present || 0);
+        const effectiveLeaves = absentDays + (payroll.leaves_adjustment || 0);
+
+        const additionsTotal = additions.reduce((a, b) => a + (b.amount || 0), 0);
+        const deductionsTotal = (payroll.deductions || []).reduce((a, b) => a + (b.amount || 0), 0);
+
+        payroll.net_salary =
+          basicSalary - dailyRate * effectiveLeaves + additionsTotal - deductionsTotal;
+
+        payroll.updatedAt = new Date();
+        await payroll.save();
+      }
     }
 
     return res.status(200).json({
@@ -380,3 +419,151 @@ exports.editTravelBill = async (req, res) => {
     });
   }
 };
+
+
+// exports.editTravelBill = async (req, res) => {
+//   try {
+//     const { status } = req.body;
+//     const { id } = req.params;
+
+//     if (!status || !id) {
+//       return res.status(400).json({
+//         success: false,
+//         status: "error",
+//         message: "Status and ID are required",
+//       });
+//     }
+
+//     if (status === "pending") {
+//       return res.status(400).json({
+//         success: false,
+//         status: "warning",
+//         message: "Cannot change status to pending",
+//       });
+//     }
+
+//     // Update bill status
+//     const bill = await Travel.findByIdAndUpdate(
+//       id,
+//       { $set: { status, updatedAt: new Date() } },
+//       { new: true, runValidators: true }
+//     );
+
+//     if (!bill) {
+//       return res.status(404).json({
+//         success: false,
+//         status: "error",
+//         message: "Travel bill not found",
+//       });
+//     }
+
+//     // ✅ If status is "approved", update payroll
+//     if (status === "approved") {
+//       const billDate = new Date(bill.billDate);
+//       console.log("bill date: ", billDate)
+//       const year = billDate.getUTCFullYear();
+//       const month = billDate.getUTCMonth() + 1; // 0-based in JS → 0 = Jan, 8 = Sep
+//       console.log("month: ", month)
+
+//       const code = bill.code;
+//       const payroll = await Payroll.findOne({ code, month, year });
+
+//       if (payroll) {
+//         // normalize billType → lowercase with underscores
+//         const additionName = bill.billType.toLowerCase().replace(/\s+/g, "_");
+
+//         let additions = payroll.additions || [];
+//         let existing = additions.find((a) => a.name === additionName);
+
+//         if (existing) {
+//           existing.amount += bill.amount; // ✅ add to existing
+//         } else {
+//           additions.push({
+//             name: additionName,
+//             amount: bill.amount,
+//             remark: bill.remarks || "",
+//           });
+//         }
+
+//         payroll.additions = additions;
+//         payroll.updatedAt = new Date();
+//         console.log("payrooll: ", payroll)
+//         await payroll.save();
+//       }
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       status: "success",
+//       message: "Travel bill updated successfully",
+//       data: bill,
+//     });
+//   } catch (error) {
+//     console.error("Error editing travel bill:", error);
+//     return res.status(500).json({
+//       success: false,
+//       status: "error",
+//       message: "Internal server error",
+//     });
+//   }
+// };
+
+
+// exports.editTravelBill = async (req, res) => {
+//   try {
+//     const { status } = req.body;
+//     const { id } = req.params;
+
+//     // Validate required inputs
+//     if (!status || !id) {
+//       return res.status(400).json({
+//         success: false,
+//         status: "error",
+//         message: "Status and ID are required",
+//       });
+//     }
+
+//     if (status === "pending") {
+//       return res.status(400).json({
+//         success: false,
+//         status: "warning",
+//         message: "Cannot change status to pending",
+//       });
+//     }
+
+//     // Prepare update object
+//     const updateData = {
+//       status,
+//       updatedAt: new Date(),
+//     };
+
+//     // Find and update in one operation
+//     const bill = await Travel.findByIdAndUpdate(
+//       id,
+//       { $set: updateData },
+//       { new: true, runValidators: true }
+//     );
+
+//     if (!bill) {
+//       return res.status(404).json({
+//         success: false,
+//         status: "error",
+//         message: "Travel bill not found",
+//       });
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       status: "success",
+//       message: "Travel bill updated successfully",
+//       data: bill,
+//     });
+//   } catch (error) {
+//     console.error("Error editing travel bill:", error);
+//     return res.status(500).json({
+//       success: false,
+//       status: "error",
+//       message: "Internal server error",
+//     });
+//   }
+// };
