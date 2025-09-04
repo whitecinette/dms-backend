@@ -188,7 +188,6 @@ exports.bulkGeneratePayroll = async (req, res) => {
   }
 };
 
-
 exports.getAllPayrolls = async (req, res) => {
   try {
     console.log("gen pay")
@@ -287,8 +286,6 @@ exports.getAllPayrolls = async (req, res) => {
     });
   }
 };
-
-
 
 // =====================
 // 1. DOWNLOAD PAYROLL
@@ -579,7 +576,6 @@ exports.getPayrollSummary = async (req, res) => {
   }
 };
 
-
 exports.getLeavesInfo = async (req, res) => {
   try {
     const { month, year, firmCode } = req.query;
@@ -624,7 +620,6 @@ exports.getLeavesInfo = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
 };
-
 
 exports.updateLeaveAdjustment = async (req, res) => {
   try {
@@ -762,7 +757,6 @@ exports.bulkUpdateLeaves = async (req, res) => {
   }
 };
 
-
 exports.getUserExpenses = async (req, res) => {
   try {
     console.log("Expem")
@@ -875,6 +869,347 @@ function getPrevMonth(year, month, offset) {
   }
   return { year: newYear, month: newMonth };
 }
+
+// 📊 API: Payroll Overview (KPI Cards)
+exports.getPayrollOverviewForCharts = async (req, res) => {
+  try {
+    const { month, year } = req.body;
+
+    if (!month || !year) {
+      return res.status(400).json({ success: false, message: "month and year are required" });
+    }
+
+    // Helper to compute totals for any month/year
+    const computeTotals = async (m, y) => {
+      const data = await Payroll.find({ month: m, year: y });
+
+      const additions = data.reduce(
+        (sum, payroll) =>
+          sum + payroll.additions.reduce((a, item) => a + (item.amount || 0), 0),
+        0
+      );
+
+      const deductions = data.reduce(
+        (sum, payroll) =>
+          sum + payroll.deductions.reduce((a, item) => a + (item.amount || 0), 0),
+        0
+      );
+
+      return {
+        additions,
+        deductions,
+        net: additions - deductions,
+      };
+    };
+
+    // Current month
+    const current = await computeTotals(month, year);
+
+    // Previous month (handle year wrap)
+    let prevMonth = month - 1;
+    let prevYear = year;
+    if (prevMonth === 0) {
+      prevMonth = 12;
+      prevYear = year - 1;
+    }
+    const prev = await computeTotals(prevMonth, prevYear);
+
+    // 2 months ago (handle year wrap)
+    let prev2Month = month - 2;
+    let prev2Year = year;
+    if (prev2Month <= 0) {
+      prev2Month += 12;
+      prev2Year = year - 1;
+    }
+    const prev2 = await computeTotals(prev2Month, prev2Year);
+
+    // % change vs last month
+    const changePercent =
+      prev.net !== 0 ? (((current.net - prev.net) / prev.net) * 100).toFixed(2) : 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totals: {
+          additions: current.additions,
+          deductions: current.deductions,
+          net: current.net,
+          changePercent: parseFloat(changePercent),
+          additionsTrend: [prev2.additions, prev.additions, current.additions],
+          deductionsTrend: [prev2.deductions, prev.deductions, current.deductions],
+          netTrend: [prev2.net, prev.net, current.net],
+          changeTrend: [
+            prev2.net !== 0 ? (((prev.net - prev2.net) / prev2.net) * 100).toFixed(2) : 0,
+            prev.net !== 0 ? (((current.net - prev.net) / prev.net) * 100).toFixed(2) : 0,
+            parseFloat(changePercent),
+          ],
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error in getPayrollOverview:", error);
+    res.status(500).json({ success: false, message: "Server error", error });
+  }
+};
+
+exports.getPayrollExpenseInsightsForCharts = async (req, res) => {
+  try {
+    const { month, year } = req.body;
+
+    if (!month || !year) {
+      return res.status(400).json({ success: false, message: "month and year are required" });
+    }
+
+    // Helper → previous 2 months + current
+    const monthsToFetch = [];
+    for (let i = 2; i >= 0; i--) {
+      let m = month - i;
+      let y = year;
+      if (m <= 0) {
+        m += 12;
+        y -= 1;
+      }
+      monthsToFetch.push({ month: m, year: y });
+    }
+
+    // Fetch payroll data for these 3 months
+    const payrollData = await Payroll.find({
+      $or: monthsToFetch.map(m => ({ month: m.month, year: m.year }))
+    });
+
+    // Utility → sum amounts grouped by category
+    const aggregateByCategory = (data) => {
+      const result = {};
+      data.forEach(p => {
+        (p.additions || []).forEach(a => {
+          if (!a.name || !a.amount) return;
+          result[a.name] = (result[a.name] || 0) + a.amount;
+        });
+        (p.deductions || []).forEach(d => {
+          if (!d.name || !d.amount) return;
+          result[d.name] = (result[d.name] || 0) + d.amount;
+        });
+      });
+      return result;
+    };
+
+    // --- Current Month Breakdown (fetch directly for selected month)
+    const currentMonthData = await Payroll.find({ month, year });
+    const currentBreakdown = aggregateByCategory(currentMonthData);
+
+    // --- Expense Trends (3 months stacked)
+    const trendsRaw = monthsToFetch.map(({ month: m, year: y }) => {
+      const monthlyData = payrollData.filter(p => p.month === m && p.year === y);
+      const monthlyAgg = aggregateByCategory(monthlyData);
+      return {
+        month: `${y}-${m}`,
+        ...monthlyAgg
+      };
+    });
+
+    // Normalize → fill missing categories with 0
+    const allCategories = new Set();
+    trendsRaw.forEach(t => {
+      Object.keys(t).forEach(k => {
+        if (k !== "month") allCategories.add(k);
+      });
+    });
+
+    const trends = trendsRaw.map(t => {
+      const filled = {};
+      allCategories.forEach(cat => {
+        filled[cat] = t[cat] || 0;
+      });
+      return { month: t.month, ...filled };
+    });
+
+    // --- Top 5 (based only on selected month)
+    const topExpenses = Object.entries(currentBreakdown)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        currentBreakdown,
+        trends,
+        topExpenses
+      }
+    });
+  } catch (error) {
+    console.error("Error in getPayrollExpenseInsights:", error);
+    res.status(500).json({ success: false, message: "Server error", error });
+  }
+};
+
+
+// exports.getPayrollExpenseInsightsForCharts = async (req, res) => {
+//   try {
+//     const { month, year } = req.body;
+
+//     if (!month || !year) {
+//       return res.status(400).json({ success: false, message: "month and year are required" });
+//     }
+
+//     // Helper → previous 2 months + current
+//     const monthsToFetch = [];
+//     for (let i = 2; i >= 0; i--) {
+//       let m = month - i;
+//       let y = year;
+//       if (m <= 0) {
+//         m += 12;
+//         y -= 1;
+//       }
+//       monthsToFetch.push({ month: m, year: y });
+//     }
+
+//     // Fetch payroll data for these 3 months
+//     const payrollData = await Payroll.find({
+//       $or: monthsToFetch.map(m => ({ month: m.month, year: m.year }))
+//     });
+
+//     // Utility → sum amounts grouped by category
+//     const aggregateByCategory = (data) => {
+//       const result = {};
+//       data.forEach(p => {
+//         (p.additions || []).forEach(a => {
+//           if (!a.name || !a.amount) return;
+//           result[a.name] = (result[a.name] || 0) + a.amount;
+//         });
+//         (p.deductions || []).forEach(d => {
+//           if (!d.name || !d.amount) return;
+//           result[d.name] = (result[d.name] || 0) + d.amount;
+//         });
+//       });
+//       return result;
+//     };
+
+//     // --- Current Month Breakdown (fetch directly for selected month)
+//     const currentMonthData = await Payroll.find({ month, year });
+//     const currentBreakdown = aggregateByCategory(currentMonthData);
+
+//     // --- Expense Trends (3 months stacked)
+//     const trends = monthsToFetch.map(({ month: m, year: y }) => {
+//       const monthlyData = payrollData.filter(p => p.month === m && p.year === y);
+//       const monthlyAgg = aggregateByCategory(monthlyData);
+//       return {
+//         month: `${y}-${m}`,
+//         ...monthlyAgg
+//       };
+//     });
+
+//     // --- Top 5 (based only on selected month)
+//     const topExpenses = Object.entries(currentBreakdown)
+//       .map(([name, value]) => ({ name, value }))
+//       .sort((a, b) => b.value - a.value)
+//       .slice(0, 5);
+
+//       //       console.log("cb: ", currentBreakdown);
+// //       console.log("trends: ", trends);
+// //       console.log("topExpenses: ", topExpenses);
+
+//     return res.status(200).json({
+//       success: true,
+//       data: {
+//         currentBreakdown,
+//         trends,
+//         topExpenses
+//       }
+//     });
+//   } catch (error) {
+//     console.error("Error in getPayrollExpenseInsights:", error);
+//     res.status(500).json({ success: false, message: "Server error", error });
+//   }
+// };
+
+
+
+
+// exports.getPayrollExpenseInsightsForCharts = async (req, res) => {
+//   try {
+//     const { month, year } = req.body;
+
+//     if (!month || !year) {
+//       return res.status(400).json({ success: false, message: "month and year are required" });
+//     }
+
+//     // Helper → previous 2 months (handle year boundaries)
+//     const monthsToFetch = [];
+//     for (let i = 2; i >= 0; i--) {
+//       let m = month - i;
+//       let y = year;
+//       if (m <= 0) {
+//         m += 12;
+//         y -= 1;
+//       }
+//       monthsToFetch.push({ month: m, year: y });
+//     }
+
+//     // Fetch payroll data for these 3 months
+//     const payrollData = await Payroll.find({
+//       $or: monthsToFetch.map(m => ({ month: m.month, year: m.year }))
+//     });
+
+//     // Utility → sum amounts grouped by category
+//     const aggregateByCategory = (data) => {
+//       const result = {};
+//       data.forEach(p => {
+//         (p.additions || []).forEach(a => {
+//           if (!a.name || !a.amount) return;
+//           result[a.name] = (result[a.name] || 0) + a.amount;
+//         });
+//         (p.deductions || []).forEach(d => {
+//           if (!d.name || !d.amount) return;
+//           result[d.name] = (result[d.name] || 0) + d.amount;
+//         });
+//       });
+//       return result;
+//     };
+
+//     // --- Current Month Breakdown ---
+//     const currentMonthData = payrollData.filter(
+//       p => p.month === month && p.year === year
+//     );
+//     const currentBreakdown = aggregateByCategory(currentMonthData);
+
+//     // --- Expense Trends (3 months stacked) ---
+//     const trends = monthsToFetch.map(({ month: m, year: y }) => {
+//       const monthlyData = payrollData.filter(p => p.month === m && p.year === y);
+//       const monthlyAgg = aggregateByCategory(monthlyData);
+//       return {
+//         month: `${y}-${m}`, // e.g. "2025-8"
+//         ...monthlyAgg
+//       };
+//     });
+
+//     // --- Top 5 Expense Types ---
+//     const overallAgg = aggregateByCategory(payrollData);
+//     const topExpenses = Object.entries(overallAgg)
+//       .map(([name, value]) => ({ name, value }))
+//       .sort((a, b) => b.value - a.value)
+//       .slice(0, 5);
+
+//       console.log("cb: ", currentBreakdown);
+//       console.log("trends: ", trends);
+//       console.log("topExpenses: ", topExpenses);
+
+//     return res.status(200).json({
+//       success: true,
+//       data: {
+//         currentBreakdown, // { transport_expenses: 4000, bonus: 2500, etc. }
+//         trends,           // [{ month:"2025-6", transport:4000, bonus:2000,...}, {...}]
+//         topExpenses       // [{ name:"transport_expenses", value:4000 }, ...]
+//       }
+//     });
+//   } catch (error) {
+//     console.error("Error in getPayrollExpenseInsights:", error);
+//     res.status(500).json({ success: false, message: "Server error", error });
+//   }
+// };
+
+
+
 
 
 
