@@ -1,7 +1,7 @@
 const express = require('express');
 const { upload } = require('../services/fileUpload');
 const { uploadSalesDataThroughCSV, getSalesDataToAdmin } = require('../controllers/admin/salesDataController');
-const { getSalesReportByCode, getDashboardSalesMetricsByCode, getSalesReportForUser,  getDashboardSalesMetricsForUser, masterSalesAPI, getSalesWithHierarchyCSV, getSalesReportProductWise } = require('../controllers/common/salesDataController');
+const { getSalesReportByCode, getDashboardSalesMetricsByCode, getSalesReportForUser,  getDashboardSalesMetricsForUser, masterSalesAPI, getSalesWithHierarchyCSV, getSalesReportProductWise, fixAbove100KSegment } = require('../controllers/common/salesDataController');
 const { userAuth, authMiddleware, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
@@ -22,6 +22,8 @@ router.post("/user/sales-data/dashboard/metrics/self", userAuth, getDashboardSal
 router.post("/user/sales-data/product-wise", userAuth, getSalesReportProductWise);
 
 
-router.get("/admin/getSalesRecords", adminOrSuperAdminAuth, getSalesDataToAdmin)
+router.get("/admin/getSalesRecords", adminOrSuperAdminAuth, getSalesDataToAdmin);
+
+router.get("/super-admin/fix-100k-in-mddwise", fixAbove100KSegment);
 
 module.exports = router;

@@ -696,6 +696,281 @@ exports.getSubordinatesForUser = async (req, res) => {
   }
 };
 
+// controllers/hierarchy.controller.js
+
+exports.getHierarchyDataStats = async (req, res) => {
+  try {
+    console.log("Lazy hierarchy API reached");
+
+    const { code } = req.user;
+    const {
+      filter_type = "value",
+      start_date,
+      end_date,
+      position,       // e.g. "division", "asm", "mdd", "tse", "dealer", "district", ...
+      parent_code,
+      page = 1,
+      limit = 50
+    } = req.body;
+
+    if (!code || !start_date || !end_date || !position) {
+      return res.status(400).json({
+        success: false,
+        message: "Code, start_date, end_date, and position are required.",
+      });
+    }
+
+    // === STEP 1: Resolve user + hierarchy
+    const actor = await ActorCode.findOne({ code });
+    if (!actor)
+      return res.status(404).json({ success: false, message: "Actor not found." });
+
+    const { role } = actor;
+
+    const actorHierarchy = await ActorTypesHierarchy.findOne({
+      name: "default_sales_flow",
+    });
+    if (!actorHierarchy || !actorHierarchy.hierarchy) {
+      return res
+        .status(500)
+        .json({ success: false, message: "Hierarchy data not found." });
+    }
+
+    const allPositions = actorHierarchy.hierarchy;
+    console.log("All positions: ", allPositions);
+
+    // === STEP 2: Collect hierarchy entries
+    let hierarchyEntries = [];
+    if (parent_code === "SPD") {
+      // Special case: SPD = all entries where mdd != "4782323"
+      hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+        mdd: { $ne: "4782323" },
+      });
+    } else if (parent_code === "DMDD") {
+      // Special case: DMDD = all entries where mdd == "4782323"
+      hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+        mdd: "4782323",
+      });
+    } else if (parent_code) {
+      hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+        $or: allPositions.map((pos) => ({ [pos]: parent_code })),
+      });
+    } else if (["admin", "super_admin"].includes(role)) {
+      hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+      });
+    } else {
+      hierarchyEntries = await HierarchyEntries.find({ [actor.position]: code });
+    }
+
+    // === STEP 3: Special case for "division" (SPD vs DMDD totals)
+    if (position === "division") {
+      const spdEntries = hierarchyEntries.filter(e => e.mdd && e.mdd !== "4782323");
+      const dmddEntries = hierarchyEntries.filter(e => e.mdd === "4782323");
+
+      const spdDealers = [...new Set(spdEntries.map(e => e.dealer).filter(Boolean))];
+      const dmddDealers = [...new Set(dmddEntries.map(e => e.dealer).filter(Boolean))];
+
+      // === Date windows
+      const startDate = new Date(start_date);
+      startDate.setUTCHours(0, 0, 0, 0);
+      const endDate = new Date(end_date);
+      endDate.setUTCHours(0, 0, 0, 0);
+
+      const lmtdStartDate = new Date(startDate);
+      lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+      const lmtdEndDate = new Date(endDate);
+      lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+      // === Aggregation helper
+      const aggSales = async (dealers, from, to) => {
+        if (dealers.length === 0) return 0;
+        const res = await SalesData.aggregate([
+          {
+            $match: {
+              buyer_code: { $in: dealers },
+              sales_type: "Sell Out",
+              date: { $gte: from, $lte: to },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
+              },
+            },
+          },
+        ]);
+        return res.length > 0 ? res[0].total : 0;
+      };
+
+      const spd_mtd = await aggSales(spdDealers, startDate, endDate);
+      const spd_lmtd = await aggSales(spdDealers, lmtdStartDate, lmtdEndDate);
+      const dmdd_mtd = await aggSales(dmddDealers, startDate, endDate);
+      const dmdd_lmtd = await aggSales(dmddDealers, lmtdStartDate, lmtdEndDate);
+
+      console.log("spd mtd: ", spd_mtd);
+
+      const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+      return res.status(200).json({
+        success: true,
+        position: "division",
+        subordinates: [
+          {
+            code: "SPD",
+            name: "SPD",
+            position: "division",
+            mtd_sell_out: spd_mtd,
+            lmtd_sell_out: spd_lmtd,
+            sell_out_growth: calcGrowth(spd_mtd, spd_lmtd).toFixed(2),
+          },
+          {
+            code: "DMDD",
+            name: "DMDD",
+            position: "division",
+            mtd_sell_out: dmdd_mtd,
+            lmtd_sell_out: dmdd_lmtd,
+            sell_out_growth: calcGrowth(dmdd_mtd, dmdd_lmtd).toFixed(2),
+          }
+        ],
+      });
+    }
+
+    // === STEP 4: For other positions (ASM, MDD, etc.)
+    const filteredEntries = hierarchyEntries.filter((entry) => entry[position]);
+    let subCodes = [...new Set(filteredEntries.map((entry) => entry[position]))];
+    console.log("Filtered: ", filteredEntries);
+
+    // Pagination (for dealers only)
+    let paginated = false;
+    if (position === "dealer") {
+      paginated = true;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + parseInt(limit);
+      subCodes = subCodes.slice(startIndex, endIndex);
+    }
+
+    const subs = await ActorCode.find(
+      { code: { $in: subCodes } },
+      { code: 1, name: 1, _id: 0 }
+    );
+
+    const dealerCodesSet = new Set();
+    for (const sub of subs) {
+      const subHierarchyDealers = filteredEntries
+        .filter((entry) => entry[position] === sub.code && entry.dealer)
+        .map((entry) => entry.dealer);
+
+      subHierarchyDealers.forEach((d) => dealerCodesSet.add(d));
+      if (position === "dealer") dealerCodesSet.add(sub.code);
+    }
+
+    const dealerCodes = [...dealerCodesSet];
+
+    const startDate = new Date(start_date);
+    startDate.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(end_date);
+    endDate.setUTCHours(0, 0, 0, 0);
+    const lmtdStartDate = new Date(startDate);
+    lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+    const lmtdEndDate = new Date(endDate);
+    lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+    const mtdSales = await SalesData.aggregate([
+      {
+        $match: {
+          buyer_code: { $in: dealerCodes },
+          sales_type: "Sell Out",
+          date: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: "$buyer_code",
+          total: {
+            $sum: {
+              $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+            },
+          },
+        },
+      },
+    ]);
+
+    const lmtdSales = await SalesData.aggregate([
+      {
+        $match: {
+          buyer_code: { $in: dealerCodes },
+          sales_type: "Sell Out",
+          date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
+        },
+      },
+      {
+        $group: {
+          _id: "$buyer_code",
+          total: {
+            $sum: {
+              $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+            },
+          },
+        },
+      },
+    ]);
+
+    const mtdMap = Object.fromEntries(mtdSales.map((e) => [e._id, e.total]));
+    const lmtdMap = Object.fromEntries(lmtdSales.map((e) => [e._id, e.total]));
+
+    const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+    const enrichedSubs = subs.map((sub) => {
+      const dealerCodesForSub = filteredEntries
+        .filter((entry) => entry[position] === sub.code && entry.dealer)
+        .map((entry) => entry.dealer);
+
+      if (position === "dealer") dealerCodesForSub.push(sub.code);
+
+      let mtd = 0,
+        lmtd = 0;
+      [...new Set(dealerCodesForSub)].forEach((code) => {
+        mtd += mtdMap[code] || 0;
+        lmtd += lmtdMap[code] || 0;
+      });
+
+      console.log("mtd: ", mtd);
+
+      return {
+        code: sub.code,
+        name: sub.name,
+        position,
+        mtd_sell_out: mtd,
+        lmtd_sell_out: lmtd,
+        sell_out_growth: calcGrowth(mtd, lmtd).toFixed(2),
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      paginated,
+      page,
+      limit,
+      count: enrichedSubs.length,
+      subordinates: enrichedSubs,
+    });
+  } catch (error) {
+    console.error("Error in getHierarchyData:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
+
+
 
 // exports.getSubordinatesForUser = async (req, res) => {
 //   try {

@@ -5,10 +5,16 @@ const Entity = require("../../model/Entity");
 const ActorCode = require("../../model/ActorCode");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const moment = require("moment");
-const { getDashboardOverview } = require("../../helpers/salesHelpers");
+const { getDashboardOverview, getProductWiseTargets } = require("../../helpers/salesHelpers");
+const {getPriceBandWiseTargets} = require("../../helpers/salesHelpers");
+
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 const User = require("../../model/User");
 const { Parser } = require("json2csv");
+const mddWiseTarget = require("../../model/mddWiseTarget");
+
+// helpers/targets.js
+
 
 exports.getSalesReportByCode = async (req, res) => {
   try {
@@ -781,6 +787,7 @@ exports.getSalesWithHierarchyCSV = async (req, res) => {
 
 // FInal apis
 
+
 exports.getSalesReportForUser = async (req, res) => {
   try {
     let { code } = req.user;
@@ -941,8 +948,18 @@ exports.getSalesReportForUser = async (req, res) => {
         });
 
     const reportCategories = entity.value || [];
-    const target = await Target.findOne({ entity: code });
-    const targetValueMap = target?.value?.[filter_type]?.[report_type] || {};
+    const targetValueMap = await getPriceBandWiseTargets({
+      code,
+      role,
+      position,
+      subordinate_codes,
+      startDate,
+      endDate,
+      filter_type, 
+    });
+
+    console.log("tgt: ", targetValueMap)
+    
 
     const matchQuery = {
       sales_type: "Sell Out",
@@ -1068,368 +1085,6 @@ exports.getSalesReportForUser = async (req, res) => {
   }
 };
 
-// exports.getDashboardSalesMetricsForUser = async (req, res) => {
-//   try {
-//     let { code } = req.user;
-//     let { filter_type, start_date, end_date, subordinate_codes } = req.body;
-//     console.log(
-//       "Filters: ",
-//       filter_type,
-//       start_date,
-//       end_date,
-//       subordinate_codes,
-//       code
-//     );
-//     filter_type = filter_type || "value"; // Default to 'value'
-
-//     console.log("Subords: ", subordinate_codes);
-
-//     if (!code || !start_date || !end_date) {
-//       return res
-//         .status(400)
-//         .json({
-//           success: false,
-//           message: "Code, start_date, and end_date are required.",
-//         });
-//     }
-
-//     const startDate = new Date(start_date);
-//     startDate.setUTCHours(0, 0, 0, 0);
-
-//     const endDate = new Date(end_date);
-//     endDate.setUTCHours(0, 0, 0, 0);
-
-//     const actor = await ActorCode.findOne({ code });
-//     if (!actor) {
-//       return res
-//         .status(404)
-//         .json({
-//           success: false,
-//           message: "Actor not found for the provided code!",
-//         });
-//     }
-
-//     const { role, position } = actor;
-//     let dealerCodes = [];
-
-//     // Check if subordinate_codes contains product categories
-//     const productCategories = ["smart_phone", "tab", "wearable"];
-//     const hasProductCategories =
-//       subordinate_codes &&
-//       subordinate_codes.some((code) => productCategories.includes(code));
-//     const selectedProductCategories = subordinate_codes
-//       ? subordinate_codes.filter((code) => productCategories.includes(code))
-//       : [];
-
-//     // Case: Subordinates are provided
-//     if (subordinate_codes && subordinate_codes.length > 0) {
-//       let allDealers = [];
-
-//       // Step 1: Fetch dynamic positions from ActorTypesHierarchy
-//       const hierarchyConfig = await ActorTypesHierarchy.findOne({
-//         name: "default_sales_flow",
-//       });
-//       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
-//         return res
-//           .status(500)
-//           .json({
-//             success: false,
-//             message: "Hierarchy config not found or invalid.",
-//           });
-//       }
-
-//       // Step 2: Handle dealer_category (labels) from User collection, town, district, and taluka
-//       const dealerCategories = await User.find(
-//         { role: "dealer", labels: { $in: subordinate_codes } },
-//         { code: 1 }
-//       ).distinct("code");
-
-//       const dealerTown = await User.find(
-//         { role: "dealer", town: { $in: subordinate_codes } },
-//         { code: 1 }
-//       ).distinct("code");
-
-//       const dealerDistrict = await User.find(
-//         { role: "dealer", district: { $in: subordinate_codes } },
-//         { code: 1 }
-//       ).distinct("code");
-
-//       const dealerTaluka = await User.find(
-//         { role: "dealer", taluka: { $in: subordinate_codes } },
-//         { code: 1 }
-//       ).distinct("code");
-
-//       // Step 3: Remove 'dealer' and create dynamic $or filter for hierarchy positions
-//       const hierarchyPositions = hierarchyConfig.hierarchy.filter(
-//         (pos) => pos !== "dealer"
-//       );
-//       const orFilters = hierarchyPositions.map((pos) => ({
-//         [pos]: { $in: subordinate_codes },
-//       }));
-
-//       // Step 4: Query HierarchyEntries for all matching subordinates
-//       const hierarchyEntries = await HierarchyEntries.find({
-//         hierarchy_name: "default_sales_flow",
-//         $or: orFilters,
-//       });
-
-//       const dealersFromHierarchy = hierarchyEntries
-//         .filter((entry) => entry.dealer)
-//         .map((entry) => entry.dealer);
-
-//       // Step 5: Include subordinates who are directly dealers
-//       const directDealers = await ActorCode.find({
-//         code: { $in: subordinate_codes },
-//         position: "dealer",
-//       }).distinct("code");
-
-//       // Step 6: Combine and deduplicate dealer codes
-//       dealerCodes = [
-//         ...new Set([
-//           ...dealersFromHierarchy,
-//           ...directDealers,
-//           ...dealerCategories,
-//           ...dealerTown,
-//           ...dealerDistrict,
-//           ...dealerTaluka,
-//         ]),
-//       ];
-//       console.log("dealer count: ", dealerCodes.length)
-//     } else {
-//       // No subordinates selected
-//       if (["admin", "super_admin"].includes(role)) {
-//         console.log("ADMIN BYPASS MODE: No subordinate filters, returning all sales data dealers");
-//         // bypass hierarchy lookups → handled later by baseQuery
-//         dealerCodes = []; 
-//       } else if (role === "employee" && position) {
-//         const hierarchyEntries = await HierarchyEntries.find({
-//           hierarchy_name: "default_sales_flow",
-//           [position]: code,
-//         });
-
-//         dealerCodes = hierarchyEntries
-//           .filter((entry) => entry.dealer)
-//           .map((entry) => entry.dealer);
-//       } else {
-//         return res
-//           .status(403)
-//           .json({ success: false, message: "Unauthorized role." });
-//       }
-//     }
-
-//     console.log("No. of dealers: ", dealerCodes.length);
-
-
-//   // Calculate LMTD date range
-//   let lmtdStartDate = new Date(startDate);
-//   lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
-
-//   // Copy endDate and move back 1 month
-//   let lmtdEndDate = new Date(endDate);
-//   lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
-
-//   // Edge case: if prev month has fewer days (e.g., 31 Aug → 31 Jul invalid)
-//   // JS auto-rolls into next month, so we clamp it back
-//   if (lmtdEndDate.getMonth() === endDate.getMonth()) {
-//     // rolled over, so set to last day of prev month
-//     lmtdEndDate.setDate(0);
-//   }
-//   lmtdEndDate.setUTCHours(23, 59, 59, 999);
-
-
-//     console.log("Current: ", startDate, endDate);
-//     console.log("Prev: ", lmtdStartDate, lmtdEndDate);
-
-//     // build baseQuery
-//     let baseQuery = {};
-//     if (["admin", "super_admin"].includes(role) && (!subordinate_codes || subordinate_codes.length === 0)) {
-//       // Admin bypass → allow all dealers from SalesData
-//       baseQuery = {};
-//     } else {
-//       baseQuery = dealerCodes.length > 0 ? { buyer_code: { $in: dealerCodes } } : { buyer_code: { $in: [] } };
-//     }
-
-//     // Aggregation helpers - Updated to handle product categories
-//     const getTotal = async (salesType, dateRange) => {
-//       if (hasProductCategories) {
-//         const salesData = await SalesData.find(
-//           {
-//             ...baseQuery,
-//             sales_type: salesType,
-//             date: { $gte: dateRange.start, $lte: dateRange.end },
-//           },
-//           { product_code: 1, total_amount: 1, quantity: 1 }
-//         );
-
-//         if (salesData.length === 0) {
-//           return [{ total: 0 }];
-//         }
-
-//         const productCodes = [...new Set(salesData.map((s) => s.product_code))];
-
-//         const productDocs = await Product.find(
-//           { product_code: { $in: productCodes } },
-//           { product_code: 1, product_category: 1, _id: 0 }
-//         );
-
-//         const productMap = Object.fromEntries(
-//           productDocs.map((p) => [
-//             p.product_code,
-//             p.product_category || "Uncategorized",
-//           ])
-//         );
-
-//         const filteredSalesData = salesData.filter((sale) => {
-//           const category = productMap[sale.product_code];
-//           return selectedProductCategories.includes(category);
-//         });
-
-//         const total = filteredSalesData.reduce((sum, sale) => {
-//           const value =
-//             filter_type === "value"
-//               ? parseFloat(sale.total_amount)
-//               : parseFloat(sale.quantity);
-//           return sum + (isNaN(value) ? 0 : value);
-//         }, 0);
-
-//         return [{ total }];
-//       } else {
-//         return await SalesData.aggregate([
-//           {
-//             $match: {
-//               ...baseQuery,
-//               sales_type: salesType,
-//               date: { $gte: dateRange.start, $lte: dateRange.end },
-//             },
-//           },
-//           {
-//             $group: {
-//               _id: null,
-//               total: {
-//                 $sum: {
-//                   $toDouble: `$${
-//                     filter_type === "value" ? "total_amount" : "quantity"
-//                   }`,
-//                 },
-//               },
-//             },
-//           },
-//         ]);
-//       }
-//     };
-
-//     const getSellinTotal = async (salesType, dateRange) => {
-//       if (hasProductCategories) {
-//         const salesData = await SalesData.find(
-//           {
-//             ...baseQuery,
-//             sales_type: { $in: salesType },
-//             date: { $gte: dateRange.start, $lte: dateRange.end },
-//           },
-//           { product_code: 1, total_amount: 1, quantity: 1 }
-//         );
-
-//         if (salesData.length === 0) {
-//           return [{ total: 0 }];
-//         }
-
-//         const productCodes = [...new Set(salesData.map((s) => s.product_code))];
-
-//         const productDocs = await Product.find(
-//           { product_code: { $in: productCodes } },
-//           { product_code: 1, product_category: 1, _id: 0 }
-//         );
-
-//         const productMap = Object.fromEntries(
-//           productDocs.map((p) => [
-//             p.product_code,
-//             p.product_category || "Uncategorized",
-//           ])
-//         );
-
-//         const filteredSalesData = salesData.filter((sale) => {
-//           const category = productMap[sale.product_code];
-//           return selectedProductCategories.includes(category);
-//         });
-
-//         const total = filteredSalesData.reduce((sum, sale) => {
-//           const value =
-//             filter_type === "value"
-//               ? parseFloat(sale.total_amount)
-//               : parseFloat(sale.quantity);
-//           return sum + (isNaN(value) ? 0 : value);
-//         }, 0);
-
-//         return [{ total }];
-//       } else {
-//         return await SalesData.aggregate([
-//           {
-//             $match: {
-//               ...baseQuery,
-//               sales_type: { $in: salesType },
-//               date: { $gte: dateRange.start, $lte: dateRange.end },
-//             },
-//           },
-//           {
-//             $group: {
-//               _id: null,
-//               total: {
-//                 $sum: {
-//                   $toDouble: `$${
-//                     filter_type === "value" ? "total_amount" : "quantity"
-//                   }`,
-//                 },
-//               },
-//             },
-//           },
-//         ]);
-//       }
-//     };
-
-//     const mtdSellOut = await getTotal("Sell Out", {
-//       start: startDate,
-//       end: endDate,
-//     });
-//     const lmtdSellOut = await getTotal("Sell Out", {
-//       start: lmtdStartDate,
-//       end: lmtdEndDate,
-//     });
-
-//     const mtdSellIn = await getSellinTotal(["Sell In", "Sell Thru2"], {
-//       start: startDate,
-//       end: endDate,
-//     });
-//     const lmtdSellIn = await getSellinTotal(["Sell In", "Sell Thru2"], {
-//       start: lmtdStartDate,
-//       end: lmtdEndDate,
-//     });
-
-//     const calculateGrowth = (current, last) =>
-//       last !== 0 ? ((current - last) / last) * 100 : 0;
-
-//     const response = {
-//       lmtd_sell_out: lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0,
-//       mtd_sell_out: mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
-//       lmtd_sell_in: lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0,
-//       mtd_sell_in: mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
-//       sell_out_growth: calculateGrowth(
-//         mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
-//         lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0
-//       ).toFixed(2),
-//       sell_in_growth: calculateGrowth(
-//         mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
-//         lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0
-//       ).toFixed(2),
-//       selected_product_categories: selectedProductCategories,
-//     };
-
-//     res.status(200).json({ success: true, data: response });
-//     console.log("Res: ", response);
-//   } catch (error) {
-//     console.error("Error in getDashboardSalesMetrics:", error);
-//     res.status(500).json({ success: false, message: "Internal server error" });
-//   }
-// };
 
 exports.getDashboardSalesMetricsForUser = async (req, res) => {
   try {
@@ -1906,9 +1561,11 @@ exports.getSalesReportProductWise = async (req, res) => {
     };
     const lastMonthSalesData = await SalesData.find(lastMonthSalesQuery);
 
-    // Fetch target data
-    const target = await Target.findOne({ entity: code });
-    const targetValueData = target?.value?.[filter_type]?.product || {};
+    // 🔥 Fetch product-wise targets (grouped by model_code)
+    const targetValueMap = await getProductWiseTargets(code, filter_type, startDate);
+
+
+
 
     // Filter sales data by product categories if applicable
     let filteredSalesData = salesData;
@@ -1936,7 +1593,7 @@ exports.getSalesReportProductWise = async (req, res) => {
       const productSales = filteredSalesData.filter(sale => sale.product_code === product.product_code);
       const lastMonthProductSales = filteredLastMonthSalesData.filter(sale => sale.product_code === product.product_code);
 
-      const targetValue = targetValueData?.[product.product_code] || 0;
+      const targetValue = targetValueMap?.[product.model_code] || 0;
       const mtdValue = productSales.reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
       const lmtdValue = lastMonthProductSales.reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
 
@@ -1988,6 +1645,28 @@ exports.getSalesReportProductWise = async (req, res) => {
   } catch (error) {
     console.error("Error in getSalesReportProductWise:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+exports.fixAbove100KSegment = async (req, res) => {
+  try {
+    const result = await mddWiseTarget.updateMany(
+      { segment: "Above 100K" },   // filter
+      { $set: { segment: "100" } } // update
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Segments updated successfully.",
+      matchedCount: result.matchedCount,   // how many matched
+      modifiedCount: result.modifiedCount, // how many actually updated
+    });
+  } catch (error) {
+    console.error("Error updating segments:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
 

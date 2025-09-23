@@ -1,5 +1,7 @@
 const ActorCode = require("../model/ActorCode");
+const ActorTypesHierarchy = require("../model/ActorTypesHierarchy");
 const HierarchyEntries = require("../model/HierarchyEntries");
+const mddWiseTarget = require("../model/mddWiseTarget");
 const SalesData = require("../model/SalesData");
 
 // Convert UTC to IST
@@ -116,6 +118,174 @@ const getDashboardOverview = async ({
   return overview;
 };
 
-module.exports = {
-  getDashboardOverview
+const getPriceBandWiseTargets = async ({
+  code,
+  role,
+  position,
+  subordinate_codes,
+  startDate,
+  endDate,
+  filter_type,
+}) => {
+  // default filter
+  filter_type = filter_type || "value";
+
+  // derive month & year from startDate
+  const month = startDate.getMonth() + 1; // JS is 0-indexed
+  const year = startDate.getFullYear();
+
+  let mddCodes = [];
+
+  if (subordinate_codes && subordinate_codes.length > 0) {
+    // Admin: resolve subordinate MDDs
+    const hierarchyConfig = await ActorTypesHierarchy.findOne({
+      name: "default_sales_flow",
+    });
+
+    if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
+      return {};
+    }
+
+    const hierarchyPositions = hierarchyConfig.hierarchy.filter(
+      (pos) => pos !== "dealer"
+    );
+    const orFilters = hierarchyPositions.map((pos) => ({
+      [pos]: { $in: subordinate_codes },
+    }));
+
+    const hierarchyEntries = await HierarchyEntries.find({
+      hierarchy_name: "default_sales_flow",
+      $or: orFilters,
+    });
+
+    mddCodes = [...new Set(hierarchyEntries.map((e) => e.mdd))];
+  } else {
+    if (["admin", "super_admin"].includes(role)) {
+      const hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+      });
+      mddCodes = [...new Set(hierarchyEntries.map((e) => e.mdd))];
+    } else if (role === "employee" && position) {
+      const hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+        [position]: code,
+      });
+      mddCodes = [...new Set(hierarchyEntries.map((e) => e.mdd))];
+    } else if (role === "mdd") {
+      // MDD himself
+      mddCodes = [code];
+    }
+  }
+
+  if (mddCodes.length === 0) return {};
+
+  // fetch targets for these MDDs for the month/year
+  const targets = await mddWiseTarget.find({
+    mdd_code: { $in: mddCodes },
+    month,
+    year,
+  });
+
+  // group by segment
+  let segmentTargets = {};
+  for (let t of targets) {
+    let seg = t.segment || "Unknown";
+
+    // normalize names to align with Product.segment
+    if (/Above 100K/i.test(seg)) seg = "100+";
+    else if (/Less than 10K/i.test(seg)) seg = "0-10";
+    else seg = seg.replace(/k/gi, ""); // "70-100k" -> "70-100"
+
+    // apply filter_type logic
+    let amount = 0;
+    if (filter_type === "value") {
+      const qty = Number(t.vol_tgt) || 0;
+      const dp = Number(t.dp) || 0;
+      amount = qty * dp;
+    } else {
+      amount = Number(t.vol_tgt) || 0;
+    }
+
+    if (!segmentTargets[seg]) segmentTargets[seg] = 0;
+    segmentTargets[seg] += amount;
+  }
+
+  return segmentTargets;
 };
+
+
+const getProductWiseTargets = async (code, filter_type = "value", startDate) => {
+  console.log("REACH")
+  // derive month & year from report's startDate
+  const month = startDate.getMonth() + 1; // JS is 0-indexed
+  const year = startDate.getFullYear();
+
+  // 🔍 Resolve actor
+  const actor = await ActorCode.findOne({ code });
+  if (!actor) return {};
+
+  const { role, position } = actor;
+  let mddCodes = [];
+
+  if (["admin", "super_admin"].includes(role)) {
+    const hierarchyEntries = await HierarchyEntries.find({
+      hierarchy_name: "default_sales_flow",
+    });
+    mddCodes = [...new Set(hierarchyEntries.map((e) => e.mdd))];
+  } else if (role === "employee" && position) {
+    const hierarchyEntries = await HierarchyEntries.find({
+      hierarchy_name: "default_sales_flow",
+      [position]: code,
+    });
+    mddCodes = [...new Set(hierarchyEntries.map((e) => e.mdd))];
+  } else if (role === "mdd") {
+    mddCodes = [code]; // MDD himself
+  }
+
+  if (mddCodes.length === 0) return {};
+
+  // 🗂 Fetch targets for MDDs for this month/year
+  const targets = await mddWiseTarget.find({
+    mdd_code: { $in: mddCodes },
+    month,
+    year,
+  });
+
+  // 📊 Group by model_code
+  let productTargets = {};
+  for (let t of targets) {
+    const key = t.model_code || "Unknown";
+    if (!productTargets[key]) productTargets[key] = 0;
+
+    if (filter_type === "value") {
+      // Value target = quantity * dp
+      productTargets[key] += (t.vol_tgt ?? 0) * (t.dp ?? 0);
+    } else {
+      // Volume target = just quantity
+      productTargets[key] += t.vol_tgt ?? 0;
+    }
+  }
+  console.log("REACH")
+  // 🖨️ Print only non-zero targets
+// for (let [modelCode, targetVal] of Object.entries(productTargets)) {
+//   if (targetVal > 0) {
+//     console.log(`Model: ${modelCode}, Target: ${targetVal}`);
+//   }
+// }
+
+  return productTargets; // { model_code: targetValue }
+};
+
+
+
+
+
+
+module.exports = {
+  getDashboardOverview,
+  getPriceBandWiseTargets,
+  getProductWiseTargets
+};
+
+
+
