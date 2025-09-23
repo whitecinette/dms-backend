@@ -40,4 +40,4 @@ const mddWiseTargetsSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("mddWiseTargets", mddWiseTargetsSchema);
+module.exports = mongoose.model("MddWiseTarget", mddWiseTargetsSchema);

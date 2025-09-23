@@ -1,6 +1,6 @@
 const fs = require("fs");
 const csv = require("csv-parser");
-const mddWiseTarget = require("../../model/mddWiseTarget");
+const MddWiseTarget = require("../../model/MddWiseTarget");
 
 function cleanHeader(header) {
   return header
@@ -77,7 +77,7 @@ exports.uploadMddWiseTargets = async (req, res) => {
               return res.status(400).json({ errors });
             }
   
-            await mddWiseTarget.insertMany(validDocs);
+            await MddWiseTarget.insertMany(validDocs);
   
             res.status(200).json({
               message: `${validDocs.length} records uploaded successfully`,
@@ -109,7 +109,7 @@ exports.uploadMddWiseTargets = async (req, res) => {
         return res.status(400).json({ error: "Month and year are required" });
       }
   
-      const targets = await mddWiseTarget.find({ month: Number(month), year: Number(year) });
+      const targets = await MddWiseTarget.find({ month: Number(month), year: Number(year) });
       res.status(200).json({ data: targets });
     } catch (err) {
       console.error(err);
