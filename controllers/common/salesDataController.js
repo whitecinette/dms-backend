@@ -11,7 +11,7 @@ const {getPriceBandWiseTargets} = require("../../helpers/salesHelpers");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 const User = require("../../model/User");
 const { Parser } = require("json2csv");
-const mddWiseTarget = require("../../model/mddWiseTarget");
+const MddWiseTarget = require("../../model/MddWiseTarget");
 
 // helpers/targets.js
 
@@ -1650,7 +1650,7 @@ exports.getSalesReportProductWise = async (req, res) => {
 
 exports.fixAbove100KSegment = async (req, res) => {
   try {
-    const result = await mddWiseTarget.updateMany(
+    const result = await MddWiseTarget.updateMany(
       { segment: "Above 100K" },   // filter
       { $set: { segment: "100" } } // update
     );

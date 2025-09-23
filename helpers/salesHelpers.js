@@ -1,7 +1,7 @@
 const ActorCode = require("../model/ActorCode");
 const ActorTypesHierarchy = require("../model/ActorTypesHierarchy");
 const HierarchyEntries = require("../model/HierarchyEntries");
-const mddWiseTarget = require("../model/mddWiseTarget");
+const MddWiseTarget = require("../model/MddWiseTarget");
 const SalesData = require("../model/SalesData");
 
 // Convert UTC to IST
@@ -180,7 +180,7 @@ const getPriceBandWiseTargets = async ({
   if (mddCodes.length === 0) return {};
 
   // fetch targets for these MDDs for the month/year
-  const targets = await mddWiseTarget.find({
+  const targets = await MddWiseTarget.find({
     mdd_code: { $in: mddCodes },
     month,
     year,
@@ -245,7 +245,7 @@ const getProductWiseTargets = async (code, filter_type = "value", startDate) => 
   if (mddCodes.length === 0) return {};
 
   // 🗂 Fetch targets for MDDs for this month/year
-  const targets = await mddWiseTarget.find({
+  const targets = await MddWiseTarget.find({
     mdd_code: { $in: mddCodes },
     month,
     year,
