@@ -707,10 +707,10 @@ exports.getHierarchyDataStats = async (req, res) => {
       filter_type = "value",
       start_date,
       end_date,
-      position,       // e.g. "division", "asm", "mdd", "tse", "dealer", "district", ...
+      position, // e.g. "division", "asm", "mdd", "tse", "dealer", "district", ...
       parent_code,
       page = 1,
-      limit = 50
+      limit = 50,
     } = req.body;
 
     if (!code || !start_date || !end_date || !position) {
@@ -723,7 +723,9 @@ exports.getHierarchyDataStats = async (req, res) => {
     // === STEP 1: Resolve user + hierarchy
     const actor = await ActorCode.findOne({ code });
     if (!actor)
-      return res.status(404).json({ success: false, message: "Actor not found." });
+      return res
+        .status(404)
+        .json({ success: false, message: "Actor not found." });
 
     const { role } = actor;
 
@@ -737,18 +739,15 @@ exports.getHierarchyDataStats = async (req, res) => {
     }
 
     const allPositions = actorHierarchy.hierarchy;
-    console.log("All positions: ", allPositions);
 
     // === STEP 2: Collect hierarchy entries
     let hierarchyEntries = [];
     if (parent_code === "SPD") {
-      // Special case: SPD = all entries where mdd != "4782323"
       hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         mdd: { $ne: "4782323" },
       });
     } else if (parent_code === "DMDD") {
-      // Special case: DMDD = all entries where mdd == "4782323"
       hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         mdd: "4782323",
@@ -763,18 +762,27 @@ exports.getHierarchyDataStats = async (req, res) => {
         hierarchy_name: "default_sales_flow",
       });
     } else {
-      hierarchyEntries = await HierarchyEntries.find({ [actor.position]: code });
+      hierarchyEntries = await HierarchyEntries.find({
+        [actor.position]: code,
+      });
     }
 
-    // === STEP 3: Special case for "division" (SPD vs DMDD totals)
+    // === STEP 3: Special case for "division"
     if (position === "division") {
-      const spdEntries = hierarchyEntries.filter(e => e.mdd && e.mdd !== "4782323");
-      const dmddEntries = hierarchyEntries.filter(e => e.mdd === "4782323");
+      const spdEntries = hierarchyEntries.filter(
+        (e) => e.mdd && e.mdd !== "4782323"
+      );
+      const dmddEntries = hierarchyEntries.filter(
+        (e) => e.mdd === "4782323"
+      );
 
-      const spdDealers = [...new Set(spdEntries.map(e => e.dealer).filter(Boolean))];
-      const dmddDealers = [...new Set(dmddEntries.map(e => e.dealer).filter(Boolean))];
+      const spdDealers = [
+        ...new Set(spdEntries.map((e) => e.dealer).filter(Boolean)),
+      ];
+      const dmddDealers = [
+        ...new Set(dmddEntries.map((e) => e.dealer).filter(Boolean)),
+      ];
 
-      // === Date windows
       const startDate = new Date(start_date);
       startDate.setUTCHours(0, 0, 0, 0);
       const endDate = new Date(end_date);
@@ -785,10 +793,9 @@ exports.getHierarchyDataStats = async (req, res) => {
       const lmtdEndDate = new Date(endDate);
       lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
 
-      // === Aggregation helper
       const aggSales = async (dealers, from, to) => {
         if (dealers.length === 0) return 0;
-        const res = await SalesData.aggregate([
+        const result = await SalesData.aggregate([
           {
             $match: {
               buyer_code: { $in: dealers },
@@ -801,21 +808,20 @@ exports.getHierarchyDataStats = async (req, res) => {
               _id: null,
               total: {
                 $sum: {
-                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                  $toDouble:
+                    `$${filter_type === "value" ? "total_amount" : "quantity"}`,
                 },
               },
             },
           },
         ]);
-        return res.length > 0 ? res[0].total : 0;
+        return result.length > 0 ? result[0].total : 0;
       };
 
       const spd_mtd = await aggSales(spdDealers, startDate, endDate);
       const spd_lmtd = await aggSales(spdDealers, lmtdStartDate, lmtdEndDate);
       const dmdd_mtd = await aggSales(dmddDealers, startDate, endDate);
       const dmdd_lmtd = await aggSales(dmddDealers, lmtdStartDate, lmtdEndDate);
-
-      console.log("spd mtd: ", spd_mtd);
 
       const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
 
@@ -830,6 +836,14 @@ exports.getHierarchyDataStats = async (req, res) => {
             mtd_sell_out: spd_mtd,
             lmtd_sell_out: spd_lmtd,
             sell_out_growth: calcGrowth(spd_mtd, spd_lmtd).toFixed(2),
+            "M-1": 0,
+            "M-2": 0,
+            "M-3": 0,
+            ADS: 0,
+            FTD: 0,
+            TGT: 0,
+            "Req. ADS": 0,
+            "Contribution%": 0,
           },
           {
             code: "DMDD",
@@ -838,17 +852,25 @@ exports.getHierarchyDataStats = async (req, res) => {
             mtd_sell_out: dmdd_mtd,
             lmtd_sell_out: dmdd_lmtd,
             sell_out_growth: calcGrowth(dmdd_mtd, dmdd_lmtd).toFixed(2),
-          }
+            "M-1": 0,
+            "M-2": 0,
+            "M-3": 0,
+            ADS: 0,
+            FTD: 0,
+            TGT: 0,
+            "Req. ADS": 0,
+            "Contribution%": 0,
+          },
         ],
       });
     }
 
-    // === STEP 4: For other positions (ASM, MDD, etc.)
+    // === STEP 4: For other positions
     const filteredEntries = hierarchyEntries.filter((entry) => entry[position]);
-    let subCodes = [...new Set(filteredEntries.map((entry) => entry[position]))];
-    console.log("Filtered: ", filteredEntries);
+    let subCodes = [
+      ...new Set(filteredEntries.map((entry) => entry[position])),
+    ];
 
-    // Pagination (for dealers only)
     let paginated = false;
     if (position === "dealer") {
       paginated = true;
@@ -862,18 +884,18 @@ exports.getHierarchyDataStats = async (req, res) => {
       { code: 1, name: 1, _id: 0 }
     );
 
+    // Collect dealer codes under these subs
     const dealerCodesSet = new Set();
     for (const sub of subs) {
       const subHierarchyDealers = filteredEntries
         .filter((entry) => entry[position] === sub.code && entry.dealer)
         .map((entry) => entry.dealer);
-
       subHierarchyDealers.forEach((d) => dealerCodesSet.add(d));
       if (position === "dealer") dealerCodesSet.add(sub.code);
     }
-
     const dealerCodes = [...dealerCodesSet];
 
+    // === Dates
     const startDate = new Date(start_date);
     startDate.setUTCHours(0, 0, 0, 0);
     const endDate = new Date(end_date);
@@ -883,6 +905,7 @@ exports.getHierarchyDataStats = async (req, res) => {
     const lmtdEndDate = new Date(endDate);
     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
 
+    // === MTD + LMTD Aggregates
     const mtdSales = await SalesData.aggregate([
       {
         $match: {
@@ -896,7 +919,8 @@ exports.getHierarchyDataStats = async (req, res) => {
           _id: "$buyer_code",
           total: {
             $sum: {
-              $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+              $toDouble:
+                `$${filter_type === "value" ? "total_amount" : "quantity"}`,
             },
           },
         },
@@ -916,7 +940,8 @@ exports.getHierarchyDataStats = async (req, res) => {
           _id: "$buyer_code",
           total: {
             $sum: {
-              $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+              $toDouble:
+                `$${filter_type === "value" ? "total_amount" : "quantity"}`,
             },
           },
         },
@@ -928,21 +953,104 @@ exports.getHierarchyDataStats = async (req, res) => {
 
     const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
 
+    // === Extra monthly windows (M-1, M-2, M-3)
+    const startOfMonth = new Date(startDate);
+    startOfMonth.setDate(1);
+    const monthWindows = [1, 2, 3].map((offset) => {
+      const mStart = new Date(startOfMonth);
+      mStart.setMonth(mStart.getMonth() - offset);
+      const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
+      mStart.setUTCHours(0, 0, 0, 0);
+      mEnd.setUTCHours(0, 0, 0, 0);
+      return { label: `M-${offset}`, start: mStart, end: mEnd };
+    });
+
+    const monthlyMaps = {};
+    for (const { label, start, end } of monthWindows) {
+      const monthSales = await SalesData.aggregate([
+        {
+          $match: {
+            buyer_code: { $in: dealerCodes },
+            sales_type: "Sell Out",
+            date: { $gte: start, $lte: end },
+          },
+        },
+        {
+          $group: {
+            _id: "$buyer_code",
+            total: {
+              $sum: {
+                $toDouble:
+                  `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+              },
+            },
+          },
+        },
+      ]);
+      monthlyMaps[label] = Object.fromEntries(
+        monthSales.map((e) => [e._id, e.total])
+      );
+    }
+
+    // === FTD (first day of month)
+    const ftdSales = await SalesData.aggregate([
+      {
+        $match: {
+          buyer_code: { $in: dealerCodes },
+          sales_type: "Sell Out",
+          date: startDate,
+        },
+      },
+      {
+        $group: {
+          _id: "$buyer_code",
+          total: {
+            $sum: {
+              $toDouble:
+                `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+            },
+          },
+        },
+      },
+    ]);
+    const ftdMap = Object.fromEntries(ftdSales.map((e) => [e._id, e.total]));
+
+    // === Group totals for contribution
+    let totalMtd = 0;
+    subs.forEach((sub) => {
+      const dealerCodesForSub = filteredEntries
+        .filter((entry) => entry[position] === sub.code && entry.dealer)
+        .map((entry) => entry.dealer);
+      if (position === "dealer") dealerCodesForSub.push(sub.code);
+      [...new Set(dealerCodesForSub)].forEach((c) => {
+        totalMtd += mtdMap[c] || 0;
+      });
+    });
+
     const enrichedSubs = subs.map((sub) => {
       const dealerCodesForSub = filteredEntries
         .filter((entry) => entry[position] === sub.code && entry.dealer)
         .map((entry) => entry.dealer);
-
       if (position === "dealer") dealerCodesForSub.push(sub.code);
+      const uniqueDealers = [...new Set(dealerCodesForSub)];
 
       let mtd = 0,
-        lmtd = 0;
-      [...new Set(dealerCodesForSub)].forEach((code) => {
-        mtd += mtdMap[code] || 0;
-        lmtd += lmtdMap[code] || 0;
+        lmtd = 0,
+        ftd = 0;
+      const monthValues = { "M-1": 0, "M-2": 0, "M-3": 0 };
+      uniqueDealers.forEach((c) => {
+        mtd += mtdMap[c] || 0;
+        lmtd += lmtdMap[c] || 0;
+        ftd += ftdMap[c] || 0;
+        for (const key of ["M-1", "M-2", "M-3"]) {
+          monthValues[key] += monthlyMaps[key]?.[c] || 0;
+        }
       });
 
-      console.log("mtd: ", mtd);
+      const todayDate = endDate.getDate();
+      const ads = todayDate > 0 ? mtd / todayDate : 0;
+      const reqAds = 0; // placeholder
+      const contribution = totalMtd > 0 ? (mtd / totalMtd) * 100 : 0;
 
       return {
         code: sub.code,
@@ -951,11 +1059,20 @@ exports.getHierarchyDataStats = async (req, res) => {
         mtd_sell_out: mtd,
         lmtd_sell_out: lmtd,
         sell_out_growth: calcGrowth(mtd, lmtd).toFixed(2),
+        "M-1": monthValues["M-1"],
+        "M-2": monthValues["M-2"],
+        "M-3": monthValues["M-3"],
+        ADS: ads.toFixed(2),
+        FTD: ftd,
+        TGT: 0,
+        "Req. ADS": reqAds.toFixed(2),
+        "Contribution%": contribution.toFixed(2),
       };
     });
 
     res.status(200).json({
       success: true,
+      position,
       paginated,
       page,
       limit,
@@ -964,9 +1081,12 @@ exports.getHierarchyDataStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getHierarchyData:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
+
 
 
 
