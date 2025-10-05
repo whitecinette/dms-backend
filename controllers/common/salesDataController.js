@@ -1107,6 +1107,8 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
       });
     }
 
+    console.log("SUBSSS: ", subordinate_codes);
+
     const startDate = new Date(start_date);
     startDate.setUTCHours(0, 0, 0, 0);
 
@@ -1122,18 +1124,121 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     }
 
     const { role, position } = actor;
-    let dealerCodes = [];
 
-    // ✅ product categories now come directly from body
+    // 🩵 Special SPD/DMDD logic from hierarchy stats
+    if (subordinate_codes?.includes("SPD") || subordinate_codes?.includes("DMDD")) {
+      const actorHierarchy = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+      if (!actorHierarchy || !actorHierarchy.hierarchy) {
+        return res.status(500).json({
+          success: false,
+          message: "Hierarchy data not found.",
+        });
+      }
+
+      const hierarchyEntries = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+      });
+
+      let filteredEntries = [];
+      if (subordinate_codes.includes("SPD")) {
+        filteredEntries = hierarchyEntries.filter((e) => e.mdd && e.mdd !== "4782323");
+      } else if (subordinate_codes.includes("DMDD")) {
+        filteredEntries = hierarchyEntries.filter((e) => e.mdd === "4782323");
+      }
+
+      const dealerCodes = [
+        ...new Set(filteredEntries.map((e) => e.dealer).filter(Boolean)),
+      ];
+
+      console.log(`SPD/DMDD mode active (${subordinate_codes}): ${dealerCodes.length} dealers found.`);
+
+      // === LMTD window
+      const lmtdStartDate = new Date(startDate);
+      lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+      const lmtdEndDate = new Date(endDate);
+      lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+      lmtdEndDate.setUTCHours(23, 59, 59, 999);
+
+      // === Aggregation helpers
+      const getTotal = async (salesType, dateRange) => {
+        return await SalesData.aggregate([
+          {
+            $match: {
+              buyer_code: { $in: dealerCodes },
+              sales_type: salesType,
+              date: { $gte: dateRange.start, $lte: dateRange.end },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
+              },
+            },
+          },
+        ]);
+      };
+
+      const getSellinTotal = async (salesTypes, dateRange) => {
+        return await SalesData.aggregate([
+          {
+            $match: {
+              buyer_code: { $in: dealerCodes },
+              sales_type: { $in: salesTypes },
+              date: { $gte: dateRange.start, $lte: dateRange.end },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
+              },
+            },
+          },
+        ]);
+      };
+
+      // === Compute metrics
+      const mtdSellOut = await getTotal("Sell Out", { start: startDate, end: endDate });
+      const lmtdSellOut = await getTotal("Sell Out", { start: lmtdStartDate, end: lmtdEndDate });
+
+      const mtdSellIn = await getSellinTotal(["Sell In", "Sell Thru2"], {
+        start: startDate,
+        end: endDate,
+      });
+      const lmtdSellIn = await getSellinTotal(["Sell In", "Sell Thru2"], {
+        start: lmtdStartDate,
+        end: lmtdEndDate,
+      });
+
+      const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+      const response = {
+        lmtd_sell_out: lmtdSellOut[0]?.total || 0,
+        mtd_sell_out: mtdSellOut[0]?.total || 0,
+        lmtd_sell_in: lmtdSellIn[0]?.total || 0,
+        mtd_sell_in: mtdSellIn[0]?.total || 0,
+        sell_out_growth: calcGrowth(mtdSellOut[0]?.total || 0, lmtdSellOut[0]?.total || 0).toFixed(2),
+        sell_in_growth: calcGrowth(mtdSellIn[0]?.total || 0, lmtdSellIn[0]?.total || 0).toFixed(2),
+      };
+
+      return res.status(200).json({ success: true, data: response });
+    }
+
+    // 🧩 Continue with normal logic for everyone else (unchanged)
     const selectedProductCategories = Array.isArray(product_categories)
       ? product_categories
       : [];
     const hasProductCategories = selectedProductCategories.length > 0;
-
-    // ✅ subordinate_codes now only for dealer filters
     const dealerFilters = subordinate_codes || [];
+    let dealerCodes = [];
 
-    // Case: Dealer filters provided
     if (dealerFilters.length > 0) {
       const hierarchyConfig = await ActorTypesHierarchy.findOne({
         name: "default_sales_flow",
@@ -1150,8 +1255,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         { code: 1 }
       ).distinct("code");
 
-
-
       const dealerTown = await User.find(
         { role: "dealer", town: { $in: dealerFilters } },
         { code: 1 }
@@ -1167,7 +1270,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         { code: 1 }
       ).distinct("code");
 
-      // Step 3: Build $or filter for hierarchy positions
       const hierarchyPositions = hierarchyConfig.hierarchy.filter(
         (pos) => pos !== "dealer"
       );
@@ -1175,7 +1277,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         [pos]: { $in: dealerFilters },
       }));
 
-      // Step 4: Query HierarchyEntries for all matching subordinates
       const hierarchyEntries = await HierarchyEntries.find({
         hierarchy_name: "default_sales_flow",
         $or: orFilters,
@@ -1185,13 +1286,11 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         .filter((entry) => entry.dealer)
         .map((entry) => entry.dealer);
 
-      // Step 5: Direct dealers
       const directDealers = await ActorCode.find({
         code: { $in: dealerFilters },
         position: "dealer",
       }).distinct("code");
 
-      // Step 6: Merge
       dealerCodes = [
         ...new Set([
           ...dealersFromHierarchy,
@@ -1205,7 +1304,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 
       console.log("dealer count: ", dealerCodes.length);
     } else {
-      // No dealer filters (maybe only categories)
       if (["admin", "super_admin"].includes(role)) {
         console.log("ADMIN BYPASS MODE: No dealer filters, returning all sales data dealers");
         dealerCodes = [];
@@ -1227,7 +1325,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 
     console.log("No. of dealers: ", dealerCodes.length);
 
-    // Calculate LMTD date range
     let lmtdStartDate = new Date(startDate);
     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
 
@@ -1239,13 +1336,9 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     }
     lmtdEndDate.setUTCHours(23, 59, 59, 999);
 
-    console.log("Current: ", startDate, endDate);
-    console.log("Prev: ", lmtdStartDate, lmtdEndDate);
-
-    // build baseQuery
     let baseQuery = {};
     if (["admin", "super_admin"].includes(role) && dealerFilters.length === 0) {
-      baseQuery = {}; // Admin bypass
+      baseQuery = {};
     } else {
       baseQuery =
         dealerCodes.length > 0
@@ -1253,7 +1346,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
           : { buyer_code: { $in: [] } };
     }
 
-    // --- Aggregation helpers ---
     const getTotal = async (salesType, dateRange) => {
       if (hasProductCategories) {
         const salesData = await SalesData.find(
@@ -1268,7 +1360,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         if (salesData.length === 0) return [{ total: 0 }];
 
         const productCodes = [...new Set(salesData.map((s) => s.product_code))];
-
         const productDocs = await Product.find(
           { product_code: { $in: productCodes } },
           { product_code: 1, product_category: 1, _id: 0 }
@@ -1329,7 +1420,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         if (salesData.length === 0) return [{ total: 0 }];
 
         const productCodes = [...new Set(salesData.map((s) => s.product_code))];
-
         const productDocs = await Product.find(
           { product_code: { $in: productCodes } },
           { product_code: 1, product_category: 1, _id: 0 }
@@ -1376,7 +1466,6 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
       }
     };
 
-    // --- Metrics ---
     const mtdSellOut = await getTotal("Sell Out", { start: startDate, end: endDate });
     const lmtdSellOut = await getTotal("Sell Out", { start: lmtdStartDate, end: lmtdEndDate });
 
@@ -1416,17 +1505,17 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
   }
 };
 
-
 // exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //   try {
 //     let { code } = req.user;
-//     let { filter_type, start_date, end_date, subordinate_codes } = req.body;
+//     let { filter_type, start_date, end_date, subordinate_codes, product_categories } = req.body;
 //     console.log(
 //       "Filters: ",
 //       filter_type,
 //       start_date,
 //       end_date,
 //       subordinate_codes,
+//       product_categories,
 //       code
 //     );
 //     filter_type = filter_type || "value"; // Default to 'value'
@@ -1437,6 +1526,8 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //         message: "Code, start_date, and end_date are required.",
 //       });
 //     }
+
+//     console.log("SUBSSS: ", subordinate_codes);
 
 //     const startDate = new Date(start_date);
 //     startDate.setUTCHours(0, 0, 0, 0);
@@ -1455,23 +1546,17 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //     const { role, position } = actor;
 //     let dealerCodes = [];
 
-//     // ✅ Separate product categories vs dealer filters
-//     const productCategories = ["smart_phone", "tab", "wearable"];
-//     const hasProductCategories =
-//       subordinate_codes &&
-//       subordinate_codes.some((c) => productCategories.includes(c));
-
-//     const selectedProductCategories = subordinate_codes
-//       ? subordinate_codes.filter((c) => productCategories.includes(c))
+//     // ✅ product categories now come directly from body
+//     const selectedProductCategories = Array.isArray(product_categories)
+//       ? product_categories
 //       : [];
+//     const hasProductCategories = selectedProductCategories.length > 0;
 
-//     const dealerFilters = subordinate_codes
-//       ? subordinate_codes.filter((c) => !productCategories.includes(c))
-//       : [];
+//     // ✅ subordinate_codes now only for dealer filters
+//     const dealerFilters = subordinate_codes || [];
 
 //     // Case: Dealer filters provided
 //     if (dealerFilters.length > 0) {
-//       // Step 1: Fetch dynamic positions from ActorTypesHierarchy
 //       const hierarchyConfig = await ActorTypesHierarchy.findOne({
 //         name: "default_sales_flow",
 //       });
@@ -1482,11 +1567,12 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //         });
 //       }
 
-//       // Step 2: Handle dealer_category, town, district, taluka
 //       const dealerCategories = await User.find(
 //         { role: "dealer", labels: { $in: dealerFilters } },
 //         { code: 1 }
 //       ).distinct("code");
+
+
 
 //       const dealerTown = await User.find(
 //         { role: "dealer", town: { $in: dealerFilters } },
@@ -1751,6 +1837,7 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 //     res.status(500).json({ success: false, message: "Internal server error" });
 //   }
 // };
+
 
 
 exports.getSalesReportProductWise = async (req, res) => {
