@@ -1085,17 +1085,17 @@ exports.getSalesReportForUser = async (req, res) => {
   }
 };
 
-
 exports.getDashboardSalesMetricsForUser = async (req, res) => {
   try {
     let { code } = req.user;
-    let { filter_type, start_date, end_date, subordinate_codes } = req.body;
+    let { filter_type, start_date, end_date, subordinate_codes, product_categories } = req.body;
     console.log(
       "Filters: ",
       filter_type,
       start_date,
       end_date,
       subordinate_codes,
+      product_categories,
       code
     );
     filter_type = filter_type || "value"; // Default to 'value'
@@ -1124,23 +1124,17 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     const { role, position } = actor;
     let dealerCodes = [];
 
-    // ✅ Separate product categories vs dealer filters
-    const productCategories = ["smart_phone", "tab", "wearable"];
-    const hasProductCategories =
-      subordinate_codes &&
-      subordinate_codes.some((c) => productCategories.includes(c));
-
-    const selectedProductCategories = subordinate_codes
-      ? subordinate_codes.filter((c) => productCategories.includes(c))
+    // ✅ product categories now come directly from body
+    const selectedProductCategories = Array.isArray(product_categories)
+      ? product_categories
       : [];
+    const hasProductCategories = selectedProductCategories.length > 0;
 
-    const dealerFilters = subordinate_codes
-      ? subordinate_codes.filter((c) => !productCategories.includes(c))
-      : [];
+    // ✅ subordinate_codes now only for dealer filters
+    const dealerFilters = subordinate_codes || [];
 
     // Case: Dealer filters provided
     if (dealerFilters.length > 0) {
-      // Step 1: Fetch dynamic positions from ActorTypesHierarchy
       const hierarchyConfig = await ActorTypesHierarchy.findOne({
         name: "default_sales_flow",
       });
@@ -1151,11 +1145,12 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
         });
       }
 
-      // Step 2: Handle dealer_category, town, district, taluka
       const dealerCategories = await User.find(
         { role: "dealer", labels: { $in: dealerFilters } },
         { code: 1 }
       ).distinct("code");
+
+
 
       const dealerTown = await User.find(
         { role: "dealer", town: { $in: dealerFilters } },
@@ -1420,6 +1415,342 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+
+// exports.getDashboardSalesMetricsForUser = async (req, res) => {
+//   try {
+//     let { code } = req.user;
+//     let { filter_type, start_date, end_date, subordinate_codes } = req.body;
+//     console.log(
+//       "Filters: ",
+//       filter_type,
+//       start_date,
+//       end_date,
+//       subordinate_codes,
+//       code
+//     );
+//     filter_type = filter_type || "value"; // Default to 'value'
+
+//     if (!code || !start_date || !end_date) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Code, start_date, and end_date are required.",
+//       });
+//     }
+
+//     const startDate = new Date(start_date);
+//     startDate.setUTCHours(0, 0, 0, 0);
+
+//     const endDate = new Date(end_date);
+//     endDate.setUTCHours(0, 0, 0, 0);
+
+//     const actor = await ActorCode.findOne({ code });
+//     if (!actor) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Actor not found for the provided code!",
+//       });
+//     }
+
+//     const { role, position } = actor;
+//     let dealerCodes = [];
+
+//     // ✅ Separate product categories vs dealer filters
+//     const productCategories = ["smart_phone", "tab", "wearable"];
+//     const hasProductCategories =
+//       subordinate_codes &&
+//       subordinate_codes.some((c) => productCategories.includes(c));
+
+//     const selectedProductCategories = subordinate_codes
+//       ? subordinate_codes.filter((c) => productCategories.includes(c))
+//       : [];
+
+//     const dealerFilters = subordinate_codes
+//       ? subordinate_codes.filter((c) => !productCategories.includes(c))
+//       : [];
+
+//     // Case: Dealer filters provided
+//     if (dealerFilters.length > 0) {
+//       // Step 1: Fetch dynamic positions from ActorTypesHierarchy
+//       const hierarchyConfig = await ActorTypesHierarchy.findOne({
+//         name: "default_sales_flow",
+//       });
+//       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
+//         return res.status(500).json({
+//           success: false,
+//           message: "Hierarchy config not found or invalid.",
+//         });
+//       }
+
+//       // Step 2: Handle dealer_category, town, district, taluka
+//       const dealerCategories = await User.find(
+//         { role: "dealer", labels: { $in: dealerFilters } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       const dealerTown = await User.find(
+//         { role: "dealer", town: { $in: dealerFilters } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       const dealerDistrict = await User.find(
+//         { role: "dealer", district: { $in: dealerFilters } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       const dealerTaluka = await User.find(
+//         { role: "dealer", taluka: { $in: dealerFilters } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       // Step 3: Build $or filter for hierarchy positions
+//       const hierarchyPositions = hierarchyConfig.hierarchy.filter(
+//         (pos) => pos !== "dealer"
+//       );
+//       const orFilters = hierarchyPositions.map((pos) => ({
+//         [pos]: { $in: dealerFilters },
+//       }));
+
+//       // Step 4: Query HierarchyEntries for all matching subordinates
+//       const hierarchyEntries = await HierarchyEntries.find({
+//         hierarchy_name: "default_sales_flow",
+//         $or: orFilters,
+//       });
+
+//       const dealersFromHierarchy = hierarchyEntries
+//         .filter((entry) => entry.dealer)
+//         .map((entry) => entry.dealer);
+
+//       // Step 5: Direct dealers
+//       const directDealers = await ActorCode.find({
+//         code: { $in: dealerFilters },
+//         position: "dealer",
+//       }).distinct("code");
+
+//       // Step 6: Merge
+//       dealerCodes = [
+//         ...new Set([
+//           ...dealersFromHierarchy,
+//           ...directDealers,
+//           ...dealerCategories,
+//           ...dealerTown,
+//           ...dealerDistrict,
+//           ...dealerTaluka,
+//         ]),
+//       ];
+
+//       console.log("dealer count: ", dealerCodes.length);
+//     } else {
+//       // No dealer filters (maybe only categories)
+//       if (["admin", "super_admin"].includes(role)) {
+//         console.log("ADMIN BYPASS MODE: No dealer filters, returning all sales data dealers");
+//         dealerCodes = [];
+//       } else if (role === "employee" && position) {
+//         const hierarchyEntries = await HierarchyEntries.find({
+//           hierarchy_name: "default_sales_flow",
+//           [position]: code,
+//         });
+
+//         dealerCodes = hierarchyEntries
+//           .filter((entry) => entry.dealer)
+//           .map((entry) => entry.dealer);
+//       } else {
+//         return res
+//           .status(403)
+//           .json({ success: false, message: "Unauthorized role." });
+//       }
+//     }
+
+//     console.log("No. of dealers: ", dealerCodes.length);
+
+//     // Calculate LMTD date range
+//     let lmtdStartDate = new Date(startDate);
+//     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+
+//     let lmtdEndDate = new Date(endDate);
+//     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     if (lmtdEndDate.getMonth() === endDate.getMonth()) {
+//       lmtdEndDate.setDate(0);
+//     }
+//     lmtdEndDate.setUTCHours(23, 59, 59, 999);
+
+//     console.log("Current: ", startDate, endDate);
+//     console.log("Prev: ", lmtdStartDate, lmtdEndDate);
+
+//     // build baseQuery
+//     let baseQuery = {};
+//     if (["admin", "super_admin"].includes(role) && dealerFilters.length === 0) {
+//       baseQuery = {}; // Admin bypass
+//     } else {
+//       baseQuery =
+//         dealerCodes.length > 0
+//           ? { buyer_code: { $in: dealerCodes } }
+//           : { buyer_code: { $in: [] } };
+//     }
+
+//     // --- Aggregation helpers ---
+//     const getTotal = async (salesType, dateRange) => {
+//       if (hasProductCategories) {
+//         const salesData = await SalesData.find(
+//           {
+//             ...baseQuery,
+//             sales_type: salesType,
+//             date: { $gte: dateRange.start, $lte: dateRange.end },
+//           },
+//           { product_code: 1, total_amount: 1, quantity: 1 }
+//         );
+
+//         if (salesData.length === 0) return [{ total: 0 }];
+
+//         const productCodes = [...new Set(salesData.map((s) => s.product_code))];
+
+//         const productDocs = await Product.find(
+//           { product_code: { $in: productCodes } },
+//           { product_code: 1, product_category: 1, _id: 0 }
+//         );
+
+//         const productMap = Object.fromEntries(
+//           productDocs.map((p) => [p.product_code, p.product_category || "Uncategorized"])
+//         );
+
+//         const filteredSalesData = salesData.filter((sale) => {
+//           const category = productMap[sale.product_code];
+//           return selectedProductCategories.includes(category);
+//         });
+
+//         const total = filteredSalesData.reduce((sum, sale) => {
+//           const value =
+//             filter_type === "value"
+//               ? parseFloat(sale.total_amount)
+//               : parseFloat(sale.quantity);
+//           return sum + (isNaN(value) ? 0 : value);
+//         }, 0);
+
+//         return [{ total }];
+//       } else {
+//         return await SalesData.aggregate([
+//           {
+//             $match: {
+//               ...baseQuery,
+//               sales_type: salesType,
+//               date: { $gte: dateRange.start, $lte: dateRange.end },
+//             },
+//           },
+//           {
+//             $group: {
+//               _id: null,
+//               total: {
+//                 $sum: {
+//                   $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+//                 },
+//               },
+//             },
+//           },
+//         ]);
+//       }
+//     };
+
+//     const getSellinTotal = async (salesType, dateRange) => {
+//       if (hasProductCategories) {
+//         const salesData = await SalesData.find(
+//           {
+//             ...baseQuery,
+//             sales_type: { $in: salesType },
+//             date: { $gte: dateRange.start, $lte: dateRange.end },
+//           },
+//           { product_code: 1, total_amount: 1, quantity: 1 }
+//         );
+
+//         if (salesData.length === 0) return [{ total: 0 }];
+
+//         const productCodes = [...new Set(salesData.map((s) => s.product_code))];
+
+//         const productDocs = await Product.find(
+//           { product_code: { $in: productCodes } },
+//           { product_code: 1, product_category: 1, _id: 0 }
+//         );
+
+//         const productMap = Object.fromEntries(
+//           productDocs.map((p) => [p.product_code, p.product_category || "Uncategorized"])
+//         );
+
+//         const filteredSalesData = salesData.filter((sale) => {
+//           const category = productMap[sale.product_code];
+//           return selectedProductCategories.includes(category);
+//         });
+
+//         const total = filteredSalesData.reduce((sum, sale) => {
+//           const value =
+//             filter_type === "value"
+//               ? parseFloat(sale.total_amount)
+//               : parseFloat(sale.quantity);
+//           return sum + (isNaN(value) ? 0 : value);
+//         }, 0);
+
+//         return [{ total }];
+//       } else {
+//         return await SalesData.aggregate([
+//           {
+//             $match: {
+//               ...baseQuery,
+//               sales_type: { $in: salesType },
+//               date: { $gte: dateRange.start, $lte: dateRange.end },
+//             },
+//           },
+//           {
+//             $group: {
+//               _id: null,
+//               total: {
+//                 $sum: {
+//                   $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+//                 },
+//               },
+//             },
+//           },
+//         ]);
+//       }
+//     };
+
+//     // --- Metrics ---
+//     const mtdSellOut = await getTotal("Sell Out", { start: startDate, end: endDate });
+//     const lmtdSellOut = await getTotal("Sell Out", { start: lmtdStartDate, end: lmtdEndDate });
+
+//     const mtdSellIn = await getSellinTotal(["Sell In", "Sell Thru2"], {
+//       start: startDate,
+//       end: endDate,
+//     });
+//     const lmtdSellIn = await getSellinTotal(["Sell In", "Sell Thru2"], {
+//       start: lmtdStartDate,
+//       end: lmtdEndDate,
+//     });
+
+//     const calculateGrowth = (current, last) =>
+//       last !== 0 ? ((current - last) / last) * 100 : 0;
+
+//     const response = {
+//       lmtd_sell_out: lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0,
+//       mtd_sell_out: mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
+//       lmtd_sell_in: lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0,
+//       mtd_sell_in: mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
+//       sell_out_growth: calculateGrowth(
+//         mtdSellOut.length > 0 ? mtdSellOut[0].total : 0,
+//         lmtdSellOut.length > 0 ? lmtdSellOut[0].total : 0
+//       ).toFixed(2),
+//       sell_in_growth: calculateGrowth(
+//         mtdSellIn.length > 0 ? mtdSellIn[0].total : 0,
+//         lmtdSellIn.length > 0 ? lmtdSellIn[0].total : 0
+//       ).toFixed(2),
+//       selected_product_categories: selectedProductCategories,
+//     };
+
+//     res.status(200).json({ success: true, data: response });
+//     console.log("Res: ", response);
+//   } catch (error) {
+//     console.error("Error in getDashboardSalesMetrics:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
 
 
 exports.getSalesReportProductWise = async (req, res) => {
