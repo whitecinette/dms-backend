@@ -346,7 +346,7 @@ exports.getSubordinatesForUser = async (req, res) => {
         date: { $gte: startDate, $lte: endDate },
         ...(allDealerCodes.length > 0 ? { buyer_code: { $in: allDealerCodes } } : {}),
       },
-      { buyer_code: 1, product_code: 1, total_amount: 1, quantity: 1 }
+      { buyer_code: 1, product_category: 1, total_amount: 1, quantity: 1 }
     );
 
     const lmtdSalesRaw = await SalesData.find(
@@ -355,28 +355,25 @@ exports.getSubordinatesForUser = async (req, res) => {
         date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
         ...(allDealerCodes.length > 0 ? { buyer_code: { $in: allDealerCodes } } : {}),
       },
-      { buyer_code: 1, product_code: 1, total_amount: 1, quantity: 1 }
+      { buyer_code: 1, product_category: 1, total_amount: 1, quantity: 1 }
     );
 
-    // === Product map ===
-    const allProductCodes = [
-      ...new Set([...mtdSalesRaw.map((s) => s.product_code), ...lmtdSalesRaw.map((s) => s.product_code)]),
-    ];
-    const productDocs = await Product.find(
-      { product_code: { $in: allProductCodes } },
-      { product_code: 1, product_category: 1, _id: 0 }
-    );
-    const productMap = Object.fromEntries(
-      productDocs.map((p) => [p.product_code, p.product_category || "Uncategorized"])
-    );
+    // ✅ Normalize function for flexible category matching
+    const normalize = (str = "") => str.toLowerCase().replace(/[_\s]+/g, "");
+    const normalizedSelected = product_categories.map(normalize);
 
+    // ✅ Category enrichment (no Product lookup)
     const enrich = (sales) =>
       sales
         .map((s) => ({
           ...s._doc,
-          category: productMap[s.product_code] || "Uncategorized",
+          category: s.product_category || "Uncategorized",
         }))
-        .filter((s) => !hasProductCategories || product_categories.includes(s.category));
+        .filter(
+          (s) =>
+            !hasProductCategories ||
+            normalizedSelected.includes(normalize(s.category))
+        );
 
     const enrichedMTDSales = enrich(mtdSalesRaw);
     const enrichedLMTDSales = enrich(lmtdSalesRaw);
@@ -600,7 +597,7 @@ exports.getSubordinatesForUser = async (req, res) => {
 //       start_date,
 //       end_date,
 //       subordinate_codes = [],
-//       product_categories = [], // ✅ Added for category filtering
+//       product_categories = [], // ✅ category filtering included
 //     } = req.body;
 
 //     console.log("Subordinate:", subordinate_codes, "Categories:", product_categories);
@@ -675,7 +672,6 @@ exports.getSubordinatesForUser = async (req, res) => {
 //         }
 //       }
 
-//       // ✅ Include orphan dealers (not in ActorCode but present in sales)
 //       console.log("Admin bypass active — fetching all dealer codes from SalesData");
 //       const allSalesDealers = await SalesData.distinct("buyer_code");
 //       allSalesDealers.forEach((code) => allDealerCodesSet.add(code));
@@ -738,14 +734,11 @@ exports.getSubordinatesForUser = async (req, res) => {
 //     const endDate = new Date(end_date);
 //     endDate.setUTCHours(0, 0, 0, 0);
 
-//     // ✅ Match dashboard LMTD window logic exactly
 //     const lmtdStartDate = new Date(startDate);
 //     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
 //     const lmtdEndDate = new Date(endDate);
 //     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
-//     if (lmtdEndDate.getMonth() === endDate.getMonth()) {
-//       lmtdEndDate.setDate(0);
-//     }
+//     if (lmtdEndDate.getMonth() === endDate.getMonth()) lmtdEndDate.setDate(0);
 //     lmtdEndDate.setUTCHours(23, 59, 59, 999);
 
 //     const allDealerCodes = [...allDealerCodesSet];
@@ -807,20 +800,25 @@ exports.getSubordinatesForUser = async (req, res) => {
 //     const lmtdCategoryMap = sumByCategory(enrichedLMTDSales);
 //     const allCategories = new Set([...Object.keys(mtdCategoryMap), ...Object.keys(lmtdCategoryMap)]);
 
-//     const categoryWiseSales = [...allCategories].map((cat) => {
-//       const mtd = mtdCategoryMap[cat] || 0;
-//       const lmtd = lmtdCategoryMap[cat] || 0;
-//       const growth = lmtd !== 0 ? ((mtd - lmtd) / lmtd) * 100 : 0;
-//       return {
-//         code: cat,
-//         name: cat,
-//         position: "product_category",
-//         mtd_sell_out: mtd,
-//         lmtd_sell_out: lmtd,
-//         sell_out_growth: growth.toFixed(2),
-//       };
-//     });
-//     subordinates.push(...categoryWiseSales);
+//     // ✅ Modified: categories now coexist with subordinates
+//     if (hasProductCategories || allCategories.size > 0) {
+//       const categoryScope = allDealerCodes.length > 0 ? "within_subordinates" : "global";
+//       const categoryWiseSales = [...allCategories].map((cat) => {
+//         const mtd = mtdCategoryMap[cat] || 0;
+//         const lmtd = lmtdCategoryMap[cat] || 0;
+//         const growth = lmtd !== 0 ? ((mtd - lmtd) / lmtd) * 100 : 0;
+//         return {
+//           code: cat,
+//           name: cat,
+//           position: "product_category",
+//           scope: categoryScope,
+//           mtd_sell_out: mtd,
+//           lmtd_sell_out: lmtd,
+//           sell_out_growth: growth.toFixed(2),
+//         };
+//       });
+//       subordinates.push(...categoryWiseSales);
+//     }
 
 //     // === Standard sales grouping ===
 //     const mtdSales = await SalesData.aggregate([
@@ -864,7 +862,6 @@ exports.getSubordinatesForUser = async (req, res) => {
 
 //     const mtdMap = Object.fromEntries(mtdSales.map((e) => [e._id, e.total]));
 //     const lmtdMap = Object.fromEntries(lmtdSales.map((e) => [e._id, e.total]));
-
 //     const calculateGrowth = (current, last) => (last !== 0 ? ((current - last) / last) * 100 : 0);
 
 //     subordinates.forEach((sub) => {
