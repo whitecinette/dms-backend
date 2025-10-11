@@ -335,68 +335,132 @@ exports.getSubordinatesForUser = async (req, res) => {
     if (lmtdEndDate.getMonth() === endDate.getMonth()) lmtdEndDate.setDate(0);
     lmtdEndDate.setUTCHours(23, 59, 59, 999);
 
-    const allDealerCodes = [...allDealerCodesSet];
-    const hasProductCategories =
-      Array.isArray(product_categories) && product_categories.length > 0;
+    // ✅ Dealer & category adjustment logic (NEW, matching dashboard api)
+    let dealerCodes = [];
+    const hasProductCategories = Array.isArray(product_categories) && product_categories.length > 0;
 
-    // ✅ Category normalization helper
+    // 🩵 SPD/DMDD special logic
+    if (
+      Array.isArray(subordinate_codes) &&
+      subordinate_codes.length === 1 &&
+      (subordinate_codes[0] === "SPD" || subordinate_codes[0] === "DMDD")
+    ) {
+      const actorHierarchySPD = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+      if (!actorHierarchySPD || !actorHierarchySPD.hierarchy) {
+        return res.status(500).json({
+          success: false,
+          message: "Hierarchy data not found.",
+        });
+      }
+
+      const hierarchyEntriesSPD = await HierarchyEntries.find({
+        hierarchy_name: "default_sales_flow",
+      });
+
+      let filteredEntries = [];
+      if (subordinate_codes.includes("SPD")) {
+        filteredEntries = hierarchyEntriesSPD.filter((e) => e.mdd && e.mdd !== "4782323");
+      } else if (subordinate_codes.includes("DMDD")) {
+        filteredEntries = hierarchyEntriesSPD.filter((e) => e.mdd === "4782323");
+      }
+
+      dealerCodes = [...new Set(filteredEntries.map((e) => e.dealer).filter(Boolean))];
+      console.log(`SPD/DMDD mode active (${subordinate_codes}): ${dealerCodes.length} dealers found.`);
+    } else {
+      // 🧭 Use last subordinate code to fetch respective dealers
+      const dealerFilters = subordinate_codes || [];
+      if (dealerFilters.length > 0) {
+        const hierarchyConfig = await ActorTypesHierarchy.findOne({
+          name: "default_sales_flow",
+        });
+        if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
+          return res.status(500).json({
+            success: false,
+            message: "Hierarchy config not found or invalid.",
+          });
+        }
+
+        const activeCode = dealerFilters[dealerFilters.length - 1];
+        let activeField = null;
+
+        const sampleEntry = await HierarchyEntries.findOne({
+          hierarchy_name: "default_sales_flow",
+          $or: [
+            { smd: activeCode },
+            { asm: activeCode },
+            { mdd: activeCode },
+            { tse: activeCode },
+            { dealer: activeCode },
+          ],
+        });
+
+        if (sampleEntry) {
+          for (const level of hierarchyConfig.hierarchy) {
+            if (sampleEntry[level] === activeCode) {
+              activeField = level;
+              break;
+            }
+          }
+        }
+
+        activeField =
+          activeField ||
+          hierarchyConfig.hierarchy[Math.min(
+            dealerFilters.length - 1,
+            hierarchyConfig.hierarchy.length - 1
+          )];
+
+        const hierarchyEntriesFiltered = await HierarchyEntries.find({
+          hierarchy_name: "default_sales_flow",
+          [activeField]: activeCode,
+        });
+
+        dealerCodes = [
+          ...new Set(hierarchyEntriesFiltered.map((entry) => entry.dealer).filter(Boolean)),
+        ];
+      } else {
+        dealerCodes = [...allDealerCodesSet];
+      }
+    }
+
+    // === Category-wise Sell Out aggregation using dealerCodes (like dashboard)
     const normalize = (str = "") => str.toLowerCase().replace(/[_\s]+/g, "");
     const normalizedSelected = product_categories.map(normalize);
 
-    // === Raw sales (⚙️ NOW CATEGORY-AWARE WITH DEALER SCOPE) ===
-    const mtdSalesRaw = await SalesData.find(
-      {
-        sales_type: "Sell Out",
-        date: { $gte: startDate, $lte: endDate },
-        ...(allDealerCodes.length > 0 ? { buyer_code: { $in: allDealerCodes } } : {}),
-        ...(hasProductCategories ? {
-          $expr: {
-            $in: [
-              {
-                $toLower: {
-                  $replaceAll: {
-                    input: { $ifNull: ["$product_category", ""] },
-                    find: " ",
-                    replacement: "",
+    const buildCategoryQuery = (dateRange) => ({
+      sales_type: "Sell Out",
+      date: { $gte: dateRange.start, $lte: dateRange.end },
+      ...(dealerCodes.length > 0 ? { buyer_code: { $in: dealerCodes } } : {}),
+      ...(hasProductCategories
+        ? {
+            $expr: {
+              $in: [
+                {
+                  $toLower: {
+                    $replaceAll: {
+                      input: { $ifNull: ["$product_category", ""] },
+                      find: " ",
+                      replacement: "",
+                    },
                   },
                 },
-              },
-              normalizedSelected,
-            ],
-          },
-
-        } : {}),
-      },
-      { buyer_code: 1, product_category: 1, total_amount: 1, quantity: 1 }
-    );
-
-    const lmtdSalesRaw = await SalesData.find(
-      {
-        sales_type: "Sell Out",
-        date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
-        ...(allDealerCodes.length > 0 ? { buyer_code: { $in: allDealerCodes } } : {}),
-        ...(hasProductCategories ? {
-          $expr: {
-          $in: [
-            {
-              $toLower: {
-                $replaceAll: {
-                  input: { $ifNull: ["$product_category", ""] },
-                  find: " ",
-                  replacement: "",
-                },
-              },
+                normalizedSelected,
+              ],
             },
-            normalizedSelected,
-          ],
-        },
+          }
+        : {}),
+    });
 
-        } : {}),
-      },
-      { buyer_code: 1, product_category: 1, total_amount: 1, quantity: 1 }
+    const mtdSalesRaw = await SalesData.find(buildCategoryQuery({ start: startDate, end: endDate }), {
+      product_category: 1,
+      total_amount: 1,
+      quantity: 1,
+    });
+    const lmtdSalesRaw = await SalesData.find(
+      buildCategoryQuery({ start: lmtdStartDate, end: lmtdEndDate }),
+      { product_category: 1, total_amount: 1, quantity: 1 }
     );
 
-    // ✅ Category enrichment (no Product lookup)
     const enrich = (sales) =>
       sales.map((s) => ({
         ...s._doc,
@@ -406,7 +470,6 @@ exports.getSubordinatesForUser = async (req, res) => {
     const enrichedMTDSales = enrich(mtdSalesRaw);
     const enrichedLMTDSales = enrich(lmtdSalesRaw);
 
-    // === Category-wise aggregation ===
     const sumByCategory = (sales) =>
       sales.reduce((map, s) => {
         const val =
@@ -417,11 +480,12 @@ exports.getSubordinatesForUser = async (req, res) => {
 
     const mtdCategoryMap = sumByCategory(enrichedMTDSales);
     const lmtdCategoryMap = sumByCategory(enrichedLMTDSales);
-    const allCategories = new Set([...Object.keys(mtdCategoryMap), ...Object.keys(lmtdCategoryMap)]);
+    const allCategories = new Set([
+      ...Object.keys(mtdCategoryMap),
+      ...Object.keys(lmtdCategoryMap),
+    ]);
 
-    // ✅ Categories now coexist with subordinates, scoped by subordinates
-    if (hasProductCategories || allCategories.size > 0) {
-      const categoryScope = allDealerCodes.length > 0 ? "within_subordinates" : "global";
+    if (allCategories.size > 0) {
       const categoryWiseSales = [...allCategories].map((cat) => {
         const mtd = mtdCategoryMap[cat] || 0;
         const lmtd = lmtdCategoryMap[cat] || 0;
@@ -430,7 +494,7 @@ exports.getSubordinatesForUser = async (req, res) => {
           code: cat,
           name: cat,
           position: "product_category",
-          scope: categoryScope,
+          scope: "within_subordinates",
           mtd_sell_out: mtd,
           lmtd_sell_out: lmtd,
           sell_out_growth: growth.toFixed(2),
@@ -438,10 +502,6 @@ exports.getSubordinatesForUser = async (req, res) => {
       });
       subordinates.push(...categoryWiseSales);
     }
-
-    // ⚙️ The rest of your logic (standard sales grouping, M-1, M-2, etc.) stays untouched.
-    // ...
-    // (Keep your same FTD, monthly windows, contribution logic here)
 
     res.status(200).json({
       success: true,
@@ -462,6 +522,8 @@ exports.getSubordinatesForUser = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+
 
 
 exports.getHierarchyDataStats = async (req, res) => {
