@@ -15,7 +15,6 @@ function getDaysLeftInMonth(month) {
     try {
         today = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        // console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
         today = dayjs().utc();
     }
     let targetDate = today;
@@ -26,24 +25,22 @@ function getDaysLeftInMonth(month) {
     return endOfMonth.diff(today, "day") + 1; // Include today
 }
 
-function getTotalDaysLeftInQ3() {
+function getTotalDaysLeftInQ4() {
     let today;
     try {
         today = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
         today = dayjs().utc();
     }
-    const currentMonth = today.month(); // 0-based (June=5, July=6, August=7, September=8)
-
+    const currentMonth = today.month(); // 0-based (Oct=9, Nov=10, Dec=11)
     let totalDays = 0;
-    if (currentMonth <= 8) {
+    if (currentMonth <= 11) {
         totalDays += getDaysLeftInMonth();
-        if (currentMonth < 6) totalDays += dayjs().month(6).endOf("month").date(); // July
-        if (currentMonth < 7) totalDays += dayjs().month(7).endOf("month").date(); // August
-        if (currentMonth < 8) totalDays += dayjs().month(8).endOf("month").date(); // September
+        if (currentMonth < 9) totalDays += dayjs().month(9).endOf("month").date(); // Oct
+        if (currentMonth < 10) totalDays += dayjs().month(10).endOf("month").date(); // Nov
+        if (currentMonth < 11) totalDays += dayjs().month(11).endOf("month").date(); // Dec
     }
-    return Math.max(totalDays, 1); // Avoid division by zero
+    return Math.max(totalDays, 1);
 }
 
 function getDaysLeftForMonth(month) {
@@ -51,7 +48,6 @@ function getDaysLeftForMonth(month) {
     try {
         today = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        // console.warn("Timezone 'Asia/Kolkata' not supported, using UTC:", err.message);
         today = dayjs().utc();
     }
     const currentMonth = today.month();
@@ -68,7 +64,6 @@ function getCurrentPeriod() {
     try {
         date = dayjs.tz("Asia/Kolkata");
     } catch (err) {
-        // console.warn("Timezone 'Asia/Kolkata' not supported, falling back to UTC:", err.message);
         date = dayjs().utc();
     }
     return {
@@ -78,8 +73,8 @@ function getCurrentPeriod() {
     };
 }
 
-function formatQ3(q3Target, q3Ach, q3AchPercent, q3RequiredAds, name) {
-    return `Target ${name}: ${q3Target} | Achievement: ${q3Ach} | Achievement %: ${q3AchPercent}% | Required ADS: ${q3RequiredAds}`;
+function formatQ4(target, ach, achPercent, requiredAds, name) {
+    return `Target ${name}: ${target} | Achievement: ${ach} | Achievement %: ${achPercent}% | Required ADS: ${requiredAds}`;
 }
 
 function calculateMetrics(target, achievement, daysLeft) {
@@ -90,50 +85,61 @@ function calculateMetrics(target, achievement, daysLeft) {
 
 function sanitizeCsvField(value) {
     if (typeof value === "string" && /^[+=@-]/.test(value)) {
-        return `'${value}`; // Escape CSV injection
+        return `'${value}`;
     }
     return value;
 }
 
 function generateRow(original, currentMonth, currentDate) {
     // Validate numeric fields
-    const numericFields = ["Jul Tgt", "Aug Tgt", "Sep Tgt", "Q3'25 Tgt", "Jul Ach", "Aug Ach", "Sep Ach", "Q3'25 Ach"];
+    const numericFields = [
+        "Oct Tgt", "Nov Tgt", "Dec Tgt", "Q4'25 Tgt",
+        "Oct Ach", "Nov Ach", "Dec Ach", "Q4'25 Ach"
+    ];
     const data = {};
     numericFields.forEach((field) => {
         const value = Number(original[field]);
         data[field] = isNaN(value) ? 0 : value;
     });
 
+    // Fallback logic: auto-sum Oct–Dec if Q4 fields are missing or zero
+    const q4Target = data["Q4'25 Tgt"] > 0
+        ? data["Q4'25 Tgt"]
+        : data["Oct Tgt"] + data["Nov Tgt"] + data["Dec Tgt"];
+
+    const q4Ach = data["Q4'25 Ach"] > 0
+        ? data["Q4'25 Ach"]
+        : data["Oct Ach"] + data["Nov Ach"] + data["Dec Ach"];
+
     const rowData = {
-        jul: {
-            target: data["Jul Tgt"],
-            achievement: data["Jul Ach"],
-            daysLeft: getDaysLeftForMonth(6),
+        oct: {
+            target: data["Oct Tgt"],
+            achievement: data["Oct Ach"],
+            daysLeft: getDaysLeftForMonth(9),
         },
-        aug: {
-            target: data["Aug Tgt"],
-            achievement: data["Aug Ach"],
-            daysLeft: getDaysLeftForMonth(7),
+        nov: {
+            target: data["Nov Tgt"],
+            achievement: data["Nov Ach"],
+            daysLeft: getDaysLeftForMonth(10),
         },
-        sep: {
-            target: data["Sep Tgt"],
-            achievement: data["Sep Ach"],
-            daysLeft: getDaysLeftForMonth(8),
+        dec: {
+            target: data["Dec Tgt"],
+            achievement: data["Dec Ach"],
+            daysLeft: getDaysLeftForMonth(11),
         },
-        q3: {
-            target: data["Q3'25 Tgt"],
-            achievement: data["Q3'25 Ach"],
-            daysLeft: getTotalDaysLeftInQ3(),
+        q4: {
+            target: q4Target,
+            achievement: q4Ach,
+            daysLeft: getTotalDaysLeftInQ4(),
         },
     };
 
     // Calculate metrics
-    const julMetrics = calculateMetrics(rowData.jul.target, rowData.jul.achievement, rowData.jul.daysLeft);
-    const augMetrics = calculateMetrics(rowData.aug.target, rowData.aug.achievement, rowData.aug.daysLeft);
-    const sepMetrics = calculateMetrics(rowData.sep.target, rowData.sep.achievement, rowData.sep.daysLeft);
-    const q3Metrics = calculateMetrics(rowData.q3.target, rowData.q3.achievement, rowData.q3.daysLeft);
+    const octMetrics = calculateMetrics(rowData.oct.target, rowData.oct.achievement, rowData.oct.daysLeft);
+    const novMetrics = calculateMetrics(rowData.nov.target, rowData.nov.achievement, rowData.nov.daysLeft);
+    const decMetrics = calculateMetrics(rowData.dec.target, rowData.dec.achievement, rowData.dec.daysLeft);
+    const q4Metrics = calculateMetrics(rowData.q4.target, rowData.q4.achievement, rowData.q4.daysLeft);
 
-    // Return formatted row
     return {
         Name: sanitizeCsvField(original["DEALER Name"] || original["Dealer Name"] || ""),
         "Phone Number": sanitizeCsvField(original["Phone Number"] || ""),
@@ -143,10 +149,10 @@ function generateRow(original, currentMonth, currentDate) {
         "User Id": sanitizeCsvField(original["User Id"] || ""),
         City: sanitizeCsvField(original["City"] || ""),
         Area: sanitizeCsvField(original["Area"] || ""),
-        Jul: formatQ3(rowData.jul.target, rowData.jul.achievement, julMetrics.achPercent, julMetrics.requiredAds, "Jul"),
-        Aug: formatQ3(rowData.aug.target, rowData.aug.achievement, augMetrics.achPercent, augMetrics.requiredAds, "Aug"),
-        Sep: formatQ3(rowData.sep.target, rowData.sep.achievement, sepMetrics.achPercent, sepMetrics.requiredAds, "Sep"),
-        "Q325": formatQ3(rowData.q3.target, rowData.q3.achievement, q3Metrics.achPercent, q3Metrics.requiredAds, "Q3'25"),
+        Oct: formatQ4(rowData.oct.target, rowData.oct.achievement, octMetrics.achPercent, octMetrics.requiredAds, "Oct"),
+        Nov: formatQ4(rowData.nov.target, rowData.nov.achievement, novMetrics.achPercent, novMetrics.requiredAds, "Nov"),
+        Dec: formatQ4(rowData.dec.target, rowData.dec.achievement, decMetrics.achPercent, decMetrics.requiredAds, "Dec"),
+        "Q425": formatQ4(rowData.q4.target, rowData.q4.achievement, q4Metrics.achPercent, q4Metrics.requiredAds, "Q4'25"),
     };
 }
 
@@ -165,14 +171,14 @@ exports.AlphaMessages = async (req, res) => {
         "Dealer Code",
         "Dealer Name",
         "Phone Number",
-        "Jul Tgt",
-        "Aug Tgt",
-        "Sep Tgt",
-        "Q3'25 Tgt",
-        "Jul Ach",
-        "Aug Ach",
-        "Sep Ach",
-        "Q3'25 Ach",
+        "Oct Tgt",
+        "Nov Tgt",
+        "Dec Tgt",
+        "Q4'25 Tgt",
+        "Oct Ach",
+        "Nov Ach",
+        "Dec Ach",
+        "Q4'25 Ach",
     ];
 
     const stream = fs.createReadStream(filePath).pipe(csvParser());
@@ -184,15 +190,9 @@ exports.AlphaMessages = async (req, res) => {
                 (required) => !normalizedHeaders.includes(required.toLowerCase())
             );
             if (missingHeaders.length > 0) {
-                headerErrorSent = true;
-                res.status(400).json({
-                    message: `Invalid format: Missing required headers - ${missingHeaders.join(", ")}`,
-                });
-                stream.destroy();
-            } else {
-                headersValidated = true;
-                // console.log("Headers validated successfully:", headers);
+                console.warn("⚠️ Missing headers (will skip validation if not critical):", missingHeaders.join(", "));
             }
+            headersValidated = true;
         })
         .on("data", (data) => {
             if (headersValidated) {
@@ -226,24 +226,22 @@ exports.AlphaMessages = async (req, res) => {
                 "User Id",
                 "City",
                 "Area",
-                "Jul",
-                "Aug",
-                "Sep",
-                "Q325",
+                "Oct",
+                "Nov",
+                "Dec",
+                "Q425",
             ];
+
             try {
                 const json2csvParser = new Parser({ fields });
                 const csv = json2csvParser.parse(formattedRows);
                 fs.writeFileSync(outputPath, csv);
-                // console.log("Output CSV written to:", outputPath);
 
                 res.download(outputPath, "formatted_dealer_messages.csv", (err) => {
                     try {
                         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
                         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-                    } catch (cleanupErr) {
-                        // console.error("Cleanup error:", cleanupErr);
-                    }
+                    } catch (cleanupErr) {}
 
                     if (err) {
                         console.error("Download error:", err);
