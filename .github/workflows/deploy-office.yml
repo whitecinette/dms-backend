@@ -3,48 +3,54 @@ name: DMS Backend CI/CD (Office Server)
 on:
   push:
     branches:
-      - main  # Trigger on pushes to the main branch
+      - main  # Trigger deployment only on pushes to main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the code
-      - name: Checkout Repository
+      # Step 1: Checkout the latest repository code
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Step 2: Setup SSH Key
+      # Step 2: Configure SSH Access using the PEM key from GitHub Secrets
       - name: Configure SSH Access
         run: |
-          echo "${{ secrets.SERVER_SSH_KEY }}" > server-key.pem
+          echo "${{ secrets.SERVER_KEY }}" > server-key.pem
           chmod 600 server-key.pem
 
-      # Step 3: Deploy to Office Windows Server
+      # Step 3: Connect and deploy to the Windows server
       - name: Deploy Backend to Siddha Connect Office
         run: |
           ssh -tt -i server-key.pem -o StrictHostKeyChecking=no Administrator@home.siddhaconnect.com << 'EOF'
-            set -e  # Exit on any error
-
+            set -e
             echo "🚀 Connected to Siddha Connect Office Server"
 
             cd "D:\Siddha Connect\dms-backend"
+
+            echo "📦 Deployment triggered from GitHub Actions at: $(date)" >> deploy.log
 
             echo "🔄 Pulling latest changes..."
             git stash || true
             git pull origin main
 
             echo "📦 Installing dependencies..."
-            npm install --production
+            npm ci --omit=dev
 
             echo "🌎 Setting environment variables..."
             setx NODE_ENV "production"
 
-            echo "🚀 Restarting PM2 processes..."
-            pm2 restart siddha-connect || pm2 start server.js --name siddha-connect
-            pm2 restart cloudflare-tunnel || true
+            echo "⚙️ Restarting PM2 processes..."
+            pm2 describe siddha-connect > NUL 2>&1 || pm2 start server.js --name siddha-connect
+            pm2 restart siddha-connect
+
+            echo "🌐 Ensuring Cloudflare Tunnel is active..."
+            pm2 describe cloudflare-tunnel > NUL 2>&1 || pm2 start cloudflared --name cloudflare-tunnel -- tunnel run siddha-connect
+            pm2 restart cloudflare-tunnel
+
             pm2 save
 
-            echo "✅ Deployment completed successfully!"
-            exit
+            echo "✅ GitHub Action reached and deployed successfully at $(date)" | tee -a deploy.log
+            exit 0
           EOF
