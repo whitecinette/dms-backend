@@ -1,0 +1,50 @@
+name: DMS Backend CI/CD (Office Server)
+
+on:
+  push:
+    branches:
+      - main  # Trigger on pushes to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # Step 2: Setup SSH Key
+      - name: Configure SSH Access
+        run: |
+          echo "${{ secrets.SERVER_SSH_KEY }}" > server-key.pem
+          chmod 600 server-key.pem
+
+      # Step 3: Deploy to Office Windows Server
+      - name: Deploy Backend to Siddha Connect Office
+        run: |
+          ssh -tt -i server-key.pem -o StrictHostKeyChecking=no Administrator@home.siddhaconnect.com << 'EOF'
+            set -e  # Exit on any error
+
+            echo "🚀 Connected to Siddha Connect Office Server"
+
+            cd "D:\Siddha Connect\dms-backend"
+
+            echo "🔄 Pulling latest changes..."
+            git stash || true
+            git pull origin main
+
+            echo "📦 Installing dependencies..."
+            npm install --production
+
+            echo "🌎 Setting environment variables..."
+            setx NODE_ENV "production"
+
+            echo "🚀 Restarting PM2 processes..."
+            pm2 restart siddha-connect || pm2 start server.js --name siddha-connect
+            pm2 restart cloudflare-tunnel || true
+            pm2 save
+
+            echo "✅ Deployment completed successfully!"
+            exit
+          EOF
