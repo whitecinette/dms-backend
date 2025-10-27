@@ -69,7 +69,7 @@ mongoose.connection.on("error", (err) => {
 
 // Default route
 app.get("/", (req, res) => {
-  res.send("Starting over ;)");
+  res.send("Starting over again ;)");
 });
 // Routes
 readdirSync("./routes").map((r) => app.use("/", require("./routes/" + r)));
