@@ -542,6 +542,8 @@ exports.getHierarchyDataStats = async (req, res) => {
       product_categories = [], // ✅ added
     } = req.body;
 
+    console.log("Parent code: ", parent_code)
+
     if (!code || !start_date || !end_date || !position) {
       return res.status(400).json({
         success: false,
@@ -602,7 +604,7 @@ exports.getHierarchyDataStats = async (req, res) => {
     const normalize = (str = "") => str.toLowerCase().replace(/[_\s]+/g, "");
     const normalizedSelected = product_categories.map(normalize);
 
-    // === STEP 3: Special case for "division"
+    // === Special case for "division"
     if (position === "division") {
       const spdEntries = hierarchyEntries.filter(
         (e) => e.mdd && e.mdd !== "4782323"
@@ -635,24 +637,22 @@ exports.getHierarchyDataStats = async (req, res) => {
           sales_type: "Sell Out",
           date: { $gte: from, $lte: to },
         };
-  if (hasProductCategories) {
-    matchQuery.$expr = {
-      $in: [
-        {
-          $toLower: {
-            $replaceAll: {
-              input: { $ifNull: ["$product_category", ""] },
-              find: " ",
-              replacement: "",
-            },
-          },
-        },
-        normalizedSelected,
-      ],
-    };
-  }
-
-
+        if (hasProductCategories) {
+          matchQuery.$expr = {
+            $in: [
+              {
+                $toLower: {
+                  $replaceAll: {
+                    input: { $ifNull: ["$product_category", ""] },
+                    find: " ",
+                    replacement: "",
+                  },
+                },
+              },
+              normalizedSelected,
+            ],
+          };
+        }
 
         const result = await SalesData.aggregate([
           { $match: matchQuery },
@@ -717,6 +717,7 @@ exports.getHierarchyDataStats = async (req, res) => {
         ],
       });
     }
+
 
     // === STEP 4: For other positions
     const filteredEntries = hierarchyEntries.filter((entry) => entry[position]);
@@ -925,6 +926,15 @@ if (hasProductCategories) {
         "Contribution%": contribution.toFixed(2),
       };
     });
+    console.log("Response data:", {
+      position,
+      paginated,
+      page,
+      limit,
+      count: enrichedSubs.length,
+      subordinates: enrichedSubs,
+    });
+
 
     res.status(200).json({
       success: true,
@@ -2683,3 +2693,368 @@ exports.getHierarchyDataByFirmName = async (req, res) => {
     });
   }
 };
+
+
+exports.getHierarchyMyntraDataStats = async (req, res) => {
+  try {
+    console.log("🔍 [MyntraHierarchy] API reached");
+
+    const { code } = req.user;
+    const {
+      filter_type = "value",
+      start_date,
+      end_date,
+      selected_entities = [],
+      product_categories = [],
+      position = "division",
+      parent_code,
+      page = 1,
+      limit = 50,
+    } = req.body;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({
+        success: false,
+        message: "start_date and end_date are required.",
+      });
+    }
+
+    // === STEP 1: Load hierarchy definition
+    const actorHierarchy = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+    if (!actorHierarchy || !actorHierarchy.hierarchy) {
+      return res.status(500).json({ success: false, message: "Hierarchy data not found." });
+    }
+    const allPositions = actorHierarchy.hierarchy;
+
+    // === STEP 2: Collect hierarchy entries
+    let hierarchyEntries = [];
+
+    const baseFilter = { hierarchy_name: "default_sales_flow" };
+
+    if (parent_code) {
+      // When a parent code is provided (click on SPD/DMDD/ASM etc.)
+      hierarchyEntries = await HierarchyEntries.find({
+        ...baseFilter,
+        $or: allPositions.map((pos) => ({ [pos]: parent_code })),
+      });
+    } else if (Array.isArray(selected_entities) && selected_entities.length > 0) {
+      // When user has applied selected filters
+      hierarchyEntries = await HierarchyEntries.find({
+        ...baseFilter,
+        $or: allPositions.map((pos) => ({ [pos]: { $in: selected_entities } })),
+      });
+    } else {
+      // Default case — no selection, fetch entire flow
+      hierarchyEntries = await HierarchyEntries.find(baseFilter);
+    }
+
+
+    // === STEP 3: Normalize product categories
+    const hasProductCategories = Array.isArray(product_categories) && product_categories.length > 0;
+    const normalize = (str = "") => str.toLowerCase().replace(/[_\s]+/g, "");
+    const normalizedSelected = product_categories.map(normalize);
+
+    // === 🧭 SPECIAL CASE: Division level (SPD vs DMDD)
+    if (position === "division") {
+      console.log("🏗️ Division case triggered");
+
+      const spdEntries = hierarchyEntries.filter((e) => e.mdd && e.mdd !== "4782323");
+      const dmddEntries = hierarchyEntries.filter((e) => e.mdd === "4782323");
+
+      const spdDealers = [...new Set(spdEntries.map((e) => e.dealer).filter(Boolean))];
+      const dmddDealers = [...new Set(dmddEntries.map((e) => e.dealer).filter(Boolean))];
+
+      const startDate = new Date(start_date);
+      startDate.setUTCHours(0, 0, 0, 0);
+      const endDate = new Date(end_date);
+      endDate.setUTCHours(0, 0, 0, 0);
+      const lmtdStartDate = new Date(startDate);
+      lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+      const lmtdEndDate = new Date(endDate);
+      lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+      const aggregate = async (codes, from, to) => {
+        if (codes.length === 0) return 0;
+        const match = {
+          buyer_code: { $in: codes },
+          sales_type: "Sell Out",
+          date: { $gte: from, $lte: to },
+        };
+        if (hasProductCategories) {
+          match.$expr = {
+            $in: [
+              {
+                $toLower: {
+                  $replaceAll: {
+                    input: { $ifNull: ["$product_category", ""] },
+                    find: " ",
+                    replacement: "",
+                  },
+                },
+              },
+              normalizedSelected,
+            ],
+          };
+        }
+
+        const result = await SalesData.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble:
+                    `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
+              },
+            },
+          },
+        ]);
+        return result.length > 0 ? result[0].total : 0;
+      };
+
+      const spd_mtd = await aggregate(spdDealers, startDate, endDate);
+      const spd_lmtd = await aggregate(spdDealers, lmtdStartDate, lmtdEndDate);
+      const dmdd_mtd = await aggregate(dmddDealers, startDate, endDate);
+      const dmdd_lmtd = await aggregate(dmddDealers, lmtdStartDate, lmtdEndDate);
+
+      const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+      const response = {
+        success: true,
+        position: "division",
+        count: 2,
+        subordinates: [
+          {
+            code: "SPD",
+            name: "SPD",
+            position: "division",
+            mtd_sell_out: spd_mtd,
+            lmtd_sell_out: spd_lmtd,
+            sell_out_growth: calcGrowth(spd_mtd, spd_lmtd).toFixed(2),
+            "Contribution%": 0,
+          },
+          {
+            code: "DMDD",
+            name: "DMDD",
+            position: "division",
+            mtd_sell_out: dmdd_mtd,
+            lmtd_sell_out: dmdd_lmtd,
+            sell_out_growth: calcGrowth(dmdd_mtd, dmdd_lmtd).toFixed(2),
+            "Contribution%": 0,
+          },
+        ],
+      };
+
+      console.log("🟢 [MyntraHierarchy] Division Response:", response);
+      return res.status(200).json(response);
+    }
+
+    // === STEP 4: Determine next position
+    const currentPosition = position;
+    const nextIndex = allPositions.indexOf(currentPosition) + 1;
+    const nextPosition = allPositions[nextIndex] || "dealer";
+
+    // === STEP 5: Filter hierarchy for the given parent (or top level)
+    let filteredEntries;
+    if (parent_code) {
+      filteredEntries = hierarchyEntries.filter((e) =>
+        Object.values(e.toObject()).includes(parent_code)
+      );
+    } else {
+      filteredEntries = hierarchyEntries;
+    }
+
+    const subCodes = [
+      ...new Set(filteredEntries.map((e) => e[nextPosition]).filter(Boolean)),
+    ];
+
+    if (!subCodes.length) {
+      return res.status(200).json({
+        success: true,
+        message: `No ${nextPosition} found under selection.`,
+        subordinates: [],
+      });
+    }
+
+    // === STEP 6: Gather actor data for next level
+    const subs = await ActorCode.find(
+      { code: { $in: subCodes } },
+      { code: 1, name: 1, position: 1, _id: 0 }
+    );
+
+    // === STEP 7: Get all dealer codes under these subs
+    const dealerCodesSet = new Set();
+    for (const sub of subs) {
+      const subDealers = filteredEntries
+        .filter((e) => e[nextPosition] === sub.code && e.dealer)
+        .map((e) => e.dealer);
+      subDealers.forEach((d) => dealerCodesSet.add(d));
+      if (nextPosition === "dealer") dealerCodesSet.add(sub.code);
+    }
+    const dealerCodes = [...dealerCodesSet];
+
+    // === STEP 8: Dates setup
+    const startDate = new Date(start_date);
+    const endDate = new Date(end_date);
+    startDate.setUTCHours(0, 0, 0, 0);
+    endDate.setUTCHours(0, 0, 0, 0);
+
+    const lmtdStartDate = new Date(startDate);
+    const lmtdEndDate = new Date(endDate);
+    lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+    lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+    const makeMatch = (from, to) => {
+      const match = {
+        buyer_code: { $in: dealerCodes },
+        sales_type: "Sell Out",
+        date: { $gte: from, $lte: to },
+      };
+      if (hasProductCategories) {
+        match.$expr = {
+          $in: [
+            {
+              $toLower: {
+                $replaceAll: {
+                  input: { $ifNull: ["$product_category", ""] },
+                  find: " ",
+                  replacement: "",
+                },
+              },
+            },
+            normalizedSelected,
+          ],
+        };
+      }
+      return match;
+    };
+
+    // === STEP 9: Aggregations
+    const aggregateSales = async (from, to) => {
+      const result = await SalesData.aggregate([
+        { $match: makeMatch(from, to) },
+        {
+          $group: {
+            _id: "$buyer_code",
+            total: {
+              $sum: {
+                $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+              },
+            },
+          },
+        },
+      ]);
+      return Object.fromEntries(result.map((e) => [e._id, e.total]));
+    };
+
+    const mtdMap = await aggregateSales(startDate, endDate);
+    const lmtdMap = await aggregateSales(lmtdStartDate, lmtdEndDate);
+
+    // === STEP 10: Month windows (M-1, M-2, M-3)
+    const startOfMonth = new Date(startDate);
+    startOfMonth.setDate(1);
+    const monthWindows = [1, 2, 3].map((offset) => {
+      const mStart = new Date(startOfMonth);
+      mStart.setMonth(mStart.getMonth() - offset);
+      const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
+      return { label: `M-${offset}`, start: mStart, end: mEnd };
+    });
+
+    const monthlyMaps = {};
+    for (const { label, start, end } of monthWindows) {
+      monthlyMaps[label] = await aggregateSales(start, end);
+    }
+
+    // === STEP 11: FTD (first day only)
+    const ftdResult = await SalesData.aggregate([
+      { $match: makeMatch(startDate, startDate) },
+      {
+        $group: {
+          _id: "$buyer_code",
+          total: {
+            $sum: {
+              $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+            },
+          },
+        },
+      },
+    ]);
+    const ftdMap = Object.fromEntries(ftdResult.map((e) => [e._id, e.total]));
+
+    // === STEP 12: Calculate per-subordinate totals
+    const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+    let totalMtd = 0;
+    for (const c of dealerCodes) totalMtd += mtdMap[c] || 0;
+
+    const todayDate = endDate.getDate();
+    const enrichedSubs = subs.map((sub) => {
+      const subDealers = filteredEntries
+        .filter((e) => e[nextPosition] === sub.code && e.dealer)
+        .map((e) => e.dealer);
+      if (nextPosition === "dealer") subDealers.push(sub.code);
+      const dealers = [...new Set(subDealers)];
+
+      let mtd = 0,
+        lmtd = 0,
+        ftd = 0;
+      const monthValues = { "M-1": 0, "M-2": 0, "M-3": 0 };
+      dealers.forEach((c) => {
+        mtd += mtdMap[c] || 0;
+        lmtd += lmtdMap[c] || 0;
+        ftd += ftdMap[c] || 0;
+        for (const key of ["M-1", "M-2", "M-3"]) {
+          monthValues[key] += monthlyMaps[key]?.[c] || 0;
+        }
+      });
+
+      const ads = todayDate > 0 ? mtd / todayDate : 0;
+      const contribution = totalMtd > 0 ? (mtd / totalMtd) * 100 : 0;
+
+      return {
+        code: sub.code,
+        name: sub.name,
+        position: nextPosition,
+        mtd_sell_out: mtd,
+        lmtd_sell_out: lmtd,
+        sell_out_growth: calcGrowth(mtd, lmtd).toFixed(2),
+        "M-1": monthValues["M-1"],
+        "M-2": monthValues["M-2"],
+        "M-3": monthValues["M-3"],
+        ADS: ads.toFixed(2),
+        FTD: ftd,
+        TGT: 0,
+        "Req. ADS": 0,
+        "Contribution%": contribution.toFixed(2),
+      };
+    });
+
+    console.log("🟢 [MyntraHierarchy] Response Preview:", {
+      position: nextPosition,
+      count: enrichedSubs.length,
+      sample: enrichedSubs.slice(0, 10),
+    });
+
+    // === STEP 13: Pagination (dealers only)
+    const startIndex = (page - 1) * limit;
+    const paginated =
+      nextPosition === "dealer"
+        ? enrichedSubs.slice(startIndex, startIndex + limit)
+        : enrichedSubs;
+
+    res.status(200).json({
+      success: true,
+      position: nextPosition,
+      page,
+      limit,
+      total_count: enrichedSubs.length,
+      subordinates: paginated,
+    });
+  } catch (error) {
+    console.error("❌ [MyntraHierarchy] Error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
