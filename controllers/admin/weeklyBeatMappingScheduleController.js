@@ -2122,6 +2122,89 @@ exports.getBeatMappingOverviewForAdminApp = async (req, res) => {
   }
 };
 
+exports.updateWeeklyBeatScheduleStatusByAdmin = async (req, res) => {
+  try {
+    const { scheduleId, entryId, status } = req.body;
+
+    if (!scheduleId || !entryId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: "scheduleId, entryId, and status are required.",
+      });
+    }
+
+    if (!["done", "pending"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Must be either 'done' or 'pending'.",
+      });
+    }
+
+    // Find the document
+    const scheduleDoc = await WeeklyBeatMappingSchedule.findById(scheduleId);
+    if (!scheduleDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "WeeklyBeatMappingSchedule not found.",
+      });
+    }
+
+    // Find the schedule entry index
+    const entryIndex = scheduleDoc.schedule.findIndex(
+      (s) => s._id.toString() === entryId
+    );
+
+    if (entryIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Schedule entry not found in the list.",
+      });
+    }
+
+    // Previous status
+    const prevStatus = scheduleDoc.schedule[entryIndex].status;
+
+    // Update status
+    scheduleDoc.schedule[entryIndex].status = status;
+
+    // If status changed, update counters
+    if (prevStatus !== status) {
+      if (status === "done") {
+        scheduleDoc.done = (scheduleDoc.done || 0) + 1;
+        scheduleDoc.pending = (scheduleDoc.pending || 0) - 1;
+      } else if (status === "pending") {
+        scheduleDoc.done = (scheduleDoc.done || 0) - 1;
+        scheduleDoc.pending = (scheduleDoc.pending || 0) + 1;
+      }
+    }
+
+    // Save updates
+    scheduleDoc.updatedAt = new Date();
+    await scheduleDoc.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Dealer status updated from '${prevStatus}' to '${status}'.`,
+      data: {
+        scheduleId,
+        entryId,
+        prevStatus,
+        newStatus: status,
+        done: scheduleDoc.done,
+        pending: scheduleDoc.pending,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error updating dealer status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+
 
 
 
