@@ -2694,22 +2694,15 @@ exports.getHierarchyDataByFirmName = async (req, res) => {
   }
 };
 
-
 exports.getHierarchyMyntraDataStats = async (req, res) => {
   try {
-    console.log("🔍 [MyntraHierarchy] API reached");
+    console.log("🔍 [MyntraHierarchy] Full multi-level API reached");
 
-    const { code } = req.user;
     const {
       filter_type = "value",
       start_date,
       end_date,
-      selected_entities = [],
       product_categories = [],
-      position = "division",
-      parent_code,
-      page = 1,
-      limit = 50,
     } = req.body;
 
     if (!start_date || !end_date) {
@@ -2719,186 +2712,32 @@ exports.getHierarchyMyntraDataStats = async (req, res) => {
       });
     }
 
-    // === STEP 1: Load hierarchy definition
-    const actorHierarchy = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
-    if (!actorHierarchy || !actorHierarchy.hierarchy) {
-      return res.status(500).json({ success: false, message: "Hierarchy data not found." });
-    }
-    const allPositions = actorHierarchy.hierarchy;
+    // === STEP 1: Load hierarchy + entries
+    const [actorHierarchy, hierarchyEntries] = await Promise.all([
+      ActorTypesHierarchy.findOne({ name: "default_sales_flow" }),
+      HierarchyEntries.find({ hierarchy_name: "default_sales_flow" }),
+    ]);
 
-    // === STEP 2: Collect hierarchy entries
-    let hierarchyEntries = [];
-
-    const baseFilter = { hierarchy_name: "default_sales_flow" };
-
-    if (parent_code) {
-      // When a parent code is provided (click on SPD/DMDD/ASM etc.)
-      hierarchyEntries = await HierarchyEntries.find({
-        ...baseFilter,
-        $or: allPositions.map((pos) => ({ [pos]: parent_code })),
+    if (!actorHierarchy || !actorHierarchy.hierarchy)
+      return res.status(500).json({
+        success: false,
+        message: "Hierarchy data not found.",
       });
-    } else if (Array.isArray(selected_entities) && selected_entities.length > 0) {
-      // When user has applied selected filters
-      hierarchyEntries = await HierarchyEntries.find({
-        ...baseFilter,
-        $or: allPositions.map((pos) => ({ [pos]: { $in: selected_entities } })),
-      });
-    } else {
-      // Default case — no selection, fetch entire flow
-      hierarchyEntries = await HierarchyEntries.find(baseFilter);
-    }
 
-
-    // === STEP 3: Normalize product categories
-    const hasProductCategories = Array.isArray(product_categories) && product_categories.length > 0;
-    const normalize = (str = "") => str.toLowerCase().replace(/[_\s]+/g, "");
-    const normalizedSelected = product_categories.map(normalize);
-
-    // === 🧭 SPECIAL CASE: Division level (SPD vs DMDD)
-    if (position === "division") {
-      console.log("🏗️ Division case triggered");
-
-      const spdEntries = hierarchyEntries.filter((e) => e.mdd && e.mdd !== "4782323");
-      const dmddEntries = hierarchyEntries.filter((e) => e.mdd === "4782323");
-
-      const spdDealers = [...new Set(spdEntries.map((e) => e.dealer).filter(Boolean))];
-      const dmddDealers = [...new Set(dmddEntries.map((e) => e.dealer).filter(Boolean))];
-
-      const startDate = new Date(start_date);
-      startDate.setUTCHours(0, 0, 0, 0);
-      const endDate = new Date(end_date);
-      endDate.setUTCHours(0, 0, 0, 0);
-      const lmtdStartDate = new Date(startDate);
-      lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
-      const lmtdEndDate = new Date(endDate);
-      lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
-
-      const aggregate = async (codes, from, to) => {
-        if (codes.length === 0) return 0;
-        const match = {
-          buyer_code: { $in: codes },
-          sales_type: "Sell Out",
-          date: { $gte: from, $lte: to },
-        };
-        if (hasProductCategories) {
-          match.$expr = {
-            $in: [
-              {
-                $toLower: {
-                  $replaceAll: {
-                    input: { $ifNull: ["$product_category", ""] },
-                    find: " ",
-                    replacement: "",
-                  },
-                },
-              },
-              normalizedSelected,
-            ],
-          };
-        }
-
-        const result = await SalesData.aggregate([
-          { $match: match },
-          {
-            $group: {
-              _id: null,
-              total: {
-                $sum: {
-                  $toDouble:
-                    `$${filter_type === "value" ? "total_amount" : "quantity"}`,
-                },
-              },
-            },
-          },
-        ]);
-        return result.length > 0 ? result[0].total : 0;
-      };
-
-      const spd_mtd = await aggregate(spdDealers, startDate, endDate);
-      const spd_lmtd = await aggregate(spdDealers, lmtdStartDate, lmtdEndDate);
-      const dmdd_mtd = await aggregate(dmddDealers, startDate, endDate);
-      const dmdd_lmtd = await aggregate(dmddDealers, lmtdStartDate, lmtdEndDate);
-
-      const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
-
-      const response = {
-        success: true,
-        position: "division",
-        count: 2,
-        subordinates: [
-          {
-            code: "SPD",
-            name: "SPD",
-            position: "division",
-            mtd_sell_out: spd_mtd,
-            lmtd_sell_out: spd_lmtd,
-            sell_out_growth: calcGrowth(spd_mtd, spd_lmtd).toFixed(2),
-            "Contribution%": 0,
-          },
-          {
-            code: "DMDD",
-            name: "DMDD",
-            position: "division",
-            mtd_sell_out: dmdd_mtd,
-            lmtd_sell_out: dmdd_lmtd,
-            sell_out_growth: calcGrowth(dmdd_mtd, dmdd_lmtd).toFixed(2),
-            "Contribution%": 0,
-          },
-        ],
-      };
-
-      console.log("🟢 [MyntraHierarchy] Division Response:", response);
-      return res.status(200).json(response);
-    }
-
-    // === STEP 4: Determine next position
-    const currentPosition = position;
-    const nextIndex = allPositions.indexOf(currentPosition) + 1;
-    const nextPosition = allPositions[nextIndex] || "dealer";
-
-    // === STEP 5: Filter hierarchy for the given parent (or top level)
-    let filteredEntries;
-    if (parent_code) {
-      filteredEntries = hierarchyEntries.filter((e) =>
-        Object.values(e.toObject()).includes(parent_code)
-      );
-    } else {
-      filteredEntries = hierarchyEntries;
-    }
-
-    const subCodes = [
-      ...new Set(filteredEntries.map((e) => e[nextPosition]).filter(Boolean)),
-    ];
-
-    if (!subCodes.length) {
+    if (!hierarchyEntries.length)
       return res.status(200).json({
         success: true,
-        message: `No ${nextPosition} found under selection.`,
-        subordinates: [],
+        message: "No hierarchy entries found.",
+        data: {},
       });
-    }
 
-    // === STEP 6: Gather actor data for next level
-    const subs = await ActorCode.find(
-      { code: { $in: subCodes } },
-      { code: 1, name: 1, position: 1, _id: 0 }
-    );
+    const allPositions = actorHierarchy.hierarchy;
+    console.log("✅ Loaded hierarchy:", allPositions);
 
-    // === STEP 7: Get all dealer codes under these subs
-    const dealerCodesSet = new Set();
-    for (const sub of subs) {
-      const subDealers = filteredEntries
-        .filter((e) => e[nextPosition] === sub.code && e.dealer)
-        .map((e) => e.dealer);
-      subDealers.forEach((d) => dealerCodesSet.add(d));
-      if (nextPosition === "dealer") dealerCodesSet.add(sub.code);
-    }
-    const dealerCodes = [...dealerCodesSet];
-
-    // === STEP 8: Dates setup
+    // === STEP 2: Date setup
     const startDate = new Date(start_date);
-    const endDate = new Date(end_date);
     startDate.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(end_date);
     endDate.setUTCHours(0, 0, 0, 0);
 
     const lmtdStartDate = new Date(startDate);
@@ -2906,9 +2745,26 @@ exports.getHierarchyMyntraDataStats = async (req, res) => {
     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
 
-    const makeMatch = (from, to) => {
+    // Monthly windows (M-1, M-2, M-3)
+    const startOfMonth = new Date(startDate);
+    startOfMonth.setDate(1);
+    const monthWindows = [1, 2, 3].map((offset) => {
+      const mStart = new Date(startOfMonth);
+      mStart.setMonth(mStart.getMonth() - offset);
+      const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
+      mStart.setUTCHours(0, 0, 0, 0);
+      mEnd.setUTCHours(0, 0, 0, 0);
+      return { label: `M-${offset}`, start: mStart, end: mEnd };
+    });
+
+    const hasProductCategories =
+      Array.isArray(product_categories) && product_categories.length > 0;
+    const normalize = (s = "") => s.toLowerCase().replace(/[_\s]+/g, "");
+    const normalizedSelected = product_categories.map(normalize);
+
+    const makeMatch = (codes, from, to) => {
       const match = {
-        buyer_code: { $in: dealerCodes },
+        buyer_code: { $in: codes },
         sales_type: "Sell Out",
         date: { $gte: from, $lte: to },
       };
@@ -2931,130 +2787,812 @@ exports.getHierarchyMyntraDataStats = async (req, res) => {
       return match;
     };
 
-    // === STEP 9: Aggregations
-    const aggregateSales = async (from, to) => {
-      const result = await SalesData.aggregate([
-        { $match: makeMatch(from, to) },
-        {
-          $group: {
-            _id: "$buyer_code",
-            total: {
-              $sum: {
-                $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+    const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+    const aggregateTotals = async (codes) => {
+      if (!codes.length)
+        return {
+          mtd: 0,
+          lmtd: 0,
+          ftd: 0,
+          months: { "M-1": 0, "M-2": 0, "M-3": 0 },
+        };
+
+      // Parallel aggregation for speed
+      const [mtd, lmtd, ftd, ...monthResults] = await Promise.all([
+        SalesData.aggregate([
+          { $match: makeMatch(codes, startDate, endDate) },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
               },
             },
           },
-        },
-      ]);
-      return Object.fromEntries(result.map((e) => [e._id, e.total]));
-    };
-
-    const mtdMap = await aggregateSales(startDate, endDate);
-    const lmtdMap = await aggregateSales(lmtdStartDate, lmtdEndDate);
-
-    // === STEP 10: Month windows (M-1, M-2, M-3)
-    const startOfMonth = new Date(startDate);
-    startOfMonth.setDate(1);
-    const monthWindows = [1, 2, 3].map((offset) => {
-      const mStart = new Date(startOfMonth);
-      mStart.setMonth(mStart.getMonth() - offset);
-      const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
-      return { label: `M-${offset}`, start: mStart, end: mEnd };
-    });
-
-    const monthlyMaps = {};
-    for (const { label, start, end } of monthWindows) {
-      monthlyMaps[label] = await aggregateSales(start, end);
-    }
-
-    // === STEP 11: FTD (first day only)
-    const ftdResult = await SalesData.aggregate([
-      { $match: makeMatch(startDate, startDate) },
-      {
-        $group: {
-          _id: "$buyer_code",
-          total: {
-            $sum: {
-              $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+        ]),
+        SalesData.aggregate([
+          { $match: makeMatch(codes, lmtdStartDate, lmtdEndDate) },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
+              },
             },
           },
-        },
-      },
-    ]);
-    const ftdMap = Object.fromEntries(ftdResult.map((e) => [e._id, e.total]));
+        ]),
+        SalesData.aggregate([
+          { $match: makeMatch(codes, startDate, startDate) },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                },
+              },
+            },
+          },
+        ]),
+        ...monthWindows.map(({ start, end }) =>
+          SalesData.aggregate([
+            { $match: makeMatch(codes, start, end) },
+            {
+              $group: {
+                _id: null,
+                total: {
+                  $sum: {
+                    $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+                  },
+                },
+              },
+            },
+          ])
+        ),
+      ]);
 
-    // === STEP 12: Calculate per-subordinate totals
-    const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
-    let totalMtd = 0;
-    for (const c of dealerCodes) totalMtd += mtdMap[c] || 0;
-
-    const todayDate = endDate.getDate();
-    const enrichedSubs = subs.map((sub) => {
-      const subDealers = filteredEntries
-        .filter((e) => e[nextPosition] === sub.code && e.dealer)
-        .map((e) => e.dealer);
-      if (nextPosition === "dealer") subDealers.push(sub.code);
-      const dealers = [...new Set(subDealers)];
-
-      let mtd = 0,
-        lmtd = 0,
-        ftd = 0;
-      const monthValues = { "M-1": 0, "M-2": 0, "M-3": 0 };
-      dealers.forEach((c) => {
-        mtd += mtdMap[c] || 0;
-        lmtd += lmtdMap[c] || 0;
-        ftd += ftdMap[c] || 0;
-        for (const key of ["M-1", "M-2", "M-3"]) {
-          monthValues[key] += monthlyMaps[key]?.[c] || 0;
-        }
+      const months = {};
+      monthWindows.forEach((w, i) => {
+        months[w.label] = monthResults[i][0]?.total || 0;
       });
 
-      const ads = todayDate > 0 ? mtd / todayDate : 0;
-      const contribution = totalMtd > 0 ? (mtd / totalMtd) * 100 : 0;
-
       return {
-        code: sub.code,
-        name: sub.name,
-        position: nextPosition,
-        mtd_sell_out: mtd,
-        lmtd_sell_out: lmtd,
-        sell_out_growth: calcGrowth(mtd, lmtd).toFixed(2),
-        "M-1": monthValues["M-1"],
-        "M-2": monthValues["M-2"],
-        "M-3": monthValues["M-3"],
-        ADS: ads.toFixed(2),
-        FTD: ftd,
+        mtd: mtd[0]?.total || 0,
+        lmtd: lmtd[0]?.total || 0,
+        ftd: ftd[0]?.total || 0,
+        months,
+      };
+    };
+
+    // === STEP 3: SPD / DMDD (Division case)
+    const spdEntries = hierarchyEntries.filter((e) => e.mdd !== "4782323");
+    const dmddEntries = hierarchyEntries.filter((e) => e.mdd === "4782323");
+    const getDealers = (arr) => [...new Set(arr.map((e) => e.dealer).filter(Boolean))];
+    const spdDealers = getDealers(spdEntries);
+    const dmddDealers = getDealers(dmddEntries);
+
+    const [spdTotals, dmddTotals] = await Promise.all([
+      aggregateTotals(spdDealers),
+      aggregateTotals(dmddDealers),
+    ]);
+
+    const division = [
+      {
+        code: "SPD",
+        name: "SPD",
+        position: "division",
+        mtd_sell_out: spdTotals.mtd,
+        lmtd_sell_out: spdTotals.lmtd,
+        sell_out_growth: calcGrowth(spdTotals.mtd, spdTotals.lmtd).toFixed(2),
+        "M-1": spdTotals.months["M-1"],
+        "M-2": spdTotals.months["M-2"],
+        "M-3": spdTotals.months["M-3"],
+        ADS: (spdTotals.mtd / endDate.getDate()).toFixed(2),
+        FTD: spdTotals.ftd,
         TGT: 0,
         "Req. ADS": 0,
-        "Contribution%": contribution.toFixed(2),
-      };
-    });
+        "Contribution%": 0,
+      },
+      {
+        code: "DMDD",
+        name: "DMDD",
+        position: "division",
+        mtd_sell_out: dmddTotals.mtd,
+        lmtd_sell_out: dmddTotals.lmtd,
+        sell_out_growth: calcGrowth(dmddTotals.mtd, dmddTotals.lmtd).toFixed(2),
+        "M-1": dmddTotals.months["M-1"],
+        "M-2": dmddTotals.months["M-2"],
+        "M-3": dmddTotals.months["M-3"],
+        ADS: (dmddTotals.mtd / endDate.getDate()).toFixed(2),
+        FTD: dmddTotals.ftd,
+        TGT: 0,
+        "Req. ADS": 0,
+        "Contribution%": 0,
+      },
+    ];
 
-    console.log("🟢 [MyntraHierarchy] Response Preview:", {
-      position: nextPosition,
-      count: enrichedSubs.length,
-      sample: enrichedSubs.slice(0, 10),
-    });
+    // === STEP 4: Other levels (ASM → MDD → TSE → Dealer)
+    const levels = ["asm", "mdd", "tse", "dealer"];
+    const dataMap = { division };
 
-    // === STEP 13: Pagination (dealers only)
-    const startIndex = (page - 1) * limit;
-    const paginated =
-      nextPosition === "dealer"
-        ? enrichedSubs.slice(startIndex, startIndex + limit)
-        : enrichedSubs;
+    await Promise.all(
+      levels.map(async (level) => {
+        const subs = await ActorCode.find(
+          { position: level },
+          { code: 1, name: 1, position: 1, _id: 0 }
+        );
 
-    res.status(200).json({
+        const results = await Promise.all(
+          subs.map(async (sub) => {
+            const dealers = [
+              ...new Set(
+                hierarchyEntries
+                  .filter((e) => e[level] === sub.code && e.dealer)
+                  .map((e) => e.dealer)
+              ),
+            ];
+
+            const totals = await aggregateTotals(dealers);
+            const totalMtdSum = subs.reduce((a, b) => a + (totals.mtd || 0), 0);
+            const contribution = totalMtdSum > 0 ? (totals.mtd / totalMtdSum) * 100 : 0;
+
+            return {
+              code: sub.code,
+              name: sub.name,
+              position: level,
+              mtd_sell_out: totals.mtd,
+              lmtd_sell_out: totals.lmtd,
+              sell_out_growth: calcGrowth(totals.mtd, totals.lmtd).toFixed(2),
+              "M-1": totals.months["M-1"],
+              "M-2": totals.months["M-2"],
+              "M-3": totals.months["M-3"],
+              ADS: (totals.mtd / endDate.getDate()).toFixed(2),
+              FTD: totals.ftd,
+              TGT: 0,
+              "Req. ADS": 0,
+              "Contribution%": contribution.toFixed(2),
+            };
+          })
+        );
+
+        dataMap[level] = results;
+      })
+    );
+
+    console.log("✅ [MyntraHierarchy] Full multi-level response built");
+
+    return res.status(200).json({
       success: true,
-      position: nextPosition,
-      page,
-      limit,
-      total_count: enrichedSubs.length,
-      subordinates: paginated,
+      data: dataMap,
     });
   } catch (error) {
     console.error("❌ [MyntraHierarchy] Error:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
+
+
+// exports.getHierarchyMyntraDataStats = async (req, res) => {
+//   try {
+//     console.log("🔍 [MyntraHierarchy] Full multi-level API reached");
+
+//     const {
+//       filter_type = "value",
+//       start_date,
+//       end_date,
+//       product_categories = [],
+//     } = req.body;
+
+//     if (!start_date || !end_date) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "start_date and end_date are required.",
+//       });
+//     }
+
+//     // === STEP 1: Load hierarchy + entries
+//     const [actorHierarchy, hierarchyEntries] = await Promise.all([
+//       ActorTypesHierarchy.findOne({ name: "default_sales_flow" }),
+//       HierarchyEntries.find({ hierarchy_name: "default_sales_flow" }),
+//     ]);
+
+//     if (!actorHierarchy || !actorHierarchy.hierarchy)
+//       return res.status(500).json({
+//         success: false,
+//         message: "Hierarchy data not found.",
+//       });
+
+//     if (!hierarchyEntries.length)
+//       return res.status(200).json({
+//         success: true,
+//         message: "No hierarchy entries found.",
+//         data: {},
+//       });
+
+//     const allPositions = actorHierarchy.hierarchy;
+//     console.log("✅ Loaded hierarchy:", allPositions);
+
+//     // === STEP 2: Date setup
+//     const startDate = new Date(start_date);
+//     startDate.setUTCHours(0, 0, 0, 0);
+//     const endDate = new Date(end_date);
+//     endDate.setUTCHours(0, 0, 0, 0);
+
+//     const lmtdStartDate = new Date(startDate);
+//     const lmtdEndDate = new Date(endDate);
+//     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     // Monthly windows (M-1, M-2, M-3)
+//     const startOfMonth = new Date(startDate);
+//     startOfMonth.setDate(1);
+//     const monthWindows = [1, 2, 3].map((offset) => {
+//       const mStart = new Date(startOfMonth);
+//       mStart.setMonth(mStart.getMonth() - offset);
+//       const mEnd = new Date(mStart.getFullYear(), mStart.getMonth() + 1, 0);
+//       mStart.setUTCHours(0, 0, 0, 0);
+//       mEnd.setUTCHours(0, 0, 0, 0);
+//       return { label: `M-${offset}`, start: mStart, end: mEnd };
+//     });
+
+//     const hasProductCategories =
+//       Array.isArray(product_categories) && product_categories.length > 0;
+//     const normalize = (s = "") => s.toLowerCase().replace(/[_\s]+/g, "");
+//     const normalizedSelected = product_categories.map(normalize);
+
+//     const makeMatch = (codes, from, to) => {
+//       const match = {
+//         buyer_code: { $in: codes },
+//         sales_type: "Sell Out",
+//         date: { $gte: from, $lte: to },
+//       };
+//       if (hasProductCategories) {
+//         match.$expr = {
+//           $in: [
+//             {
+//               $toLower: {
+//                 $replaceAll: {
+//                   input: { $ifNull: ["$product_category", ""] },
+//                   find: " ",
+//                   replacement: "",
+//                 },
+//               },
+//             },
+//             normalizedSelected,
+//           ],
+//         };
+//       }
+//       return match;
+//     };
+
+//     const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+//     const aggregateTotals = async (codes) => {
+//       if (!codes.length)
+//         return {
+//           mtd: 0,
+//           lmtd: 0,
+//           ftd: 0,
+//           months: { "M-1": 0, "M-2": 0, "M-3": 0 },
+//         };
+
+//       // Parallel aggregation for speed
+//       const [mtd, lmtd, ftd, ...monthResults] = await Promise.all([
+//         SalesData.aggregate([
+//           { $match: makeMatch(codes, startDate, endDate) },
+//           { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } },
+//         ]),
+//         SalesData.aggregate([
+//           { $match: makeMatch(codes, lmtdStartDate, lmtdEndDate) },
+//           { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } },
+//         ]),
+//         SalesData.aggregate([
+//           { $match: makeMatch(codes, startDate, startDate) },
+//           { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } },
+//         ]),
+//         ...monthWindows.map(({ start, end }) =>
+//           SalesData.aggregate([
+//             { $match: makeMatch(codes, start, end) },
+//             { $group: { _id: null, total: { $sum: { $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}` } } } },
+//           ])
+//         ),
+//       ]);
+
+//       const months = {};
+//       monthWindows.forEach((w, i) => {
+//         months[w.label] = monthResults[i][0]?.total || 0;
+//       });
+
+//       return {
+//         mtd: mtd[0]?.total || 0,
+//         lmtd: lmtd[0]?.total || 0,
+//         ftd: ftd[0]?.total || 0,
+//         months,
+//       };
+//     };
+
+//     // === STEP 3: SPD / DMDD (Division case)
+//     const spdEntries = hierarchyEntries.filter((e) => e.mdd !== "4782323");
+//     const dmddEntries = hierarchyEntries.filter((e) => e.mdd === "4782323");
+//     const getDealers = (arr) => [...new Set(arr.map((e) => e.dealer).filter(Boolean))];
+//     const spdDealers = getDealers(spdEntries);
+//     const dmddDealers = getDealers(dmddEntries);
+
+//     const [spdTotals, dmddTotals] = await Promise.all([
+//       aggregateTotals(spdDealers),
+//       aggregateTotals(dmddDealers),
+//     ]);
+
+//     const division = [
+//       {
+//         code: "SPD",
+//         name: "SPD",
+//         position: "division",
+//         mtd_sell_out: spdTotals.mtd,
+//         lmtd_sell_out: spdTotals.lmtd,
+//         sell_out_growth: calcGrowth(spdTotals.mtd, spdTotals.lmtd).toFixed(2),
+//         "M-1": spdTotals.months["M-1"],
+//         "M-2": spdTotals.months["M-2"],
+//         "M-3": spdTotals.months["M-3"],
+//         ADS: (spdTotals.mtd / endDate.getDate()).toFixed(2),
+//         FTD: spdTotals.ftd,
+//         TGT: 0,
+//         "Req. ADS": 0,
+//         "Contribution%": 0,
+//       },
+//       {
+//         code: "DMDD",
+//         name: "DMDD",
+//         position: "division",
+//         mtd_sell_out: dmddTotals.mtd,
+//         lmtd_sell_out: dmddTotals.lmtd,
+//         sell_out_growth: calcGrowth(dmddTotals.mtd, dmddTotals.lmtd).toFixed(2),
+//         "M-1": dmddTotals.months["M-1"],
+//         "M-2": dmddTotals.months["M-2"],
+//         "M-3": dmddTotals.months["M-3"],
+//         ADS: (dmddTotals.mtd / endDate.getDate()).toFixed(2),
+//         FTD: dmddTotals.ftd,
+//         TGT: 0,
+//         "Req. ADS": 0,
+//         "Contribution%": 0,
+//       },
+//     ];
+
+//     // === STEP 4: All other levels concurrently (ASM → MDD → TSE → Dealer)
+//     const levels = ["asm", "mdd", "tse", "dealer"];
+//     const dataMap = { division };
+
+//     await Promise.all(
+//       levels.map(async (level) => {
+//         const subs = await ActorCode.find(
+//           { position: level },
+//           { code: 1, name: 1, position: 1, _id: 0 }
+//         );
+
+//         const results = await Promise.all(
+//           subs.map(async (sub) => {
+//             const dealers = [
+//               ...new Set(
+//                 hierarchyEntries
+//                   .filter((e) => e[level] === sub.code && e.dealer)
+//                   .map((e) => e.dealer)
+//               ),
+//             ];
+
+//             const totals = await aggregateTotals(dealers);
+//             const totalMtdSum = subs.reduce((a, b) => a + (totals.mtd || 0), 0);
+//             const contribution = totalMtdSum > 0 ? (totals.mtd / totalMtdSum) * 100 : 0;
+
+//             return {
+//               code: sub.code,
+//               name: sub.name,
+//               position: level,
+//               mtd_sell_out: totals.mtd,
+//               lmtd_sell_out: totals.lmtd,
+//               sell_out_growth: calcGrowth(totals.mtd, totals.lmtd).toFixed(2),
+//               "M-1": totals.months["M-1"],
+//               "M-2": totals.months["M-2"],
+//               "M-3": totals.months["M-3"],
+//               ADS: (totals.mtd / endDate.getDate()).toFixed(2),
+//               FTD: totals.ftd,
+//               TGT: 0,
+//               "Req. ADS": 0,
+//               "Contribution%": contribution.toFixed(2),
+//             };
+//           })
+//         );
+
+//         dataMap[level] = results;
+//       })
+//     );
+
+//     console.log("✅ [MyntraHierarchy] Full multi-level response built");
+
+//     return res.status(200).json({
+//       success: true,
+//       data: dataMap,
+//     });
+//   } catch (error) {
+//     console.error("❌ [MyntraHierarchy] Error:", error);
+//     res
+//       .status(500)
+//       .json({ success: false, message: "Internal server error", error: error.message });
+//   }
+// };
+
+
+// exports.getHierarchyMyntraDataStats = async (req, res) => {
+//   try {
+//     console.log("🔍 [MyntraHierarchy] API reached");
+
+//     const { code } = req.user;
+//     const {
+//       filter_type = "value",
+//       start_date,
+//       end_date,
+//       selected_entities = [],
+//       product_categories = [],
+//       position, // 👈 allow it to be undefined
+//       parent_code,
+//       page = 1,
+//       limit = 50,
+//     } = req.body;
+
+//     console.log("POsiiton, parent in Myn: ", position, parent_code)
+
+//     if (!start_date || !end_date) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "start_date and end_date are required.",
+//       });
+//     }
+
+
+//     // === STEP 1: Load hierarchy definition
+//     const actorHierarchy = await ActorTypesHierarchy.findOne({
+//       name: "default_sales_flow",
+//     });
+//     if (!actorHierarchy || !actorHierarchy.hierarchy) {
+//       return res
+//         .status(500)
+//         .json({ success: false, message: "Hierarchy data not found." });
+//     }
+//     const allPositions = actorHierarchy.hierarchy;
+//     console.log("Step1 done")
+
+// // === STEP 2: Collect hierarchy entries
+// const baseFilter = { hierarchy_name: "default_sales_flow" };
+// let hierarchyEntries = [];
+
+// console.log("POsiiton, parent in Myn:", position, parent_code);
+
+//   // 🧭 Special case — Division level (SPD / DMDD are virtual)
+//   if (position === "division" && parent_code) {
+//     console.log("🧭 Division selection detected:", parent_code);
+
+//     let spdFilter = {};
+//     if (parent_code === "SPD") {
+//       // SPD → all entries EXCEPT Jaipur (mdd 4782323)
+//       spdFilter = { mdd: { $ne: "4782323" } };
+//     } else if (parent_code === "DMDD") {
+//       // DMDD → only Jaipur region (mdd 4782323)
+//       spdFilter = { mdd: "4782323" };
+//     }
+
+//     hierarchyEntries = await HierarchyEntries.find({
+//       ...baseFilter,
+//       ...spdFilter,
+//     });
+
+//     console.log("🔹 SPD/DMDD filter applied:", spdFilter);
+//     console.log("🔹 Entries found:", hierarchyEntries.length);
+//   }
+
+//   // 🧱 Normal flow — if not division-level
+//   else if (parent_code) {
+//     console.log("📎 Parent-level selection detected:", parent_code);
+//     hierarchyEntries = await HierarchyEntries.find({
+//       ...baseFilter,
+//       $or: allPositions.map((pos) => ({ [pos]: parent_code })),
+//     });
+//     console.log("🔹 Entries found (parent_code):", hierarchyEntries.length);
+//   }
+
+//   // 🧩 Filter-based selection (multiple entities)
+//   else if (Array.isArray(selected_entities) && selected_entities.length > 0) {
+//     console.log("🎯 Selected entities:", selected_entities);
+//     hierarchyEntries = await HierarchyEntries.find({
+//       ...baseFilter,
+//       $or: allPositions.map((pos) => ({
+//         [pos]: { $in: selected_entities },
+//       })),
+//     });
+//     console.log("🔹 Entries found (selected_entities):", hierarchyEntries.length);
+//   }
+
+//   // 🌍 Default fallback — entire hierarchy
+//   else {
+//     console.log("🌍 No selection — fetching full hierarchy.");
+//     hierarchyEntries = await HierarchyEntries.find(baseFilter);
+//     console.log("🔹 Entries found (default):", hierarchyEntries.length);
+//   }
+
+//   // 🚧 Safety check
+//   if (!hierarchyEntries.length) {
+//     console.log("⚠️ No hierarchy entries found for filter.");
+//     return res.status(200).json({
+//       success: true,
+//       message: "No hierarchy entries found.",
+//       subordinates: [],
+//     });
+//   }
+
+    
+
+//     // === STEP 3: Normalize product categories
+//     const hasProductCategories =
+//       Array.isArray(product_categories) && product_categories.length > 0;
+//     const normalize = (str = "") => str.toLowerCase().replace(/[_\s]+/g, "");
+//     const normalizedSelected = product_categories.map(normalize);
+
+//     // === STEP 4: Determine current position
+//     const currentPosition = position || "division"; // 👈 fallback here
+//     console.log("📍 Current Position:", currentPosition);
+
+//     // === 🧭 SPECIAL CASE: Division level (SPD vs DMDD)
+//     if (!position || currentPosition === "division") {
+//       console.log("🏗️ Division case triggered");
+
+//       const spdEntries = hierarchyEntries.filter(
+//         (e) => e.mdd && e.mdd !== "4782323"
+//       );
+//       const dmddEntries = hierarchyEntries.filter(
+//         (e) => e.mdd === "4782323"
+//       );
+
+//       const spdDealers = [
+//         ...new Set(spdEntries.map((e) => e.dealer).filter(Boolean)),
+//       ];
+//       const dmddDealers = [
+//         ...new Set(dmddEntries.map((e) => e.dealer).filter(Boolean)),
+//       ];
+
+//       const startDate = new Date(start_date);
+//       const endDate = new Date(end_date);
+//       startDate.setUTCHours(0, 0, 0, 0);
+//       endDate.setUTCHours(0, 0, 0, 0);
+
+//       const lmtdStartDate = new Date(startDate);
+//       const lmtdEndDate = new Date(endDate);
+//       lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//       lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//       const aggregate = async (codes, from, to) => {
+//         if (codes.length === 0) return 0;
+//         const match = {
+//           buyer_code: { $in: codes },
+//           sales_type: "Sell Out",
+//           date: { $gte: from, $lte: to },
+//         };
+//         if (hasProductCategories) {
+//           match.$expr = {
+//             $in: [
+//               {
+//                 $toLower: {
+//                   $replaceAll: {
+//                     input: { $ifNull: ["$product_category", ""] },
+//                     find: " ",
+//                     replacement: "",
+//                   },
+//                 },
+//               },
+//               normalizedSelected,
+//             ],
+//           };
+//         }
+//         const result = await SalesData.aggregate([
+//           { $match: match },
+//           {
+//             $group: {
+//               _id: null,
+//               total: {
+//                 $sum: {
+//                   $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+//                 },
+//               },
+//             },
+//           },
+//         ]);
+//         return result.length > 0 ? result[0].total : 0;
+//       };
+
+//       const spd_mtd = await aggregate(spdDealers, startDate, endDate);
+//       const spd_lmtd = await aggregate(spdDealers, lmtdStartDate, lmtdEndDate);
+//       const dmdd_mtd = await aggregate(dmddDealers, startDate, endDate);
+//       const dmdd_lmtd = await aggregate(dmddDealers, lmtdStartDate, lmtdEndDate);
+
+//       const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+//       const response = {
+//         success: true,
+//         position: "division",
+//         count: 2,
+//         subordinates: [
+//           {
+//             code: "SPD",
+//             name: "SPD",
+//             position: "division",
+//             mtd_sell_out: spd_mtd,
+//             lmtd_sell_out: spd_lmtd,
+//             sell_out_growth: calcGrowth(spd_mtd, spd_lmtd).toFixed(2),
+//             "Contribution%": 0,
+//           },
+//           {
+//             code: "DMDD",
+//             name: "DMDD",
+//             position: "division",
+//             mtd_sell_out: dmdd_mtd,
+//             lmtd_sell_out: dmdd_lmtd,
+//             sell_out_growth: calcGrowth(dmdd_mtd, dmdd_lmtd).toFixed(2),
+//             "Contribution%": 0,
+//           },
+//         ],
+//       };
+
+//       console.log("🟢 [MyntraHierarchy] Division Response:", response);
+//       return res.status(200).json(response);
+//     }
+
+//     // === STEP 5: Determine next position
+//     const nextIndex = allPositions.indexOf(currentPosition) + 1;
+//     const nextPosition = allPositions[nextIndex] || "dealer";
+
+//     // === STEP 6: Filter hierarchy for the given parent (or top level)
+//     let filteredEntries;
+//     if (parent_code) {
+//       filteredEntries = hierarchyEntries.filter((e) =>
+//         Object.values(e.toObject()).includes(parent_code)
+//       );
+//     } else {
+//       filteredEntries = hierarchyEntries;
+//     }
+
+//     const subCodes = [
+//       ...new Set(filteredEntries.map((e) => e[nextPosition]).filter(Boolean)),
+//     ];
+
+//     if (!subCodes.length) {
+//       return res.status(200).json({
+//         success: true,
+//         message: `No ${nextPosition} found under selection.`,
+//         subordinates: [],
+//       });
+//     }
+
+//     // === STEP 7: Gather actor data for next level
+//     const subs = await ActorCode.find(
+//       { code: { $in: subCodes } },
+//       { code: 1, name: 1, position: 1, _id: 0 }
+//     );
+
+//     // === STEP 8: Get all dealer codes under these subs
+//     const dealerCodesSet = new Set();
+//     for (const sub of subs) {
+//       const subDealers = filteredEntries
+//         .filter((e) => e[nextPosition] === sub.code && e.dealer)
+//         .map((e) => e.dealer);
+//       subDealers.forEach((d) => dealerCodesSet.add(d));
+//       if (nextPosition === "dealer") dealerCodesSet.add(sub.code);
+//     }
+//     const dealerCodes = [...dealerCodesSet];
+
+//     // === STEP 9: Date setup
+//     const startDate = new Date(start_date);
+//     const endDate = new Date(end_date);
+//     startDate.setUTCHours(0, 0, 0, 0);
+//     endDate.setUTCHours(0, 0, 0, 0);
+//     const lmtdStartDate = new Date(startDate);
+//     const lmtdEndDate = new Date(endDate);
+//     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     const makeMatch = (from, to) => {
+//       const match = {
+//         buyer_code: { $in: dealerCodes },
+//         sales_type: "Sell Out",
+//         date: { $gte: from, $lte: to },
+//       };
+//       if (hasProductCategories) {
+//         match.$expr = {
+//           $in: [
+//             {
+//               $toLower: {
+//                 $replaceAll: {
+//                   input: { $ifNull: ["$product_category", ""] },
+//                   find: " ",
+//                   replacement: "",
+//                 },
+//               },
+//             },
+//             normalizedSelected,
+//           ],
+//         };
+//       }
+//       return match;
+//     };
+
+//     // === STEP 10: Aggregate sales
+//     const aggregateSales = async (from, to) => {
+//       const result = await SalesData.aggregate([
+//         { $match: makeMatch(from, to) },
+//         {
+//           $group: {
+//             _id: "$buyer_code",
+//             total: {
+//               $sum: {
+//                 $toDouble: `$${filter_type === "value" ? "total_amount" : "quantity"}`,
+//               },
+//             },
+//           },
+//         },
+//       ]);
+//       return Object.fromEntries(result.map((e) => [e._id, e.total]));
+//     };
+
+//     const mtdMap = await aggregateSales(startDate, endDate);
+//     const lmtdMap = await aggregateSales(lmtdStartDate, lmtdEndDate);
+
+//     const calcGrowth = (a, b) => (b !== 0 ? ((a - b) / b) * 100 : 0);
+
+//     const enrichedSubs = subs.map((sub) => {
+//       const subDealers = filteredEntries
+//         .filter((e) => e[nextPosition] === sub.code && e.dealer)
+//         .map((e) => e.dealer);
+
+//       const dealers = [...new Set(subDealers)];
+//       let mtd = 0,
+//         lmtd = 0;
+//       dealers.forEach((c) => {
+//         mtd += mtdMap[c] || 0;
+//         lmtd += lmtdMap[c] || 0;
+//       });
+
+
+//       return {
+//         code: sub.code,
+//         name: sub.name,
+//         position: nextPosition,
+//         mtd_sell_out: mtd,
+//         lmtd_sell_out: lmtd,
+//         sell_out_growth: calcGrowth(mtd, lmtd).toFixed(2),
+//       };
+//     });
+
+
+//       console.log("🟢 [MyntraHierarchy] Response Preview:", {
+//       position: nextPosition,
+//       count: enrichedSubs.length,
+//       });
+//     res.status(200).json({
+//       success: true,
+//       position: nextPosition,
+//       total_count: enrichedSubs.length,
+//       subordinates: enrichedSubs,
+//     });
+//   } catch (error) {
+//     console.error("❌ [MyntraHierarchy] Error:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
+
 
 
