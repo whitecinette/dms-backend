@@ -902,6 +902,7 @@ exports.getSalesReportForUser = async (req, res) => {
       return res.status(400).json({ success: false, message: `No ${report_type} found in the database.` });
 
     const reportCategories = entity.value || [];
+    console.log("Report categories: ", reportCategories);
     const targetValueMap = await getPriceBandWiseTargets({
       code,
       role,
@@ -922,6 +923,8 @@ exports.getSalesReportForUser = async (req, res) => {
     if (allowedProductCodes.length > 0) matchQuery.product_code = { $in: allowedProductCodes };
     console.log("report mtd: ", startDate, endDate)
 
+    console.log("Match query: ", matchQuery)
+
     const allSales = await SalesData.aggregate([
       { $match: matchQuery },
       { $match: { date: { $gte: startDate, $lte: endDate } } }, // ✅ precise date filter after month-year filter
@@ -940,6 +943,8 @@ exports.getSalesReportForUser = async (req, res) => {
     ]);
 
     console.log("Total sales count:", allSales.length);
+    console.log("📊 First 5 of allSales:", allSales.slice(0, 5));
+
 
     // mtd console 
 
@@ -1001,14 +1006,27 @@ console.log("📊 Raw MTD Sell Out total:", mtdTotal[0]?.total || 0);
 
       products.forEach((p) => (productMap[p.product_code] = p.segment));
     }
+    console.log("📦 First 10 of productMap:", Object.entries(productMap).slice(0, 10));
+
 
     const salesMap = {};
     allSales.forEach((row) => {
       const key = report_type === "segment" ? productMap[row._id] : row._id;
       if (key) salesMap[key] = (salesMap[key] || 0) + row.total;
-      if (!productMap[row._id]) console.warn("⚠️ Unmapped product:", row._id);
 
+      if (!productMap[row._id]) console.warn("⚠️ Unmapped product:", row._id);
+      
     });
+
+
+console.log(`🧾 Total products processed: ${allSales.length}`);
+console.log("📊 Final salesMap sample:", Object.entries(salesMap).slice(0, 10));
+
+
+    console.log("🧭 Sample productMap pairs:", Object.entries(productMap).slice(0, 10));
+
+    console.log("salesMap: ", salesMap);
+    
 
     const lastMonthMap = {};
     lastMonthSalesData.forEach((row) => {
@@ -1028,6 +1046,8 @@ console.log("📊 Raw MTD Sell Out total:", mtdTotal[0]?.total || 0);
       const reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
       const growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : 0;
 
+      console.log("MTD Value: ", mtdValue)
+
       reportData.push({
         "Segment/Channel": category,
         Target: targetValue,
@@ -1043,6 +1063,7 @@ console.log("📊 Raw MTD Sell Out total:", mtdTotal[0]?.total || 0);
     }
 
     const totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
+    console.log("Total sales: ", totalSales);
     reportData = reportData.map((row) => ({
       ...row,
       "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0,
