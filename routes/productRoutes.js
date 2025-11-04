@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin,  editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById, getUniqueBrands, getProductsByBrand, updateProducts, makeAllProductsInactive } = require("../controllers/admin/productController");
+const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin,  editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById, getUniqueBrands, getProductsByBrand, updateProducts, makeAllProductsInactive, cleanSamsungProducts } = require("../controllers/admin/productController");
 const {getAllProductsForDealer} = require("../controllers/common/productController");
 const {adminOrSuperAdminAuth, userAuth} = require("../middlewares/authmiddlewares");
 const { upload } = require('../services/fileUpload');
@@ -33,4 +33,6 @@ router.get("/dealer/get-all-products", getAllProductsForDealer);
 router.put("/product/update-products", upload.single("file"), updateProducts);
 
 router.put("/admin/product/inactive-all", userAuth, makeAllProductsInactive);
+
+router.post("/super-admin/products/clean-samsung", userAuth, cleanSamsungProducts);
 module.exports = router;

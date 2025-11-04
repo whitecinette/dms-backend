@@ -605,3 +605,54 @@ exports.makeAllProductsInactive = async (req, res) => {
 };
 
 
+exports.cleanSamsungProducts = async (req, res) => {
+  try {
+    const { role } = req.user;
+    if (role !== "super_admin") {
+      return res.status(403).json({ success: false, message: "Access denied. Only super_admin can perform this action." });
+    }
+
+    // Find all Samsung products
+    const samsungProducts = await Product.find({ brand: "samsung" }).sort({ updatedAt: -1 });
+
+    // Group by product_code
+    const grouped = {};
+    for (const prod of samsungProducts) {
+      if (!grouped[prod.product_code]) {
+        grouped[prod.product_code] = [prod];
+      } else {
+        grouped[prod.product_code].push(prod);
+      }
+    }
+
+    let deletedCount = 0;
+    const duplicates = [];
+
+    // For each duplicate group, keep the most recently updated and delete older ones
+    for (const code in grouped) {
+      const products = grouped[code];
+      if (products.length > 1) {
+        // Sort again just to be safe (latest first)
+        products.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        const toKeep = products[0];
+        const toDelete = products.slice(1).map((p) => p._id);
+
+        const result = await Product.deleteMany({ _id: { $in: toDelete } });
+        deletedCount += result.deletedCount;
+        duplicates.push({ product_code: code, kept: toKeep._id, deleted: toDelete });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Samsung product cleanup complete.`,
+      deletedCount,
+      duplicatesFound: duplicates.length,
+      details: duplicates,
+    });
+  } catch (error) {
+    console.error("Error in cleanSamsungProducts:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+

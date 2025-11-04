@@ -1000,32 +1000,117 @@ console.log("📊 Raw MTD Sell Out total:", mtdTotal[0]?.total || 0);
       },
     ]);
 
-    const productMap = {};
-    if (report_type === "segment") {
-      const products = await Product.find(); // not { status: "active" }
+    // const productMap = {};
+    // if (report_type === "segment") {
+    //   const products = await Product.find(); // not { status: "active" }
 
-      products.forEach((p) => (productMap[p.product_code] = p.segment));
-    }
-    console.log("📦 First 10 of productMap:", Object.entries(productMap).slice(0, 10));
+    //   products.forEach((p) => (productMap[p.product_code] = p.segment));
+    // }
+    // console.log("📦 First 10 of productMap:", Object.entries(productMap).slice(0, 10));
 
 
-    const salesMap = {};
-    allSales.forEach((row) => {
-      const key = report_type === "segment" ? productMap[row._id] : row._id;
-      if (key) salesMap[key] = (salesMap[key] || 0) + row.total;
+    // const salesMap = {};
+    // allSales.forEach((row) => {
+    //   const key = report_type === "segment" ? productMap[row._id] : row._id;
+    //   if (key) salesMap[key] = (salesMap[key] || 0) + row.total;
 
-      if (!productMap[row._id]) console.warn("⚠️ Unmapped product:", row._id);
+    //   if (!productMap[row._id]) console.warn("⚠️ Unmapped product:", row._id);
       
-    });
+    // });
+
+    // 🧭 Segment mapping logic (updated)
+const productMap = {};
+const validSegments = [
+  { name: "0-6", min: 0, max: 6000 },
+  { name: "6-10", min: 6000, max: 10000 },
+  { name: "10-15", min: 10000, max: 15000 },
+  { name: "15-20", min: 15000, max: 20000 },
+  { name: "20-30", min: 20000, max: 30000 },
+  { name: "30-40", min: 30000, max: 40000 },
+  { name: "40-70", min: 40000, max: 70000 },
+  { name: "70-100", min: 70000, max: 100000 },
+  { name: "100", min: 100000, max: Infinity },
+];
+
+// 🧾 Build product→segment map from database first
+if (report_type === "segment") {
+  const products = await Product.find({}, { product_code: 1, segment: 1, mrp: 1 });
+  products.forEach((p) => {
+    if (p.segment) {
+      productMap[p.product_code] = p.segment;
+    } else if (p.mrp) {
+      const seg = validSegments.find(s => p.mrp >= s.min && p.mrp < s.max);
+      productMap[p.product_code] = seg ? seg.name : "Unsegmented";
+    }
+  });
+}
+
+  // 🧮 Now build salesMap using either known or computed segment
+  const salesMap = {};
+  for (const row of allSales) {
+    let key;
+
+    if (report_type === "segment") {
+      // Try to get from preloaded productMap
+      key = productMap[row._id];
+
+      // 🔄 If missing, derive segment using avg price (total_amount / quantity)
+      if (!key && row.total > 0) {
+        const saleDoc = await SalesData.findOne(
+          { product_code: row._id, date: { $gte: startDate, $lte: endDate } },
+          { total_amount: 1, quantity: 1 }
+        ).lean();
+
+        if (saleDoc && saleDoc.quantity > 0) {
+          const oprice = saleDoc.total_amount / saleDoc.quantity;
+          const seg = validSegments.find(s => oprice >= s.min && oprice < s.max);
+          key = seg ? seg.name : "Unsegmented";
+        }
+      }
+    } else {
+      key = row._id; // channel mode
+    }
+
+    if (key) {
+      salesMap[key] = (salesMap[key] || 0) + row.total;
+    } else {
+      console.warn("⚠️ Could not determine segment for product:", row._id);
+    }
+  }
 
 
-console.log(`🧾 Total products processed: ${allSales.length}`);
-console.log("📊 Final salesMap sample:", Object.entries(salesMap).slice(0, 10));
+
+    console.log(`🧾 Total products processed: ${allSales.length}`);
+    console.log("📊 Final salesMap sample:", Object.entries(salesMap).slice(0, 10));
 
 
     console.log("🧭 Sample productMap pairs:", Object.entries(productMap).slice(0, 10));
 
     console.log("salesMap: ", salesMap);
+
+    // 🕵️‍♂️ Debug: print products that contributed to 0–6 segment
+    if (salesMap["6-10"]) {
+      const segmentProducts = [];
+
+      for (const row of allSales) {
+        const segment = productMap[row._id];
+        if (segment === "6-10") {
+          segmentProducts.push({
+            product_code: row._id,
+            total_value: row.total,
+          });
+        }
+      }
+
+      console.log("🟦 Products considered in MTD 6-10 segment:", segmentProducts.length);
+      console.table(segmentProducts.slice(0, 10)); // show first 10 neatly
+
+      // Optional: full dump (comment out later)
+      // console.log(JSON.stringify(segmentProducts, null, 2));
+    } else {
+      console.log("ℹ️ No sales found for 6-10 segment this month.");
+    }
+
     
 
     const lastMonthMap = {};
