@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin,  editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById, getUniqueBrands, getProductsByBrand, updateProducts } = require("../controllers/admin/productController");
+const {addProductForAdmin, uploadBulkProducts, getAllProductsForAdmin,  editProductForAdmin, deleteProductForAdmin, getAllProducts, uploadProductsThroughCSV, getProductById, getUniqueBrands, getProductsByBrand, updateProducts, makeAllProductsInactive } = require("../controllers/admin/productController");
 const {getAllProductsForDealer} = require("../controllers/common/productController");
-const {adminOrSuperAdminAuth} = require("../middlewares/authmiddlewares");
+const {adminOrSuperAdminAuth, userAuth} = require("../middlewares/authmiddlewares");
 const { upload } = require('../services/fileUpload');
 // const upload = require("../helpers/multerHelper");
 
@@ -31,4 +31,6 @@ router.get("/dealer/get-all-products", getAllProductsForDealer);
 
 // update products 
 router.put("/product/update-products", upload.single("file"), updateProducts);
+
+router.put("/admin/product/inactive-all", userAuth, makeAllProductsInactive);
 module.exports = router;

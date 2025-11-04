@@ -573,3 +573,35 @@ exports.updateProducts = async (req, res) => {
  }
 };
 
+exports.makeAllProductsInactive = async (req, res) => {
+  try {
+    const { role } = req.user;
+
+    // Only admin or super_admin can perform this
+    if (role !== "admin" && role !== "super_admin") {
+      return res
+        .status(403)
+        .json({ success: false, message: "Unauthorized access" });
+    }
+
+    // Bulk update all products to inactive + make unavailable
+    const result = await Product.updateMany(
+      {},
+      { $set: { status: "inactive", isAvailable: false } }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `✅ ${result.modifiedCount} products marked as inactive.`,
+    });
+  } catch (error) {
+    console.error("❌ Error updating product statuses:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+
