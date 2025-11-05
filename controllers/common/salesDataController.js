@@ -902,7 +902,7 @@ exports.getSalesReportForUser = async (req, res) => {
       return res.status(400).json({ success: false, message: `No ${report_type} found in the database.` });
 
     const reportCategories = entity.value || [];
-    console.log("Report categories: ", reportCategories);
+    // console.log("Report categories: ", reportCategories);
     const targetValueMap = await getPriceBandWiseTargets({
       code,
       role,
@@ -921,9 +921,9 @@ exports.getSalesReportForUser = async (req, res) => {
     };
     if (dealerCodes.length > 0) matchQuery.buyer_code = { $in: dealerCodes };
     if (allowedProductCodes.length > 0) matchQuery.product_code = { $in: allowedProductCodes };
-    console.log("report mtd: ", startDate, endDate)
+    // console.log("report mtd: ", startDate, endDate)
 
-    console.log("Match query: ", matchQuery)
+    // console.log("Match query: ", matchQuery)
 
     const allSales = await SalesData.aggregate([
       { $match: matchQuery },
@@ -942,8 +942,8 @@ exports.getSalesReportForUser = async (req, res) => {
       },
     ]);
 
-    console.log("Total sales count:", allSales.length);
-    console.log("📊 First 5 of allSales:", allSales.slice(0, 5));
+    // console.log("Total sales count:", allSales.length);
+    // console.log("📊 First 5 of allSales:", allSales.slice(0, 5));
 
 
     // mtd console 
@@ -964,7 +964,7 @@ const mtdTotal = await SalesData.aggregate([
   },
 ]);
 
-console.log("📊 Raw MTD Sell Out total:", mtdTotal[0]?.total || 0);
+// console.log("📊 Raw MTD Sell Out total:", mtdTotal[0]?.total || 0);
 
 
     // mtd console. 
@@ -1080,13 +1080,13 @@ if (report_type === "segment") {
 
 
 
-    console.log(`🧾 Total products processed: ${allSales.length}`);
-    console.log("📊 Final salesMap sample:", Object.entries(salesMap).slice(0, 10));
+    // console.log(`🧾 Total products processed: ${allSales.length}`);
+    // console.log("📊 Final salesMap sample:", Object.entries(salesMap).slice(0, 10));
 
 
-    console.log("🧭 Sample productMap pairs:", Object.entries(productMap).slice(0, 10));
+    // console.log("🧭 Sample productMap pairs:", Object.entries(productMap).slice(0, 10));
 
-    console.log("salesMap: ", salesMap);
+    // console.log("salesMap: ", salesMap);
 
     // 🕵️‍♂️ Debug: print products that contributed to 0–6 segment
     if (salesMap["6-10"]) {
@@ -1103,7 +1103,7 @@ if (report_type === "segment") {
       }
 
       console.log("🟦 Products considered in MTD 6-10 segment:", segmentProducts.length);
-      console.table(segmentProducts.slice(0, 10)); // show first 10 neatly
+      // console.table(segmentProducts.slice(0, 10)); // show first 10 neatly
 
       // Optional: full dump (comment out later)
       // console.log(JSON.stringify(segmentProducts, null, 2));
@@ -1131,7 +1131,7 @@ if (report_type === "segment") {
       const reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
       const growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : 0;
 
-      console.log("MTD Value: ", mtdValue)
+      // console.log("MTD Value: ", mtdValue)
 
       reportData.push({
         "Segment/Channel": category,
@@ -1148,7 +1148,7 @@ if (report_type === "segment") {
     }
 
     const totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
-    console.log("Total sales: ", totalSales);
+    // console.log("Total sales: ", totalSales);
     reportData = reportData.map((row) => ({
       ...row,
       "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0,
@@ -1156,21 +1156,21 @@ if (report_type === "segment") {
 
     // res console 
 
-    console.log("📦 Final Sales Report Response:", JSON.stringify({
-  headers: [
-    "Segment/Channel",
-    "Target",
-    "MTD",
-    "LMTD",
-    "Pending",
-    "ADS",
-    "Req. ADS",
-    "% Growth",
-    "FTD",
-    "% Contribution",
-  ],
-  data: reportData,
-}, null, 2));
+    // console.log("📦 Final Sales Report Response:", JSON.stringify({
+    //   headers: [
+    //     "Segment/Channel",
+    //     "Target",
+    //     "MTD",
+    //     "LMTD",
+    //     "Pending",
+    //     "ADS",
+    //     "Req. ADS",
+    //     "% Growth",
+    //     "FTD",
+    //     "% Contribution",
+    //   ],
+    //   data: reportData,
+    // }, null, 2));
 
     // res console 
 
@@ -2777,47 +2777,40 @@ exports.getDashboardSalesMetricsForUser = async (req, res) => {
 // };
 
 
-
 exports.getSalesReportProductWise = async (req, res) => {
   try {
+    console.log("Product wise reaching");
     const { code } = req.user;
     let { start_date, end_date, filter_type, segment, subordinate_codes } = req.body;
     filter_type = filter_type || "value";
 
-    // Validate required fields
     if (!start_date || !end_date || !code || !segment) {
       return res.status(400).json({ success: false, message: "Start date, end date, code, and segment are required." });
     }
 
-    // Validate subordinate_codes is an array if provided
     if (subordinate_codes && !Array.isArray(subordinate_codes)) {
       return res.status(400).json({ success: false, message: "subordinate_codes must be an array." });
     }
 
-    // Date handling
+    console.log("filters in product wise: ", segment, start_date, end_date);
+
     const startDate = new Date(start_date);
     startDate.setUTCHours(0, 0, 0, 0);
     const endDate = new Date(end_date);
     endDate.setUTCHours(23, 59, 59, 999);
     const todayDate = new Date().getDate();
 
-    // Validate actor
     const actor = await ActorCode.findOne({ code });
-    if (!actor) {
-      return res.status(404).json({ success: false, message: "Actor not found." });
-    }
+    if (!actor) return res.status(404).json({ success: false, message: "Actor not found." });
 
     const { role, position } = actor;
     let dealerCodes = [];
+    const metricField = filter_type === "value" ? "total_amount" : "quantity";
 
-    // Check if subordinate_codes contains product categories
     const productCategories = ["smart_phone", "tab", "wearable"];
-    const isProductCategoryFilter = subordinate_codes && subordinate_codes.length > 0 && 
-      subordinate_codes.some(code => productCategories.includes(code));
+    const isProductCategoryFilter = subordinate_codes?.some(code => productCategories.includes(code));
 
-    // Fetch dealer codes
-    if (!isProductCategoryFilter && subordinate_codes && subordinate_codes.length > 0) {
-      // Treat subordinate_codes as hierarchy codes
+    if (!isProductCategoryFilter && subordinate_codes?.length) {
       const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
@@ -2826,143 +2819,169 @@ exports.getSalesReportProductWise = async (req, res) => {
       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
 
-      const hierarchyEntries = await HierarchyEntries.find({
-        hierarchy_name: "default_sales_flow",
-        $or: orFilters,
-      });
-
+      const hierarchyEntries = await HierarchyEntries.find({ hierarchy_name: "default_sales_flow", $or: orFilters });
       const dealersFromHierarchy = hierarchyEntries.map(entry => entry.dealer);
 
-      const directDealers = await ActorCode.find({
-        code: { $in: subordinate_codes },
-        position: "dealer"
-      }).distinct("code");
+      const directDealers = await ActorCode.find({ code: { $in: subordinate_codes }, position: "dealer" }).distinct("code");
+      const extraFilters = ["labels", "town", "district", "taluka"];
+      const dealerExtras = await Promise.all(
+        extraFilters.map(f => User.find({ role: "dealer", [f]: { $in: subordinate_codes } }, { code: 1 }).distinct("code"))
+      );
 
-      const dealerCategories = await User.find(
-        { role: "dealer", labels: { $in: subordinate_codes } },
-        { code: 1 }
-      ).distinct("code");
-
-      const dealerTown = await User.find(
-        { role: "dealer", town: { $in: subordinate_codes } },
-        { code: 1 }
-      ).distinct("code");
-
-      const dealerDistrict = await User.find(
-        { role: "dealer", district: { $in: subordinate_codes } },
-        { code: 1 }
-      ).distinct("code");
-
-      const dealerTaluka = await User.find(
-        { role: "dealer", taluka: { $in: subordinate_codes } },
-        { code: 1 }
-      ).distinct("code");
-
-      dealerCodes = [...new Set([
-        ...dealersFromHierarchy,
-        ...directDealers,
-        ...dealerCategories,
-        ...dealerTown,
-        ...dealerDistrict,
-        ...dealerTaluka,
-      ])];
-    } else if (["admin", "mdd", "super_admin"].includes(role)) {
-      const hierarchyEntries = await HierarchyEntries.find({
-        hierarchy_name: "default_sales_flow"
-      });
+      dealerCodes = [...new Set([...dealersFromHierarchy, ...directDealers, ...dealerExtras.flat()])];
+    } else if (["admin", "super_admin"].includes(role)) {
+      dealerCodes = await SalesData.distinct("buyer_code", { date: { $gte: startDate, $lte: endDate } });
+    } else if (role === "mdd") {
+      const hierarchyEntries = await HierarchyEntries.find({ hierarchy_name: "default_sales_flow" });
       dealerCodes = [...new Set(hierarchyEntries.map(entry => entry.dealer))];
     } else if (role === "employee" && position) {
-      const hierarchyEntries = await HierarchyEntries.find({
-        hierarchy_name: "default_sales_flow",
-        [position]: code,
-      });
+      const hierarchyEntries = await HierarchyEntries.find({ hierarchy_name: "default_sales_flow", [position]: code });
       dealerCodes = hierarchyEntries.map(entry => entry.dealer);
     } else {
       return res.status(403).json({ success: false, message: "Unauthorized role." });
     }
 
-    // Fetch products for the segment
-    const products = await Product.find({ segment, status: "active", brand: "samsung" });
-    if (!products.length) {
-      return res.status(404).json({ success: false, message: "No active products found for the specified segment." });
+    console.log("Product sales date: ", startDate, endDate);
+
+    const activeDealers = await SalesData.distinct("buyer_code", {
+      buyer_code: { $in: dealerCodes },
+      sales_type: "Sell Out",
+      date: { $gte: startDate, $lte: endDate },
+    });
+    dealerCodes = dealerCodes.filter(d => activeDealers.includes(d));
+    if (!dealerCodes.length) {
+      return res.status(200).json({ success: true, headers: [], data: [] });
     }
 
-    const productCodeToDetailsMap = {};
-    const productCodes = products.map(p => {
-      productCodeToDetailsMap[p.product_code] = {
-        product_name: p.product_name,
-        product_category: p.product_category
-      };
-      return p.product_code;
+    const allProducts = await Product.find({ brand: "samsung" }); // fetch all, we'll filter manually
+    const soldProductCodes = await SalesData.distinct("product_code", {
+      buyer_code: { $in: dealerCodes },
+      sales_type: "Sell Out",
+      date: { $gte: startDate, $lte: endDate },
     });
 
-    // Fetch sales data
-    let salesQuery = {
-      date: { $gte: startDate, $lte: endDate },
-      product_code: { $in: productCodes },
-      buyer_code: { $in: dealerCodes }
-    };
-    const salesData = await SalesData.find(salesQuery);
-
-    // Fetch last month's sales data
-    let lmtdStartDate = new Date(startDate);
-    lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
-    let lmtdEndDate = new Date(endDate);
-    lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
-
-    let lastMonthSalesQuery = {
-      date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
-      product_code: { $in: productCodes },
-      buyer_code: { $in: dealerCodes }
-    };
-    const lastMonthSalesData = await SalesData.find(lastMonthSalesQuery);
-
-    // 🔥 Fetch product-wise targets (grouped by model_code)
-    const targetValueMap = await getProductWiseTargets(code, filter_type, startDate);
-
-
-
-
-    // Filter sales data by product categories if applicable
-    let filteredSalesData = salesData;
-    let filteredLastMonthSalesData = lastMonthSalesData;
-
-    if (isProductCategoryFilter) {
-      filteredSalesData = salesData.filter(sale => {
-        const productCategory = productCodeToDetailsMap[sale.product_code]?.product_category;
-        return productCategory && subordinate_codes.includes(productCategory);
-      });
-      filteredLastMonthSalesData = lastMonthSalesData.filter(sale => {
-        const productCategory = productCodeToDetailsMap[sale.product_code]?.product_category;
-        return productCategory && subordinate_codes.includes(productCategory);
-      });
+    const productMap = {};
+    for (const p of allProducts) {
+      productMap[p.product_code] = {
+        model_code: p.model_code || "NA",
+        product_name: p.product_name,
+        product_category: p.product_category,
+        segment: p.segment,
+        mrp: p.mrp
+      };
     }
 
-    // Aggregate data by product
-    let reportData = [];
-    for (let product of products) {
-      // Skip products not matching the specified categories if product category filter is applied
-      if (isProductCategoryFilter && !subordinate_codes.includes(product.product_category)) {
-        continue;
+    const [salesData, lastMonthSalesData] = await Promise.all([
+      SalesData.find({
+        buyer_code: { $in: dealerCodes },
+        product_code: { $in: soldProductCodes },
+        sales_type: "Sell Out",
+        date: { $gte: startDate, $lte: endDate },
+      }),
+      (async () => {
+        const lmtdStartDate = new Date(startDate);
+        lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+        const lmtdEndDate = new Date(endDate);
+        lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+        return SalesData.find({
+          buyer_code: { $in: dealerCodes },
+          product_code: { $in: soldProductCodes },
+          sales_type: "Sell Out",
+          date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
+        });
+      })(),
+    ]);
+
+    // ✅ manual segment boundaries (same as ref API)
+    const validSegments = [
+      { name: "0-6", min: 0, max: 6000 },
+      { name: "6-10", min: 6000, max: 10000 },
+      { name: "10-15", min: 10000, max: 15000 },
+      { name: "15-20", min: 15000, max: 20000 },
+      { name: "20-30", min: 20000, max: 30000 },
+      { name: "30-40", min: 30000, max: 40000 },
+      { name: "40-70", min: 40000, max: 70000 },
+      { name: "70-100", min: 70000, max: 100000 },
+      { name: "100", min: 100000, max: Infinity },
+    ];
+
+    // 🧩 Helper to check if sale belongs to selected segment
+    const belongsToSegment = async (s) => {
+      const info = productMap[s.product_code];
+      if (info && info.segment) return info.segment === segment;
+
+      // derive via mrp or avg price
+      let price = info?.mrp;
+      if (!price || price === 0) {
+        const qty = parseFloat(s.quantity || 0);
+        const val = parseFloat(s.total_amount || 0);
+        if (qty > 0 && val > 0) price = val / qty;
       }
+      const seg = validSegments.find(seg => price >= seg.min && price < seg.max);
+      return seg ? seg.name === segment : false;
+    };
 
-      const productSales = filteredSalesData.filter(sale => sale.product_code === product.product_code);
-      const lastMonthProductSales = filteredLastMonthSalesData.filter(sale => sale.product_code === product.product_code);
+    // ✅ Keep only products that truly belong to selected segment (manually derived)
+    const filteredSalesData = [];
+    for (const s of salesData) {
+      if (await belongsToSegment(s)) filteredSalesData.push(s);
+    }
+    const filteredLastMonthSalesData = [];
+    for (const s of lastMonthSalesData) {
+      if (await belongsToSegment(s)) filteredLastMonthSalesData.push(s);
+    }
 
-      const targetValue = targetValueMap?.[product.model_code] || 0;
-      const mtdValue = productSales.reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
-      const lmtdValue = lastMonthProductSales.reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
+    // groupByModel same
+    const groupByModel = (salesArr) => {
+      const grouped = {};
+      for (const s of salesArr) {
+        const info = productMap[s.product_code] || {};
+        const model = info.model_code || "NA";
+        if (!grouped[model]) {
+          grouped[model] = {
+            model_code: model,
+            product_name: info.product_name || s.product_name || "Unknown Product",
+            product_category: info.product_category || "Unknown",
+            total_amount: 0,
+            quantity: 0,
+          };
+        }
+        grouped[model].total_amount += parseFloat(s.total_amount) || 0;
+        grouped[model].quantity += parseFloat(s.quantity) || 0;
+      }
+      return grouped;
+    };
+
+    const groupedSales = groupByModel(filteredSalesData);
+    const groupedLastMonth = groupByModel(filteredLastMonthSalesData);
+
+    const targetValueMap = await getProductWiseTargets(code, filter_type, startDate);
+
+    const reportData = [];
+    for (const modelCode in groupedSales) {
+      const model = groupedSales[modelCode];
+      const targetValue = targetValueMap?.[modelCode] || 0;
+      const mtdValue = filter_type === "value" ? model.total_amount : model.quantity;
+      const lmtdValue = groupedLastMonth[modelCode]
+        ? (filter_type === "value" ? groupedLastMonth[modelCode].total_amount : groupedLastMonth[modelCode].quantity)
+        : 0;
 
       const pending = targetValue - mtdValue;
-      const ads = todayDate !== 0 ? (mtdValue / todayDate).toFixed(2) : 0;
-      const reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
-      const growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : mtdValue > 0 ? 100 : 0;
+      // Safe numeric calculation for ADS and Req. ADS
+      const ads = todayDate && mtdValue ? Number((mtdValue / todayDate).toFixed(2)) : 0;
+      const reqAds =
+        todayDate < 30 && (pending > 0 ? pending : 0)
+          ? Number(((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2))
+          : 0;
 
-      const ftd = productSales.filter(s => new Date(s.date).getDate() === todayDate)
-        .reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
+      const growth = lmtdValue === 0 && mtdValue > 0 ? 100 : lmtdValue === 0 ? 0 : ((mtdValue - lmtdValue) / lmtdValue) * 100;
+      const ftd = 0;
 
       reportData.push({
-        "Segment/Channel": product.product_name,
+        model_code: modelCode,
+        product_code: Object.keys(productMap).find(pc => productMap[pc].model_code === modelCode) || "NA",
+        "Name": model.product_name,
         Target: targetValue,
         MTD: mtdValue,
         LMTD: lmtdValue,
@@ -2975,34 +2994,66 @@ exports.getSalesReportProductWise = async (req, res) => {
       });
     }
 
-    // Calculate contribution percentage
-    const totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
-    reportData = reportData.map(row => ({
-      ...row,
-      "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0
+    const totalSales = reportData.reduce((sum, r) => sum + r.MTD, 0);
+    const finalData = reportData.map(r => ({
+      ...r,
+      "% Contribution": totalSales ? ((r.MTD / totalSales) * 100).toFixed(2) : 0,
     }));
 
-    // Define response headers
-    const headers = [
-      "Segment/Channel",
-      "Target",
-      "MTD",
-      "LMTD",
-      "Pending",
-      "ADS",
-      "Req. ADS",
-      "% Growth",
-      "FTD",
-      "% Contribution"
-    ];
+    // 🧮 Intelligent Total Row Calculation
+if (finalData.length > 0) {
+  const totalTarget = finalData.reduce((sum, r) => sum + (parseFloat(r.Target) || 0), 0);
+  const totalMTD = finalData.reduce((sum, r) => sum + (parseFloat(r.MTD) || 0), 0);
+  const totalLMTD = finalData.reduce((sum, r) => sum + (parseFloat(r.LMTD) || 0), 0);
+  const totalPending = totalTarget - totalMTD;
 
-    return res.status(200).json({ success: true, headers, data: reportData });
+  const ads = todayDate && totalMTD ? Number((totalMTD / todayDate).toFixed(2)) : 0;
+  const reqAds =
+    todayDate < 30 && totalPending > 0
+      ? Number((totalPending / (30 - todayDate)).toFixed(2))
+      : 0;
+
+  const growth = totalLMTD !== 0 ? (((totalMTD - totalLMTD) / totalLMTD) * 100).toFixed(2) : "0.00";
+
+  const totalRow = {
+    model_code: "TOTAL",
+    product_code: "-",
+    "Name": "TOTAL",
+    Target: totalTarget,
+    MTD: totalMTD,
+    LMTD: totalLMTD,
+    Pending: totalPending,
+    ADS: ads,
+    "Req. ADS": reqAds,
+    "% Growth": growth,
+    FTD: 0,
+    "% Contribution": "100.00",
+  };
+
+  finalData.push(totalRow);
+}
+
+
+    console.log("🧾 Final Report Data (first 10 entries):");
+    finalData.slice(0, 10).forEach((row, i) => console.log(`${i + 1}.`, row));
+
+    return res.status(200).json({
+      success: true,
+      headers: [
+        "Name", "Target", "MTD", "LMTD", "Pending",
+        "ADS", "Req. ADS", "% Growth", "FTD", "% Contribution"
+      ],
+      data: finalData
+    });
 
   } catch (error) {
     console.error("Error in getSalesReportProductWise:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+
+
 
 exports.fixAbove100KSegment = async (req, res) => {
   try {
@@ -3026,3 +3077,232 @@ exports.fixAbove100KSegment = async (req, res) => {
   }
 };
 
+
+// getSalesReportProductWise
+// commented on 04112025 1806 rakshita
+// exports.getSalesReportProductWise = async (req, res) => {
+//   try {
+//     console.log("Product wise reaching");
+//     const { code } = req.user;
+//     let { start_date, end_date, filter_type, segment, subordinate_codes } = req.body;
+//     filter_type = filter_type || "value";
+
+//     // Validate required fields
+//     if (!start_date || !end_date || !code || !segment) {
+//       return res.status(400).json({ success: false, message: "Start date, end date, code, and segment are required." });
+//     }
+
+//     // Validate subordinate_codes is an array if provided
+//     if (subordinate_codes && !Array.isArray(subordinate_codes)) {
+//       return res.status(400).json({ success: false, message: "subordinate_codes must be an array." });
+//     }
+
+//     // Date handling
+//     const startDate = new Date(start_date);
+//     startDate.setUTCHours(0, 0, 0, 0);
+//     const endDate = new Date(end_date);
+//     endDate.setUTCHours(23, 59, 59, 999);
+//     const todayDate = new Date().getDate();
+
+//     // Validate actor
+//     const actor = await ActorCode.findOne({ code });
+//     if (!actor) {
+//       return res.status(404).json({ success: false, message: "Actor not found." });
+//     }
+
+//     const { role, position } = actor;
+//     let dealerCodes = [];
+
+//     // Check if subordinate_codes contains product categories
+//     const productCategories = ["smart_phone", "tab", "wearable"];
+//     const isProductCategoryFilter = subordinate_codes && subordinate_codes.length > 0 && 
+//       subordinate_codes.some(code => productCategories.includes(code));
+
+//     // Fetch dealer codes
+//     if (!isProductCategoryFilter && subordinate_codes && subordinate_codes.length > 0) {
+//       // Treat subordinate_codes as hierarchy codes
+//       const hierarchyConfig = await ActorTypesHierarchy.findOne({ name: "default_sales_flow" });
+//       if (!hierarchyConfig || !Array.isArray(hierarchyConfig.hierarchy)) {
+//         return res.status(500).json({ success: false, message: "Hierarchy config not found or invalid." });
+//       }
+
+//       const hierarchyPositions = hierarchyConfig.hierarchy.filter(pos => pos !== "dealer");
+//       const orFilters = hierarchyPositions.map(pos => ({ [pos]: { $in: subordinate_codes } }));
+
+//       const hierarchyEntries = await HierarchyEntries.find({
+//         hierarchy_name: "default_sales_flow",
+//         $or: orFilters,
+//       });
+
+//       const dealersFromHierarchy = hierarchyEntries.map(entry => entry.dealer);
+
+//       const directDealers = await ActorCode.find({
+//         code: { $in: subordinate_codes },
+//         position: "dealer"
+//       }).distinct("code");
+
+//       const dealerCategories = await User.find(
+//         { role: "dealer", labels: { $in: subordinate_codes } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       const dealerTown = await User.find(
+//         { role: "dealer", town: { $in: subordinate_codes } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       const dealerDistrict = await User.find(
+//         { role: "dealer", district: { $in: subordinate_codes } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       const dealerTaluka = await User.find(
+//         { role: "dealer", taluka: { $in: subordinate_codes } },
+//         { code: 1 }
+//       ).distinct("code");
+
+//       dealerCodes = [...new Set([
+//         ...dealersFromHierarchy,
+//         ...directDealers,
+//         ...dealerCategories,
+//         ...dealerTown,
+//         ...dealerDistrict,
+//         ...dealerTaluka,
+//       ])];
+//     } else if (["admin", "mdd", "super_admin"].includes(role)) {
+//       const hierarchyEntries = await HierarchyEntries.find({
+//         hierarchy_name: "default_sales_flow"
+//       });
+//       dealerCodes = [...new Set(hierarchyEntries.map(entry => entry.dealer))];
+//     } else if (role === "employee" && position) {
+//       const hierarchyEntries = await HierarchyEntries.find({
+//         hierarchy_name: "default_sales_flow",
+//         [position]: code,
+//       });
+//       dealerCodes = hierarchyEntries.map(entry => entry.dealer);
+//     } else {
+//       return res.status(403).json({ success: false, message: "Unauthorized role." });
+//     }
+
+//     // Fetch products for the segment
+//     const products = await Product.find({ segment, status: "active", brand: "samsung" });
+//     if (!products.length) {
+//       return res.status(404).json({ success: false, message: "No active products found for the specified segment." });
+//     }
+
+//     const productCodeToDetailsMap = {};
+//     const productCodes = products.map(p => {
+//       productCodeToDetailsMap[p.product_code] = {
+//         product_name: p.product_name,
+//         product_category: p.product_category
+//       };
+//       return p.product_code;
+//     });
+
+//     // Fetch sales data
+//     let salesQuery = {
+//       date: { $gte: startDate, $lte: endDate },
+//       product_code: { $in: productCodes },
+//       buyer_code: { $in: dealerCodes }
+//     };
+//     const salesData = await SalesData.find(salesQuery);
+
+//     // Fetch last month's sales data
+//     let lmtdStartDate = new Date(startDate);
+//     lmtdStartDate.setMonth(lmtdStartDate.getMonth() - 1);
+//     let lmtdEndDate = new Date(endDate);
+//     lmtdEndDate.setMonth(lmtdEndDate.getMonth() - 1);
+
+//     let lastMonthSalesQuery = {
+//       date: { $gte: lmtdStartDate, $lte: lmtdEndDate },
+//       product_code: { $in: productCodes },
+//       buyer_code: { $in: dealerCodes }
+//     };
+//     const lastMonthSalesData = await SalesData.find(lastMonthSalesQuery);
+
+//     // 🔥 Fetch product-wise targets (grouped by model_code)
+//     const targetValueMap = await getProductWiseTargets(code, filter_type, startDate);
+
+
+
+
+//     // Filter sales data by product categories if applicable
+//     let filteredSalesData = salesData;
+//     let filteredLastMonthSalesData = lastMonthSalesData;
+
+//     if (isProductCategoryFilter) {
+//       filteredSalesData = salesData.filter(sale => {
+//         const productCategory = productCodeToDetailsMap[sale.product_code]?.product_category;
+//         return productCategory && subordinate_codes.includes(productCategory);
+//       });
+//       filteredLastMonthSalesData = lastMonthSalesData.filter(sale => {
+//         const productCategory = productCodeToDetailsMap[sale.product_code]?.product_category;
+//         return productCategory && subordinate_codes.includes(productCategory);
+//       });
+//     }
+
+//     // Aggregate data by product
+//     let reportData = [];
+//     for (let product of products) {
+//       // Skip products not matching the specified categories if product category filter is applied
+//       if (isProductCategoryFilter && !subordinate_codes.includes(product.product_category)) {
+//         continue;
+//       }
+
+//       const productSales = filteredSalesData.filter(sale => sale.product_code === product.product_code);
+//       const lastMonthProductSales = filteredLastMonthSalesData.filter(sale => sale.product_code === product.product_code);
+
+//       const targetValue = targetValueMap?.[product.model_code] || 0;
+//       const mtdValue = productSales.reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
+//       const lmtdValue = lastMonthProductSales.reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
+
+//       const pending = targetValue - mtdValue;
+//       const ads = todayDate !== 0 ? (mtdValue / todayDate).toFixed(2) : 0;
+//       const reqAds = ((pending > 0 ? pending : 0) / (30 - todayDate)).toFixed(2);
+//       const growth = lmtdValue !== 0 ? ((mtdValue - lmtdValue) / lmtdValue) * 100 : mtdValue > 0 ? 100 : 0;
+
+//       const ftd = productSales.filter(s => new Date(s.date).getDate() === todayDate)
+//         .reduce((sum, s) => sum + (filter_type === "value" ? s.total_amount : s.quantity), 0);
+
+//       reportData.push({
+//         "Segment/Channel": product.product_name,
+//         Target: targetValue,
+//         MTD: mtdValue,
+//         LMTD: lmtdValue,
+//         Pending: pending,
+//         ADS: ads,
+//         "Req. ADS": reqAds,
+//         "% Growth": growth.toFixed(2),
+//         FTD: ftd,
+//         "% Contribution": 0,
+//       });
+//     }
+
+//     // Calculate contribution percentage
+//     const totalSales = reportData.reduce((sum, row) => sum + row.MTD, 0);
+//     reportData = reportData.map(row => ({
+//       ...row,
+//       "% Contribution": totalSales !== 0 ? ((row.MTD / totalSales) * 100).toFixed(2) : 0
+//     }));
+
+//     // Define response headers
+//     const headers = [
+//       "Segment/Channel",
+//       "Target",
+//       "MTD",
+//       "LMTD",
+//       "Pending",
+//       "ADS",
+//       "Req. ADS",
+//       "% Growth",
+//       "FTD",
+//       "% Contribution"
+//     ];
+
+//     return res.status(200).json({ success: true, headers, data: reportData });
+
+//   } catch (error) {
+//     console.error("Error in getSalesReportProductWise:", error);
+//     return res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
