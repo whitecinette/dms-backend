@@ -2048,7 +2048,7 @@ exports.getBeatMappingOverviewForAdminApp = async (req, res) => {
     const monthEnd = moment(start).endOf("month").endOf("day").toDate();
 
     // 🔹 Step 1: Get users
-    const users = await User.find({ position: { $in: positions } }).lean();
+    const users = await User.find({ position: { $in: positions }, status: 'active' }).lean();
     const userCodes = users.map(u => u.code);
 
     // 🔹 Step 2: Fetch schedules in parallel
