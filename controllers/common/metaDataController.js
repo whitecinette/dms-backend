@@ -4,6 +4,7 @@ const fs = require('fs');
 const moment = require('moment'); // or use native Date
 const MetaData = require('../../model/MetaData');
 const Attendance = require('../../model/Attendance');
+const Firm = require('../../model/Firm');
 const ActorCodes = require('../../model/ActorCode');
 const { Parser } = require("json2csv");
 
@@ -538,3 +539,226 @@ exports.bulkUpdateLeavesConfig = async (req, res) => {
 };
 
 
+//new
+
+// Get all active firms with code and organization
+exports.getActiveFirms = async (req, res) => {
+  try {
+    const firms = await Firm.find(
+      { status: 'Active' },
+      { code: 1, orgName: 1, name: 1, _id: 0 }
+    ).sort({ name: 1 });
+
+    res.status(200).json({
+      success: true,
+      message: "Active firms fetched successfully",
+      count: firms.length,
+      data: firms,
+    });
+  } catch (error) {
+    console.error("❌ getActiveFirms error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching active firms",
+      error: error.message,
+    });
+  }
+};
+
+// controllers/sidebar.controller.js
+exports.getSidebar = async (req, res) => {
+  try {
+    const userCode = req.user.code;
+    if (!userCode)
+      return res.status(400).json({ error: "User code missing" });
+
+    // 🟢 Get actor first (for position and role)
+    const actor = await ActorCodes.findOne({ code: userCode });
+    const position = actor?.position?.toLowerCase() || "employee";
+    const role = actor?.role?.toLowerCase() || "employee";
+
+    // 🟢 Try to get metadata — but don't fail if missing
+    const metadata = await MetaData.findOne({ code: userCode }).lean();
+    const firm = metadata?.firm_code || "UNKNOWN_FIRM";
+
+    console.log("Sidebar → position:", position, "| role:", role, "| firm:", firm);
+
+    // 🧩 Sidebar container
+    let sidebar = [];
+
+    // ✅ 1️⃣ Super admin override
+    if (role === "super_admin" || position === "super_admin") {
+      sidebar = adminSidebar(); // or a separate superAdminSidebar() if you have one
+    }
+
+    // ✅ 2️⃣ Admin override — irrespective of firm
+    else if (role === "admin" || position === "admin") {
+      sidebar = adminSidebar();
+    }
+
+    // ✅ 3️⃣ HR override
+    else if (role === "hr" || position === "hr") {
+      sidebar = hrSidebar ? hrSidebar() : restSidebar(); // use HR-specific if defined
+    }
+
+    // ✅ 4️⃣ MDD override
+    else if (position === "mdd") {
+      sidebar = mddSidebar();
+    }
+
+    // ✅ 5️⃣ Otherwise, use firm-based logic
+    else if (firm === "SiddhaCorp_01") {
+      if (position === "zsm") sidebar = zsmSidebar();
+      else if (["asm", "tse"].includes(position)) sidebar = asmTseSidebar();
+      else sidebar = restSidebar();
+    } 
+    
+    // ✅ 6️⃣ Fallback for others / unknown firms
+    else {
+      sidebar = restSidebar();
+    }
+
+    // ✅ Send response even if metadata missing
+    return res.json({
+      success: true,
+      firm,
+      position,
+      role,
+      sidebar,
+    });
+  } catch (err) {
+    console.error("❌ Sidebar API Error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
+// ------------------------------
+// 🧱 Sidebar Configurations start
+// ------------------------------
+const adminSidebar = () => [
+  { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  { name: "Sales Dashboard", route: "sales_dashboard", icon: "barChart2" },
+  {
+    name: "Extraction",
+    icon: "database",
+    children: [
+      { name: "Add Data", route: "extraction_add", icon: "plusCircle" },
+      { name: "View Status", route: "extraction_status", icon: "clipboardList" },
+      { name: "Report", route: "extraction_report", icon: "fileText" },
+    ],
+  },
+  { name: "Route Plan", route: "route_plan", icon: "map" },
+  {
+    name: "Market Coverage",
+    icon: "briefcase",
+    children: [
+      { name: "Overview", route: "market_overview", icon: "map" },
+      { name: "Beats", route: "market_beats", icon: "route" },
+    ],
+  },
+  {
+    name: "HR",
+    icon: "users",
+    children: [
+      { name: "Attendance & Leave", route: "attendance", icon: "calendarCheck2" },
+      { name: "Bill Upload", route: "bill_upload", icon: "fileUp" },
+    ],
+  },
+  { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
+  { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
+  { name: "Profile", route: "profile", icon: "user" },
+  { name: "Logout", route: "logout", icon: "logOut" },
+];
+
+const zsmSidebar = () => [
+  { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  { name: "Sales Dashboard", route: "sales_dashboard", icon: "barChart2" },
+  {
+    name: "Extraction",
+    icon: "database",
+    children: [
+      { name: "Add Data", route: "extraction_add", icon: "plusCircle" },
+      { name: "View Status", route: "extraction_status", icon: "clipboardList" },
+      { name: "Report", route: "extraction_report", icon: "fileText" },
+    ],
+  },
+  { name: "Route Plan", route: "route_plan", icon: "map" },
+  {
+    name: "Market Coverage",
+    icon: "briefcase",
+    children: [
+      { name: "Overview", route: "market_overview", icon: "map" },
+      { name: "Beats", route: "market_beats", icon: "route" },
+    ],
+  },
+  {
+    name: "HR",
+    icon: "users",
+    children: [
+      { name: "Attendance & Leave", route: "attendance", icon: "calendarCheck2" },
+      { name: "Bill Upload", route: "bill_upload", icon: "fileUp" },
+    ],
+  },
+  { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
+  { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
+  { name: "Profile", route: "profile", icon: "user" },
+  { name: "Logout", route: "logout", icon: "logOut" },
+];
+
+const asmTseSidebar = () => [
+  { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  { name: "Sales Dashboard", route: "sales_dashboard", icon: "barChart2" },
+  {
+    name: "Extraction",
+    icon: "database",
+    children: [{ name: "Add Data", route: "extraction_add", icon: "plusCircle" }],
+  },
+  { name: "Route Plan", route: "route_plan", icon: "map" },
+  {
+    name: "Market Coverage",
+    icon: "briefcase",
+    children: [{ name: "Beats", route: "market_beats", icon: "route" }],
+  },
+  {
+    name: "HR",
+    icon: "users",
+    children: [
+      { name: "Attendance & Leave", route: "attendance", icon: "calendarCheck2" },
+      { name: "Bill Upload", route: "bill_upload", icon: "fileUp" },
+    ],
+  },
+  { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
+  { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
+  { name: "Profile", route: "profile", icon: "user" },
+  { name: "Logout", route: "logout", icon: "logOut" },
+];
+
+const mddSidebar = () => [
+  { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  {
+    name: "Extraction",
+    icon: "database",
+    children: [{ name: "Add Data", route: "extraction_add", icon: "plusCircle" }],
+  },
+  { name: "Logout", route: "logout", icon: "logOut" },
+];
+
+const restSidebar = () => [
+  { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  {
+    name: "HR",
+    icon: "users",
+    children: [
+      { name: "Attendance & Leave", route: "attendance", icon: "calendarCheck2" },
+      { name: "Bill Upload", route: "bill_upload", icon: "fileUp" },
+    ],
+  },
+  { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
+  { name: "Profile", route: "profile", icon: "user" },
+  { name: "Logout", route: "logout", icon: "logOut" },
+];
+// ------------------------------
+// 🧱 Sidebar Configurations end
+// ------------------------------
