@@ -669,7 +669,7 @@ const adminSidebar = () => [
   { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
   { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
   { name: "Profile", route: "profile", icon: "user" },
-  { name: "Logout", route: "logout", icon: "logOut" },
+  // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 
 const zsmSidebar = () => [
@@ -704,7 +704,7 @@ const zsmSidebar = () => [
   { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
   { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
   { name: "Profile", route: "profile", icon: "user" },
-  { name: "Logout", route: "logout", icon: "logOut" },
+  // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 
 const asmTseSidebar = () => [
@@ -732,7 +732,7 @@ const asmTseSidebar = () => [
   { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
   { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
   { name: "Profile", route: "profile", icon: "user" },
-  { name: "Logout", route: "logout", icon: "logOut" },
+  // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 
 const mddSidebar = () => [
@@ -742,7 +742,7 @@ const mddSidebar = () => [
     icon: "database",
     children: [{ name: "Add Data", route: "extraction_add", icon: "plusCircle" }],
   },
-  { name: "Logout", route: "logout", icon: "logOut" },
+  // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 
 const restSidebar = () => [
@@ -757,7 +757,7 @@ const restSidebar = () => [
   },
   { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
   { name: "Profile", route: "profile", icon: "user" },
-  { name: "Logout", route: "logout", icon: "logOut" },
+  // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 // ------------------------------
 // 🧱 Sidebar Configurations end
