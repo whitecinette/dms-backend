@@ -451,21 +451,69 @@ exports.bulkUpsertMetadata = async (req, res) => {
 
 
 
-
 exports.downloadMetadata = async (req, res) => {
   try {
-    const data = await MetaData.find().lean();
+    const data = await MetaData.aggregate([
+      {
+        $lookup: {
+          from: "actorcodes", // Mongo collection name
+          localField: "code",
+          foreignField: "code",
+          as: "actor"
+        }
+      },
+      {
+        $unwind: {
+          path: "$actor",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          name: 1,
+          code: 1,
+          firm_code: 1,
+          attendance: 1,
+          basic_salary: 1,
+          allowed_leaves: 1,
+          leaves_balance: 1,
+
+          role: "$actor.role",
+          position: "$actor.position",
+          actor_name: "$actor.name",
+          status: "$actor.status",
+          parent_code: "$actor.parent_code"
+        }
+      }
+    ]);
 
     if (!data.length) {
       return res.status(404).json({ message: "No metadata found" });
     }
 
-    const parser = new Parser();
+    const fields = [
+      "name",
+      "code",
+      "firm_code",
+      "role",
+      "position",
+      "actor_name",
+      "status",
+      "parent_code",
+      "attendance",
+      "basic_salary",
+      "allowed_leaves",
+      "leaves_balance"
+    ];
+
+    const parser = new Parser({ fields });
     const csv = parser.parse(data);
 
     res.header("Content-Type", "text/csv");
     res.attachment("metadata_export.csv");
     return res.send(csv);
+
   } catch (error) {
     console.error("❌ CSV export error:", error);
     res.status(500).json({ message: "Failed to export metadata" });
