@@ -99,7 +99,7 @@ exports.uploadBulkActorCodes = async (req, res) => {
             data: errors,
           });
         } catch (err) {
-          console.error("Error processing CSV:", err);
+          console.error("Error processing CSV;;:", err);
           res.status(500).json({ message: "Internal server error." });
         }
       });
