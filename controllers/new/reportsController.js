@@ -1,6 +1,8 @@
 const ActivationData = require("../../model/ActivationData")
 const SecondaryData = require("../../model/SecondaryData");
 const TertiaryData = require("../../model/TertiaryData");
+const ProductMaster = require("../../model/ProductMaster");
+
 
 const {
   getLastThreeMonths,
@@ -154,6 +156,66 @@ exports.getReportSummary = async (req, res) => {
     });
   } catch (err) {
     console.error("Report error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+
+
+
+exports.getSegmentSummary = async (req, res) => {
+  try {
+    const { selectedMonth, filters } = req.body;
+
+    const dealerCodes = await getDealerCodesFromFilters(filters);
+
+    const match = {
+      year_month: selectedMonth,
+    };
+
+    if (dealerCodes && dealerCodes.length > 0) {
+      match.dealer_code = { $in: dealerCodes };
+    }
+
+    const result = await TertiaryData.aggregate([
+      // STEP 1: FILTER EARLY (uses year_month index)
+      { $match: match },
+
+      // STEP 2: JOIN WITH PRODUCT MASTER (uses sku index)
+      {
+        $lookup: {
+          from: "productmasters",
+          localField: "sku",
+          foreignField: "sku",
+          as: "product",
+        },
+      },
+
+      // STEP 3: Flatten
+      { $unwind: "$product" },
+
+      // STEP 4: GROUP BY SEGMENT
+      {
+        $group: {
+          _id: "$product.segment",
+          totalValue: { $sum: "$net_value" },
+          totalQty: { $sum: "$qty" },
+        },
+      },
+
+      // STEP 5: Sort
+      { $sort: { totalValue: -1 } },
+    ]);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+
+  } catch (err) {
     res.status(500).json({
       success: false,
       message: err.message,
