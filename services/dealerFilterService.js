@@ -1,21 +1,46 @@
 const DealerHierarchy = require("../model/DealerHierarchy");
+const { POSITION_FIELD_MAP } = require("../config/hierarchy_structure");
 
-exports.getDealerCodesFromFilters = async (filters) => {
-  if (!filters || Object.keys(filters).length === 0) {
-    return null;
-  }
-
+exports.getDealerCodesFromFilters = async (filters = {}, user) => {
   const query = {};
 
-  Object.keys(filters).forEach((key) => {
-    if (filters[key] && filters[key].length > 0) {
-      query[key] = { $in: filters[key] };
+  // 🔐 1. Mandatory role restriction
+  if (!["admin", "super_admin"].includes(user.role)) {
+    const hierarchyField = POSITION_FIELD_MAP[user.position];
+
+    if (hierarchyField) {
+      query[hierarchyField] = user.code;
     }
-  });
+  }
 
-  if (Object.keys(query).length === 0) return null;
+  // 🔎 2. Apply optional filters (within allowed scope)
 
-  const dealers = await DealerHierarchy.find(query).select("dealer_code");
+  if (filters.sh?.length) {
+    query.sh_code = { $in: filters.sh };
+  }
 
-  return dealers.map((d) => d.dealer_code);
+  if (filters.zsm?.length) {
+    query.zsm_code = { $in: filters.zsm };
+  }
+
+  if (filters.asm?.length) {
+    query.asm_code = { $in: filters.asm };
+  }
+
+  if (filters.mdd?.length) {
+    query.mdd_code = { $in: filters.mdd };
+  }
+
+  if (filters.tse?.length) {
+    query.tse_code = { $in: filters.tse };
+  }
+
+  const dealers = await DealerHierarchy.find(query).select(
+    "dealer_code mdd_code"
+  );
+
+  return {
+    dealerCodes: dealers.map((d) => d.dealer_code),
+    mddCodes: [...new Set(dealers.map((d) => d.mdd_code))],
+  };
 };

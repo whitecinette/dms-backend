@@ -1,224 +1,251 @@
-const ActivationData = require("../../model/ActivationData")
+const ActivationData = require("../../model/ActivationData");
 const SecondaryData = require("../../model/SecondaryData");
 const TertiaryData = require("../../model/TertiaryData");
-const ProductMaster = require("../../model/ProductMaster");
+const moment = require("moment");
+const { getDealerCodesFromFilters } = require("../../services/dealerFilterService");
 
 
-const {
-  getLastThreeMonths,
-  getYesterdayIndia,
-} = require("../../utils/reportHelpers");
-
-const {
-  getDealerCodesFromFilters,
-} = require("../../services/dealerFilterService");
-
-exports.getReportSummary = async (req, res) => {
+// ============================================
+// MAIN DASHBOARD API (Exact Screenshot Table)
+// ============================================
+exports.getDashboardSummary = async (req, res) => {
   try {
-    const { type, selectedMonth, filters } = req.body;
+    const { start_date, end_date, filters } = req.body;
+    const user = req.user;
 
-    if (!type || !selectedMonth) {
+    if (!start_date || !end_date) {
       return res.status(400).json({
         success: false,
-        message: "type and selectedMonth required",
+        message: "start_date and end_date required",
       });
     }
 
-    const months = getLastThreeMonths(selectedMonth);
+    const { dealerCodes, mddCodes } =
+      await getDealerCodesFromFilters(filters, user);
 
-    // Get dealer codes if filtering applied
-    const dealerCodes = await getDealerCodesFromFilters(filters);
+    const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
+    const endDate = moment(end_date, "YYYY-MM-DD").endOf("day");
 
-    let Model;
-    let dateField;
-    let valueField;
-    let qtyField;
-    let dealerField;
+    const isFullMonth =
+      startDate.date() === 1 &&
+      endDate.date() === endDate.daysInMonth();
 
-    if (type === "activation") {
-      Model = ActivationData;
-      dateField = "activation_date_raw";
-      valueField = "val";
-      qtyField = "qty";
-      dealerField = "tertiary_buyer_code";
+    let lmtdStart = startDate.clone().subtract(1, "month");
+    let lmtdEnd = endDate.clone().subtract(1, "month");
+
+    if (isFullMonth) {
+      lmtdStart = lmtdStart.startOf("month");
+      lmtdEnd = lmtdStart.clone().endOf("month");
     }
 
-    if (type === "tertiary") {
-      Model = TertiaryData;
-      dateField = "invoice_date_raw";
-      valueField = "net_value";
-      qtyField = "qty";
-      dealerField = "dealer_code";
-    }
+    const ftdRawDate = endDate.format("M/D/YY");
 
-    if (type === "secondary") {
-      Model = SecondaryData;
-      dateField = "invoice_date_raw";
-      valueField = "net_value";
-      qtyField = "qty";
-      dealerField = "mdd_code";
-    }
+    const baseMonth = moment(startDate);
 
-    // Base Match
-    const match = {
-      year_month: { $in: months },
-    };
+    const lastThreeMonths = [
+      baseMonth.clone().subtract(3, "months").format("YYYY-MM"),
+      baseMonth.clone().subtract(2, "months").format("YYYY-MM"),
+      baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
+    ];
 
-    if (dealerCodes && dealerCodes.length > 0) {
-      match[dealerField] = { $in: dealerCodes };
-    }
-
-    // Monthly aggregation
-    const monthlyData = await Model.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: "$year_month",
-          totalValue: { $sum: `$${valueField}` },
-          totalQty: { $sum: `$${qtyField}` },
-        },
-      },
+    const [activation, tertiary, secondary] = await Promise.all([
+      buildReport(
+        ActivationData,
+        "activation_date_raw",
+        "tertiary_buyer_code",
+        dealerCodes,
+        "val",
+        "qty",
+        lastThreeMonths,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        true
+      ),
+      buildReport(
+        TertiaryData,
+        "invoice_date_raw",
+        "dealer_code",
+        dealerCodes,
+        "net_value",
+        "qty",
+        lastThreeMonths,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        true
+      ),
+      buildReport(
+        SecondaryData,
+        "invoice_date_raw",
+        "mdd_code",
+        mddCodes,
+        "net_value",
+        "qty",
+        lastThreeMonths,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        false
+      ),
     ]);
-
-    // Convert to map
-    const monthlyMap = {};
-    monthlyData.forEach((m) => {
-      monthlyMap[m._id] = m;
-    });
-
-    // MTD
-    const [year, month] = selectedMonth.split("-");
-    const yesterdayRaw = getYesterdayIndia();
-
-    const mtdData = await Model.aggregate([
-      {
-        $match: {
-          year_month: selectedMonth,
-          ...(dealerCodes && dealerCodes.length > 0
-            ? { [dealerField]: { $in: dealerCodes } }
-            : {}),
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalValue: { $sum: `$${valueField}` },
-          totalQty: { $sum: `$${qtyField}` },
-        },
-      },
-    ]);
-
-    // FTD (Yesterday only)
-    const ftdData = await Model.aggregate([
-      {
-        $match: {
-          [dateField]: yesterdayRaw,
-          ...(dealerCodes && dealerCodes.length > 0
-            ? { [dealerField]: { $in: dealerCodes } }
-            : {}),
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalValue: { $sum: `$${valueField}` },
-          totalQty: { $sum: `$${qtyField}` },
-        },
-      },
-    ]);
-
-    const current = monthlyMap[selectedMonth] || {
-      totalValue: 0,
-      totalQty: 0,
-    };
-
-    const prev = monthlyMap[months[1]] || {
-      totalValue: 0,
-      totalQty: 0,
-    };
-
-    const growth =
-      prev.totalValue === 0
-        ? 0
-        : ((current.totalValue - prev.totalValue) /
-            prev.totalValue) *
-          100;
 
     return res.json({
       success: true,
-      months,
-      data: {
-        monthly: monthlyMap,
-        mtd: mtdData[0] || { totalValue: 0, totalQty: 0 },
-        ftd: ftdData[0] || { totalValue: 0, totalQty: 0 },
-        growthPercent: Number(growth.toFixed(2)),
-      },
+      activation,
+      tertiary,
+      secondary,
     });
-  } catch (err) {
-    console.error("Report error:", err);
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 
-
-
-exports.getSegmentSummary = async (req, res) => {
-  try {
-    const { selectedMonth, filters } = req.body;
-
-    const dealerCodes = await getDealerCodesFromFilters(filters);
-
-    const match = {
-      year_month: selectedMonth,
-    };
-
-    if (dealerCodes && dealerCodes.length > 0) {
-      match.dealer_code = { $in: dealerCodes };
+// ============================================
+// GENERIC REPORT BUILDER
+// ============================================
+async function buildReport(
+  Model,
+  dateField,
+  dealerField,
+  codes,
+  valueField,
+  qtyField,
+  lastThreeMonths,
+  startDate,
+  endDate,
+  lmtdStart,
+  lmtdEnd,
+  ftdRawDate,
+  includeWod
+) {
+  const result = await Model.aggregate([
+    {
+      $addFields: {
+        parsedDate: {
+          $let: {
+            vars: { parts: { $split: [`$${dateField}`, "/"] } },
+            in: {
+              $dateFromParts: {
+                year: {
+                  $add: [
+                    2000,
+                    { $toInt: { $arrayElemAt: ["$$parts", 2] } }
+                  ]
+                },
+                month: { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                day: { $toInt: { $arrayElemAt: ["$$parts", 1] } }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      $match: {
+        ...(codes?.length ? { [dealerField]: { $in: codes } } : {})
+      }
+    },
+    {
+      $facet: {
+        lastThree: [
+          { $match: { year_month: { $in: lastThreeMonths } } },
+          {
+            $group: {
+              _id: "$year_month",
+              totalVal: { $sum: `$${valueField}` },
+              totalQty: { $sum: `$${qtyField}` }
+            }
+          }
+        ],
+        mtd: [
+          { $match: { parsedDate: { $gte: startDate.toDate(), $lte: endDate.toDate() } } },
+          { $group: { _id: null, totalVal: { $sum: `$${valueField}` }, totalQty: { $sum: `$${qtyField}` } } }
+        ],
+        lmtd: [
+          { $match: { parsedDate: { $gte: lmtdStart.toDate(), $lte: lmtdEnd.toDate() } } },
+          { $group: { _id: null, totalVal: { $sum: `$${valueField}` }, totalQty: { $sum: `$${qtyField}` } } }
+        ],
+        ftd: [
+          { $match: { [dateField]: ftdRawDate } },
+          { $group: { _id: null, totalVal: { $sum: `$${valueField}` }, totalQty: { $sum: `$${qtyField}` } } }
+        ],
+        wod: includeWod
+          ? [
+              { $match: { parsedDate: { $gte: startDate.toDate(), $lte: endDate.toDate() }, [qtyField]: { $gt: 0 } } },
+              { $group: { _id: `$${dealerField}` } },
+              { $count: "totalDealers" }
+            ]
+          : []
+      }
     }
+  ]);
 
-    const result = await TertiaryData.aggregate([
-      // STEP 1: FILTER EARLY (uses year_month index)
-      { $match: match },
+  return formatTable(result[0], lastThreeMonths, includeWod);
+}
 
-      // STEP 2: JOIN WITH PRODUCT MASTER (uses sku index)
-      {
-        $lookup: {
-          from: "productmasters",
-          localField: "sku",
-          foreignField: "sku",
-          as: "product",
-        },
-      },
 
-      // STEP 3: Flatten
-      { $unwind: "$product" },
+// ============================================
+// FORMAT EXACT TABLE STRUCTURE
+// ============================================
+function formatTable(data, lastThreeMonths, includeWod) {
+  const monthLabels = lastThreeMonths.map(m =>
+    moment(m, "YYYY-MM").format("MMM")
+  );
 
-      // STEP 4: GROUP BY SEGMENT
-      {
-        $group: {
-          _id: "$product.segment",
-          totalValue: { $sum: "$net_value" },
-          totalQty: { $sum: "$qty" },
-        },
-      },
+  const valueRow = {};
+  const volumeRow = {};
 
-      // STEP 5: Sort
-      { $sort: { totalValue: -1 } },
-    ]);
+  monthLabels.forEach(label => {
+    valueRow[label] = 0;
+    volumeRow[label] = 0;
+  });
 
-    res.json({
-      success: true,
-      data: result,
-    });
+  (data.lastThree || []).forEach(m => {
+    const label = moment(m._id, "YYYY-MM").format("MMM");
+    valueRow[label] = m.totalVal;
+    volumeRow[label] = m.totalQty;
+  });
 
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
-  }
-};
+  const mtd = data.mtd?.[0] || { totalVal: 0, totalQty: 0 };
+  const lmtd = data.lmtd?.[0] || { totalVal: 0, totalQty: 0 };
+  const ftd = data.ftd?.[0] || { totalVal: 0, totalQty: 0 };
+
+  const growth =
+    lmtd.totalVal === 0
+      ? 0
+      : ((mtd.totalVal - lmtd.totalVal) / lmtd.totalVal) * 100;
+
+  valueRow["MTD"] = mtd.totalVal;
+  valueRow["LMTD"] = lmtd.totalVal;
+  valueRow["FTD"] = ftd.totalVal;
+  valueRow["G/D%"] = Number(growth.toFixed(2));
+  valueRow["ExpAch"] = 0;
+  valueRow["WFM"] = 0;
+
+  volumeRow["MTD"] = mtd.totalQty;
+  volumeRow["LMTD"] = lmtd.totalQty;
+  volumeRow["FTD"] = ftd.totalQty;
+  volumeRow["G/D%"] = Number(growth.toFixed(2));
+  volumeRow["ExpAch"] = 0;
+  volumeRow["WFM"] = 0;
+
+  return {
+    table: {
+      value: valueRow,
+      volume: volumeRow,
+      ...(includeWod && {
+        wod: data.wod?.[0]?.totalDealers || 0
+      })
+    }
+  };
+}
