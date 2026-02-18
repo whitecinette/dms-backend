@@ -96,11 +96,23 @@ exports.getDashboardSummary = async (req, res) => {
       ),
     ]);
 
+    const wodTables = await getWODSummary(
+      dealerCodes,
+      startDate,
+      endDate,
+      lmtdStart,
+      lmtdEnd,
+      ftdRawDate,
+      lastThreeMonths
+    );
+
+
     return res.json({
       success: true,
       activation,
       tertiary,
       secondary,
+      wodTables,
     });
 
   } catch (error) {
@@ -249,3 +261,141 @@ function formatTable(data, lastThreeMonths, includeWod) {
     }
   };
 }
+
+async function getWODSummary(
+  dealerCodes,
+  startDate,
+  endDate,
+  lmtdStart,
+  lmtdEnd,
+  ftdRawDate,
+  lastThreeMonths
+) {
+  const sellIn = await buildWODPipeline(
+    TertiaryData,
+    "dealer_code",
+    dealerCodes,
+    startDate,
+    endDate,
+    lmtdStart,
+    lmtdEnd,
+    ftdRawDate,
+    lastThreeMonths
+  );
+
+  const sellOut = await buildWODPipeline(
+    ActivationData,
+    "tertiary_buyer_code",
+    dealerCodes,
+    startDate,
+    endDate,
+    lmtdStart,
+    lmtdEnd,
+    ftdRawDate,
+    lastThreeMonths
+  );
+
+  return {
+    sellInWOD: sellIn,
+    sellOutWOD: sellOut,
+  };
+}
+
+async function buildWODPipeline(
+  Model,
+  dealerField,
+  dealerCodes,
+  startDate,
+  endDate,
+  lmtdStart,
+  lmtdEnd,
+  ftdRawDate,
+  lastThreeMonths
+) {
+  const result = await Model.aggregate([
+    {
+      $addFields: {
+        parsedDate: {
+          $let: {
+            vars: { parts: { $split: ["$invoice_date_raw", "/"] } },
+            in: {
+              $dateFromParts: {
+                year: {
+                  $add: [2000, { $toInt: { $arrayElemAt: ["$$parts", 2] } }],
+                },
+                month: { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                day: { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $match: {
+        ...(dealerCodes?.length
+          ? { [dealerField]: { $in: dealerCodes } }
+          : {}),
+        qty: { $gt: 0 },
+      },
+    },
+    {
+      $facet: {
+        lastThree: [
+          { $match: { year_month: { $in: lastThreeMonths } } },
+          { $group: { _id: "$year_month", dealers: { $addToSet: `$${dealerField}` } } },
+          { $project: { count: { $size: "$dealers" } } },
+        ],
+        mtd: [
+          { $match: { parsedDate: { $gte: startDate.toDate(), $lte: endDate.toDate() } } },
+          { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
+          { $project: { count: { $size: "$dealers" } } },
+        ],
+        lmtd: [
+          { $match: { parsedDate: { $gte: lmtdStart.toDate(), $lte: lmtdEnd.toDate() } } },
+          { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
+          { $project: { count: { $size: "$dealers" } } },
+        ],
+        ftd: [
+          { $match: { activation_date_raw: ftdRawDate } },
+          { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
+          { $project: { count: { $size: "$dealers" } } },
+        ],
+      },
+    },
+  ]);
+
+  return formatWODResult(result[0], lastThreeMonths);
+}
+
+
+function formatWODResult(data, lastThreeMonths) {
+  const monthMap = {};
+
+  lastThreeMonths.forEach((m) => {
+    monthMap[m] = 0;
+  });
+
+  (data.lastThree || []).forEach((m, index) => {
+    monthMap[lastThreeMonths[index]] = m.count || 0;
+  });
+
+  const mtd = data.mtd?.[0]?.count || 0;
+  const lmtd = data.lmtd?.[0]?.count || 0;
+  const ftd = data.ftd?.[0]?.count || 0;
+
+  const growth =
+    lmtd === 0 ? 0 : ((mtd - lmtd) / lmtd) * 100;
+
+  return {
+    Nov: monthMap[lastThreeMonths[0]],
+    Dec: monthMap[lastThreeMonths[1]],
+    Jan: monthMap[lastThreeMonths[2]],
+    MTD: mtd,
+    LMTD: lmtd,
+    FTD: ftd,
+    "G/D%": Number(growth.toFixed(2)),
+    "Exp.Ach": 0, // placeholder
+  };
+}
+
