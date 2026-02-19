@@ -3,6 +3,7 @@ const SecondaryData = require("../../model/SecondaryData");
 const TertiaryData = require("../../model/TertiaryData");
 const moment = require("moment");
 const { getDealerCodesFromFilters } = require("../../services/dealerFilterService");
+const momentTz = require("moment-timezone");
 
 
 // ============================================
@@ -10,14 +11,18 @@ const { getDealerCodesFromFilters } = require("../../services/dealerFilterServic
 // ============================================
 exports.getDashboardSummary = async (req, res) => {
   try {
-    const { start_date, end_date, filters } = req.body;
+    let { start_date, end_date, filters } = req.body;
     const user = req.user;
 
+    const indiaNow = momentTz().tz("Asia/Kolkata");
+
+    // If no dates provided → default to real-time safe range
     if (!start_date || !end_date) {
-      return res.status(400).json({
-        success: false,
-        message: "start_date and end_date required",
-      });
+
+      const yesterday = indiaNow.clone().subtract(1, "day");
+
+      start_date = yesterday.clone().startOf("month").format("YYYY-MM-DD");
+      end_date = yesterday.format("YYYY-MM-DD");
     }
 
     const { dealerCodes = [], mddCodes = [] } =
@@ -217,93 +222,158 @@ async function buildReport(
         // ========================
         // MTD
         // ========================
-        mtd: [
-          {
-            $match: {
-              parsedDate: {
-                $gte: startDate.toDate(),
-                $lte: endDate.toDate()
+        mtd: includeWod
+          ? [
+              {
+                $match: {
+                  parsedDate: {
+                    $gte: startDate.toDate(),
+                    $lte: endDate.toDate()
+                  }
+                }
+              },
+              {
+                $group: {
+                  _id: null,
+                  totalVal: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${valueField}`,
+                        0
+                      ]
+                    }
+                  },
+                  totalQty: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${qtyField}`,
+                        0
+                      ]
+                    }
+                  },
+                  excludedVal: {
+                    $sum: { $cond: ["$inHierarchy", 0, `$${valueField}`] }
+                  },
+                  excludedQty: {
+                    $sum: { $cond: ["$inHierarchy", 0, `$${qtyField}`] }
+                  },
+                  excludedCount: {
+                    $sum: { $cond: ["$inHierarchy", 0, 1] }
+                  }
+                }
               }
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              totalVal: {
-                $sum: {
-                  $cond: [
-                    { $or: ["$inHierarchy", isAdmin] },
-                    `$${valueField}`,
-                    0
-                  ]
+            ]
+          : [
+              {
+                $match: {
+                  year_month: startDate.format("YYYY-MM")
                 }
               },
-              totalQty: {
-                $sum: {
-                  $cond: [
-                    { $or: ["$inHierarchy", isAdmin] },
-                    `$${qtyField}`,
-                    0
-                  ]
+              {
+                $group: {
+                  _id: null,
+                  totalVal: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${valueField}`,
+                        0
+                      ]
+                    }
+                  },
+                  totalQty: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${qtyField}`,
+                        0
+                      ]
+                    }
+                  },
+                  excludedVal: {
+                    $sum: { $cond: ["$inHierarchy", 0, `$${valueField}`] }
+                  },
+                  excludedQty: {
+                    $sum: { $cond: ["$inHierarchy", 0, `$${qtyField}`] }
+                  },
+                  excludedCount: {
+                    $sum: { $cond: ["$inHierarchy", 0, 1] }
+                  }
                 }
-              },
+              }
+            ],
 
-              // 🔴 always calculate excluded separately
-              excludedVal: {
-                $sum: {
-                  $cond: ["$inHierarchy", 0, `$${valueField}`]
-                }
-              },
-              excludedQty: {
-                $sum: {
-                  $cond: ["$inHierarchy", 0, `$${qtyField}`]
-                }
-              },
-              excludedCount: {
-                $sum: {
-                  $cond: ["$inHierarchy", 0, 1]
-                }
-              }
-            }
-          }
-        ],
 
         // ========================
         // LMTD
         // ========================
-        lmtd: [
-          {
-            $match: {
-              parsedDate: {
-                $gte: lmtdStart.toDate(),
-                $lte: lmtdEnd.toDate()
-              }
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              totalVal: {
-                $sum: {
-                  $cond: [
-                    { $or: ["$inHierarchy", isAdmin] },
-                    `$${valueField}`,
-                    0
-                  ]
+        lmtd: includeWod
+          ? [
+              {
+                $match: {
+                  parsedDate: {
+                    $gte: lmtdStart.toDate(),
+                    $lte: lmtdEnd.toDate()
+                  }
                 }
               },
-              totalQty: {
-                $sum: {
-                  $cond: [
-                    { $or: ["$inHierarchy", isAdmin] },
-                    `$${qtyField}`,
-                    0
-                  ]
+              {
+                $group: {
+                  _id: null,
+                  totalVal: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${valueField}`,
+                        0
+                      ]
+                    }
+                  },
+                  totalQty: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${qtyField}`,
+                        0
+                      ]
+                    }
+                  }
                 }
               }
-            }
-          }
-        ],
+            ]
+          : [
+              {
+                $match: {
+                  year_month: lmtdStart.format("YYYY-MM")
+                }
+              },
+              {
+                $group: {
+                  _id: null,
+                  totalVal: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${valueField}`,
+                        0
+                      ]
+                    }
+                  },
+                  totalQty: {
+                    $sum: {
+                      $cond: [
+                        { $or: ["$inHierarchy", isAdmin] },
+                        `$${qtyField}`,
+                        0
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+
 
         // ========================
         // FTD
