@@ -30,7 +30,7 @@ exports.getUnmappedProducts = async (req, res) => {
     ];
 
     // 2️⃣ Get product master models
-    const masterModels = await ProductMaster.distinct("model_no");
+    const masterModels = await ProductMaster.distinct("model");
 
     const normalizedMasterModels = new Set(
       masterModels
