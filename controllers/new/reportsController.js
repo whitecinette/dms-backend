@@ -112,15 +112,17 @@ exports.getDashboardSummary = async (req, res) => {
     ]);
 
 
-    const wodTables = await getWODSummary(
-      dealerCodes,
-      startDate,
-      endDate,
-      lmtdStart,
-      lmtdEnd,
-      ftdRawDate,
-      lastThreeMonths
-    );
+  const wodTables = await getWODSummary(
+    dealerCodes,
+    startDate,
+    endDate,
+    lmtdStart,
+    lmtdEnd,
+    ftdRawDate,
+    lastThreeMonths,
+    isAdmin
+  );
+
 
     return res.json({
       success: true,
@@ -430,7 +432,13 @@ async function buildReport(
     }
   ]);
 
-  return formatTable(result[0], lastThreeMonths, includeWod);
+  return formatTable(
+  result[0],
+  lastThreeMonths,
+  includeWod,
+  isAdmin
+);
+
 }
 
 
@@ -439,7 +447,8 @@ async function buildReport(
 // ============================================
 // FORMAT EXACT TABLE STRUCTURE
 // ============================================
-function formatTable(data, lastThreeMonths, includeWod) {
+function formatTable(data, lastThreeMonths, includeWod, isAdmin){
+
   const monthLabels = lastThreeMonths.map(m =>
     moment(m, "YYYY-MM").format("MMM")
   );
@@ -465,22 +474,32 @@ function formatTable(data, lastThreeMonths, includeWod) {
   const mtdVal = mtd.totalVal || 0;
   const lmtdVal = lmtd.totalVal || 0;
 
-  const growth =
+  const mtdQty = mtd.totalQty || 0;
+  const lmtdQty = lmtd.totalQty || 0;
+
+  // ✅ Value Growth
+  const valueGrowth =
     lmtdVal === 0
       ? 0
       : ((mtdVal - lmtdVal) / lmtdVal) * 100;
 
+  // ✅ Volume Growth
+  const volumeGrowth =
+    lmtdQty === 0
+      ? 0
+      : ((mtdQty - lmtdQty) / lmtdQty) * 100;
+
   valueRow["MTD"] = mtdVal;
   valueRow["LMTD"] = lmtdVal;
   valueRow["FTD"] = ftd.totalVal || 0;
-  valueRow["G/D%"] = Number(growth.toFixed(2));
+  valueRow["G/D%"] = Number(valueGrowth.toFixed(2));
   valueRow["ExpAch"] = 0;
   valueRow["WFM"] = 0;
 
   volumeRow["MTD"] = mtd.totalQty || 0;
   volumeRow["LMTD"] = lmtd.totalQty || 0;
   volumeRow["FTD"] = ftd.totalQty || 0;
-  volumeRow["G/D%"] = Number(growth.toFixed(2));
+  volumeRow["G/D%"] = Number(volumeGrowth.toFixed(2));
   volumeRow["ExpAch"] = 0;
   volumeRow["WFM"] = 0;
 
@@ -493,12 +512,19 @@ function formatTable(data, lastThreeMonths, includeWod) {
       }),
 
       // 🔴 NEW FLAG SUMMARY (SAFE ADDITION)
-      flagSummary: {
-        excludedVal: mtd.excludedVal || 0,
-        excludedQty: mtd.excludedQty || 0,
-        excludedCount: mtd.excludedCount || 0,
-        countedInOverall: false
-      }
+    flagSummary: {
+      excludedVal: mtd.excludedVal || 0,
+      excludedQty: mtd.excludedQty || 0,
+      excludedCount: mtd.excludedCount || 0,
+
+      // ✅ Admin includes excluded in totals
+      countedInOverall: isAdmin,
+
+      // ✅ Useful UI flag trigger
+      hasHierarchyIssue: (mtd.excludedCount || 0) > 0
+    }
+
+
     }
   };
 }
@@ -511,10 +537,13 @@ async function getWODSummary(
   lmtdStart,
   lmtdEnd,
   ftdRawDate,
-  lastThreeMonths
-) {
+  lastThreeMonths,
+  isAdmin
+)
+{
   const sellIn = await buildWODPipeline(
     TertiaryData,
+    "invoice_date_raw",
     "dealer_code",
     dealerCodes,
     startDate,
@@ -522,11 +551,13 @@ async function getWODSummary(
     lmtdStart,
     lmtdEnd,
     ftdRawDate,
-    lastThreeMonths
+    lastThreeMonths,
+    isAdmin
   );
 
   const sellOut = await buildWODPipeline(
     ActivationData,
+    "activation_date_raw",
     "tertiary_buyer_code",
     dealerCodes,
     startDate,
@@ -545,6 +576,7 @@ async function getWODSummary(
 
 async function buildWODPipeline(
   Model,
+  dateField,
   dealerField,
   dealerCodes,
   startDate,
@@ -552,14 +584,17 @@ async function buildWODPipeline(
   lmtdStart,
   lmtdEnd,
   ftdRawDate,
-  lastThreeMonths
-) {
+  lastThreeMonths,
+  isAdmin
+)
+ {
   const result = await Model.aggregate([
     {
       $addFields: {
         parsedDate: {
           $let: {
-            vars: { parts: { $split: ["$invoice_date_raw", "/"] } },
+            vars: { parts: { $split: [`$${dateField}`, "/"] } },
+
             in: {
               $dateFromParts: {
                 year: {
@@ -573,14 +608,18 @@ async function buildWODPipeline(
         },
       },
     },
-    {
-      $match: {
-        ...(dealerCodes?.length
+  {
+    $match: {
+      ...(isAdmin
+        ? {}
+        : dealerCodes?.length
           ? { [dealerField]: { $in: dealerCodes } }
           : {}),
-        qty: { $gt: 0 },
-      },
+      qty: { $gt: 0 },
     },
+  }
+,
+
     {
       $facet: {
         lastThree: [
@@ -599,7 +638,7 @@ async function buildWODPipeline(
           { $project: { count: { $size: "$dealers" } } },
         ],
         ftd: [
-          { $match: { activation_date_raw: ftdRawDate } },
+          { $match: { [dateField]: ftdRawDate } },
           { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
           { $project: { count: { $size: "$dealers" } } },
         ],
