@@ -35,12 +35,16 @@ exports.getDealerCodesFromFilters = async (filters = {}, user) => {
     query.tse_code = { $in: filters.tse };
   }
 
+  // 🔥 IMPORTANT CHANGE: include beat_code
   const dealers = await DealerHierarchy.find(query).select(
-    "dealer_code mdd_code"
+    "dealer_code mdd_code beat_code"
   );
 
   return {
     dealerCodes: dealers.map((d) => d.dealer_code),
-    mddCodes: [...new Set(dealers.map((d) => d.mdd_code))],
+
+    // 🔥 SECONDARY FIX:
+    // Secondary.mdd_code actually matches dealerhierarchies.beat_code
+    mddCodes: [...new Set(dealers.map((d) => d.beat_code))],
   };
 };

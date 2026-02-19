@@ -20,7 +20,7 @@ exports.getDashboardSummary = async (req, res) => {
       });
     }
 
-    const { dealerCodes, mddCodes } =
+    const { dealerCodes = [], mddCodes = [] } =
       await getDealerCodesFromFilters(filters, user);
 
     const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
@@ -48,7 +48,12 @@ exports.getDashboardSummary = async (req, res) => {
       baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
     ];
 
+    const isAdmin =
+      user?.role === "admin" ||
+      user?.role === "super_admin";
+
     const [activation, tertiary, secondary] = await Promise.all([
+
       buildReport(
         ActivationData,
         "activation_date_raw",
@@ -62,8 +67,10 @@ exports.getDashboardSummary = async (req, res) => {
         lmtdStart,
         lmtdEnd,
         ftdRawDate,
-        true
+        true,
+        isAdmin
       ),
+
       buildReport(
         TertiaryData,
         "invoice_date_raw",
@@ -77,8 +84,10 @@ exports.getDashboardSummary = async (req, res) => {
         lmtdStart,
         lmtdEnd,
         ftdRawDate,
-        true
+        true,
+        isAdmin
       ),
+
       buildReport(
         SecondaryData,
         "invoice_date_raw",
@@ -92,9 +101,11 @@ exports.getDashboardSummary = async (req, res) => {
         lmtdStart,
         lmtdEnd,
         ftdRawDate,
-        false
+        false,
+        isAdmin
       ),
     ]);
+
 
     const wodTables = await getWODSummary(
       dealerCodes,
@@ -105,7 +116,6 @@ exports.getDashboardSummary = async (req, res) => {
       ftdRawDate,
       lastThreeMonths
     );
-
 
     return res.json({
       success: true,
@@ -138,8 +148,12 @@ async function buildReport(
   lmtdStart,
   lmtdEnd,
   ftdRawDate,
-  includeWod
+  includeWod,
+  isAdmin = false
 ) {
+
+  const safeCodes = Array.isArray(codes) ? codes : [];
+
   const result = await Model.aggregate([
     {
       $addFields: {
@@ -159,42 +173,186 @@ async function buildReport(
               }
             }
           }
+        },
+
+        inHierarchy: {
+          $in: [`$${dealerField}`, safeCodes]
         }
       }
     },
-    {
-      $match: {
-        ...(codes?.length ? { [dealerField]: { $in: codes } } : {})
-      }
-    },
+
     {
       $facet: {
+
+        // ========================
+        // LAST 3 MONTHS
+        // ========================
         lastThree: [
           { $match: { year_month: { $in: lastThreeMonths } } },
           {
             $group: {
               _id: "$year_month",
-              totalVal: { $sum: `$${valueField}` },
-              totalQty: { $sum: `$${qtyField}` }
+              totalVal: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${valueField}`,
+                    0
+                  ]
+                }
+              },
+              totalQty: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${qtyField}`,
+                    0
+                  ]
+                }
+              }
             }
           }
         ],
+
+        // ========================
+        // MTD
+        // ========================
         mtd: [
-          { $match: { parsedDate: { $gte: startDate.toDate(), $lte: endDate.toDate() } } },
-          { $group: { _id: null, totalVal: { $sum: `$${valueField}` }, totalQty: { $sum: `$${qtyField}` } } }
+          {
+            $match: {
+              parsedDate: {
+                $gte: startDate.toDate(),
+                $lte: endDate.toDate()
+              }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalVal: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${valueField}`,
+                    0
+                  ]
+                }
+              },
+              totalQty: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${qtyField}`,
+                    0
+                  ]
+                }
+              },
+
+              // 🔴 always calculate excluded separately
+              excludedVal: {
+                $sum: {
+                  $cond: ["$inHierarchy", 0, `$${valueField}`]
+                }
+              },
+              excludedQty: {
+                $sum: {
+                  $cond: ["$inHierarchy", 0, `$${qtyField}`]
+                }
+              },
+              excludedCount: {
+                $sum: {
+                  $cond: ["$inHierarchy", 0, 1]
+                }
+              }
+            }
+          }
         ],
+
+        // ========================
+        // LMTD
+        // ========================
         lmtd: [
-          { $match: { parsedDate: { $gte: lmtdStart.toDate(), $lte: lmtdEnd.toDate() } } },
-          { $group: { _id: null, totalVal: { $sum: `$${valueField}` }, totalQty: { $sum: `$${qtyField}` } } }
+          {
+            $match: {
+              parsedDate: {
+                $gte: lmtdStart.toDate(),
+                $lte: lmtdEnd.toDate()
+              }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalVal: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${valueField}`,
+                    0
+                  ]
+                }
+              },
+              totalQty: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${qtyField}`,
+                    0
+                  ]
+                }
+              }
+            }
+          }
         ],
+
+        // ========================
+        // FTD
+        // ========================
         ftd: [
           { $match: { [dateField]: ftdRawDate } },
-          { $group: { _id: null, totalVal: { $sum: `$${valueField}` }, totalQty: { $sum: `$${qtyField}` } } }
+          {
+            $group: {
+              _id: null,
+              totalVal: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${valueField}`,
+                    0
+                  ]
+                }
+              },
+              totalQty: {
+                $sum: {
+                  $cond: [
+                    { $or: ["$inHierarchy", isAdmin] },
+                    `$${qtyField}`,
+                    0
+                  ]
+                }
+              }
+            }
+          }
         ],
+
+        // ========================
+        // WOD
+        // ========================
         wod: includeWod
           ? [
-              { $match: { parsedDate: { $gte: startDate.toDate(), $lte: endDate.toDate() }, [qtyField]: { $gt: 0 } } },
-              { $group: { _id: `$${dealerField}` } },
+              {
+                $match: {
+                  parsedDate: {
+                    $gte: startDate.toDate(),
+                    $lte: endDate.toDate()
+                  },
+                  [qtyField]: { $gt: 0 },
+                  ...(isAdmin ? {} : { inHierarchy: true })
+                }
+              },
+              {
+                $group: { _id: `$${dealerField}` }
+              },
               { $count: "totalDealers" }
             ]
           : []
@@ -204,6 +362,8 @@ async function buildReport(
 
   return formatTable(result[0], lastThreeMonths, includeWod);
 }
+
+
 
 
 // ============================================
@@ -228,25 +388,28 @@ function formatTable(data, lastThreeMonths, includeWod) {
     volumeRow[label] = m.totalQty;
   });
 
-  const mtd = data.mtd?.[0] || { totalVal: 0, totalQty: 0 };
-  const lmtd = data.lmtd?.[0] || { totalVal: 0, totalQty: 0 };
-  const ftd = data.ftd?.[0] || { totalVal: 0, totalQty: 0 };
+  const mtd = data.mtd?.[0] || {};
+  const lmtd = data.lmtd?.[0] || {};
+  const ftd = data.ftd?.[0] || {};
+
+  const mtdVal = mtd.totalVal || 0;
+  const lmtdVal = lmtd.totalVal || 0;
 
   const growth =
-    lmtd.totalVal === 0
+    lmtdVal === 0
       ? 0
-      : ((mtd.totalVal - lmtd.totalVal) / lmtd.totalVal) * 100;
+      : ((mtdVal - lmtdVal) / lmtdVal) * 100;
 
-  valueRow["MTD"] = mtd.totalVal;
-  valueRow["LMTD"] = lmtd.totalVal;
-  valueRow["FTD"] = ftd.totalVal;
+  valueRow["MTD"] = mtdVal;
+  valueRow["LMTD"] = lmtdVal;
+  valueRow["FTD"] = ftd.totalVal || 0;
   valueRow["G/D%"] = Number(growth.toFixed(2));
   valueRow["ExpAch"] = 0;
   valueRow["WFM"] = 0;
 
-  volumeRow["MTD"] = mtd.totalQty;
-  volumeRow["LMTD"] = lmtd.totalQty;
-  volumeRow["FTD"] = ftd.totalQty;
+  volumeRow["MTD"] = mtd.totalQty || 0;
+  volumeRow["LMTD"] = lmtd.totalQty || 0;
+  volumeRow["FTD"] = ftd.totalQty || 0;
   volumeRow["G/D%"] = Number(growth.toFixed(2));
   volumeRow["ExpAch"] = 0;
   volumeRow["WFM"] = 0;
@@ -257,10 +420,19 @@ function formatTable(data, lastThreeMonths, includeWod) {
       volume: volumeRow,
       ...(includeWod && {
         wod: data.wod?.[0]?.totalDealers || 0
-      })
+      }),
+
+      // 🔴 NEW FLAG SUMMARY (SAFE ADDITION)
+      flagSummary: {
+        excludedVal: mtd.excludedVal || 0,
+        excludedQty: mtd.excludedQty || 0,
+        excludedCount: mtd.excludedCount || 0,
+        countedInOverall: false
+      }
     }
   };
 }
+
 
 async function getWODSummary(
   dealerCodes,
