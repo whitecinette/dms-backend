@@ -568,6 +568,7 @@ exports.getExtractionStatus = async (req, res) => {
 exports.getExtractionStatusRoleWise = async (req, res) => {
   try {
     let { roles = [], startDate, endDate } = req.body;
+    console.log("Extraction start last: ", startDate, endDate);
     const { code: userCode, position: userPosition, role: userRole } = req.user;
 
     if (!userCode || !userPosition || !userRole) {
@@ -580,11 +581,13 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
     if (!Array.isArray(roles) || roles.length === 0) {
       roles = ["tse"];
     }
+    console.log("Extraction cp 1");
 
     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
 
     const results = [];
+    console.log("Extraction cp 2");
 
     // ✅ Only fetch others' data if NOT blocked
     if (!isRestricted) {
@@ -602,6 +605,7 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
           if (userRole !== "admin") {
             hierarchyFilter[userPosition] = userCode;
           }
+          console.log("Extraction cp 3");
 
           const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
           const dealerSet = new Set();
@@ -622,6 +626,7 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
           const pendingCount = totalCount - doneCount;
           const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
           const pendingPercent = 100 - donePercent;
+          console.log("Extraction cp 4");
 
           results.push({
             name: user.name || "N/A",
