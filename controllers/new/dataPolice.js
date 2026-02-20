@@ -282,33 +282,98 @@ exports.getSalesReportFlags = async (req, res) => {
       };
     };
 
-    const [activation, tertiary, secondary] =
-      await Promise.all([
-        analyzeModel(
-          ActivationData,
-          "activation_date_raw",
-          "tertiary_buyer_code",
-          dealerCodes,
-          "val",
-          "qty"
-        ),
-        analyzeModel(
-          TertiaryData,
-          "invoice_date_raw",
-          "dealer_code",
-          dealerCodes,
-          "net_value",
-          "qty"
-        ),
-        analyzeModel(
-          SecondaryData,
-          "invoice_date_raw",
-          "mdd_code",
-          mddCodes, // ✅ beat_code-based mddCodes
-          "net_value",
-          "qty"
-        ),
-      ]);
+    const analyzeWOD = async (
+      Model,
+      dateField,
+      dealerField,
+      codes,
+      qtyField
+    ) => {
+      const safeCodes = Array.isArray(codes) ? codes : [];
+      const docs = await Model.find({}).lean();
+
+      const dealerMap = {};
+      let excludedDealers = 0;
+
+      docs.forEach((doc) => {
+        let parsedDate = null;
+
+        if (doc[dateField]) {
+          const parts = doc[dateField].split("/");
+          if (parts.length === 3) {
+            parsedDate = moment(
+              `20${parts[2]}-${parts[0]}-${parts[1]}`,
+              "YYYY-MM-DD"
+            );
+          }
+        }
+
+        if (!parsedDate || !parsedDate.isValid()) return;
+        if (
+          parsedDate.isBefore(startDate) ||
+          parsedDate.isAfter(endDate)
+        ) return;
+
+        if (!doc[dealerField]) return;
+        if (Number(doc[qtyField] || 0) <= 0) return;
+
+        if (!dealerMap[doc[dealerField]]) {
+          dealerMap[doc[dealerField]] = {
+            inHierarchy:
+              !safeCodes.length ||
+              safeCodes.includes(doc[dealerField]),
+          };
+        }
+      });
+
+      const uniqueDealers = Object.keys(dealerMap);
+
+      uniqueDealers.forEach((code) => {
+        if (!dealerMap[code].inHierarchy) excludedDealers++;
+      });
+
+      return {
+        totalDealers: uniqueDealers.length,
+        excludedDealers,
+      };
+    };
+
+    const [activation, tertiary, secondary, wod] =
+
+    await Promise.all([
+      analyzeModel(
+        ActivationData,
+        "activation_date_raw",
+        "tertiary_buyer_code",
+        dealerCodes,
+        "val",
+        "qty"
+      ),
+      analyzeModel(
+        TertiaryData,
+        "invoice_date_raw",
+        "dealer_code",
+        dealerCodes,
+        "net_value",
+        "qty"
+      ),
+      analyzeModel(
+        SecondaryData,
+        "invoice_date_raw",
+        "mdd_code",
+        mddCodes,
+        "net_value",
+        "qty"
+      ),
+      analyzeWOD(
+        TertiaryData, // 🔥 change to ActivationData if needed
+        "invoice_date_raw",
+        "dealer_code",
+        dealerCodes,
+        "qty"
+      ),
+    ]);
+
 
     return res.json({
       success: true,
@@ -316,6 +381,7 @@ exports.getSalesReportFlags = async (req, res) => {
       activation,
       tertiary,
       secondary,
+      wod
     });
 
   } catch (error) {

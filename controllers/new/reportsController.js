@@ -410,24 +410,52 @@ async function buildReport(
         // ========================
         // WOD
         // ========================
-        wod: includeWod
-          ? [
-              {
-                $match: {
-                  parsedDate: {
-                    $gte: startDate.toDate(),
-                    $lte: endDate.toDate()
-                  },
-                  [qtyField]: { $gt: 0 },
-                  ...(isAdmin ? {} : { inHierarchy: true })
-                }
-              },
-              {
-                $group: { _id: `$${dealerField}` }
-              },
-              { $count: "totalDealers" }
-            ]
-          : []
+// ========================
+// WOD
+// ========================
+wod: includeWod
+  ? [
+      {
+        $match: {
+          parsedDate: {
+            $gte: startDate.toDate(),
+            $lte: endDate.toDate()
+          }
+        }
+      },
+      {
+        $group: {
+          _id: `$${dealerField}`,
+          totalQty: { $sum: `$${qtyField}` },
+          inHierarchy: { $first: "$inHierarchy" }
+        }
+      },
+      {
+        $match: {
+          totalQty: { $gt: 0 }   // ✅ Only keep dealers with net positive qty
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalDealers: {
+            $sum: {
+              $cond: [
+                { $or: ["$inHierarchy", isAdmin] },
+                1,
+                0
+              ]
+            }
+          },
+          excludedDealers: {
+            $sum: {
+              $cond: ["$inHierarchy", 0, 1]
+            }
+          }
+        }
+      }
+    ]
+  : []
       }
     }
   ]);
@@ -586,69 +614,130 @@ async function buildWODPipeline(
   ftdRawDate,
   lastThreeMonths,
   isAdmin
-)
- {
+) {
   const result = await Model.aggregate([
     {
       $addFields: {
         parsedDate: {
           $let: {
             vars: { parts: { $split: [`$${dateField}`, "/"] } },
-
             in: {
               $dateFromParts: {
                 year: {
-                  $add: [2000, { $toInt: { $arrayElemAt: ["$$parts", 2] } }],
+                  $add: [2000, { $toInt: { $arrayElemAt: ["$$parts", 2] } }]
                 },
                 month: { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                day: { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-              },
-            },
-          },
-        },
-      },
+                day: { $toInt: { $arrayElemAt: ["$$parts", 1] } }
+              }
+            }
+          }
+        }
+      }
     },
-  {
-    $match: {
-      ...(isAdmin
-        ? {}
-        : dealerCodes?.length
+
+    {
+      $match: {
+        ...(isAdmin
+          ? {}
+          : dealerCodes?.length
           ? { [dealerField]: { $in: dealerCodes } }
-          : {}),
-      qty: { $gt: 0 },
+          : {})
+      }
     },
-  }
-,
 
     {
       $facet: {
+
+        // =========================
+        // LAST THREE MONTHS
+        // =========================
         lastThree: [
           { $match: { year_month: { $in: lastThreeMonths } } },
-          { $group: { _id: "$year_month", dealers: { $addToSet: `$${dealerField}` } } },
-          { $project: { count: { $size: "$dealers" } } },
+
+          {
+            $group: {
+              _id: {
+                month: "$year_month",
+                dealer: `$${dealerField}`
+              },
+              totalQty: { $sum: "$qty" }
+            }
+          },
+
+          { $match: { totalQty: { $gt: 0 } } },
+
+          {
+            $group: {
+              _id: "$_id.month",
+              dealers: { $sum: 1 }
+            }
+          }
         ],
+
+        // =========================
+        // MTD
+        // =========================
         mtd: [
-          { $match: { parsedDate: { $gte: startDate.toDate(), $lte: endDate.toDate() } } },
-          { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
-          { $project: { count: { $size: "$dealers" } } },
+          {
+            $match: {
+              parsedDate: {
+                $gte: startDate.toDate(),
+                $lte: endDate.toDate()
+              }
+            }
+          },
+          {
+            $group: {
+              _id: `$${dealerField}`,
+              totalQty: { $sum: "$qty" }
+            }
+          },
+          { $match: { totalQty: { $gt: 0 } } },
+          { $group: { _id: null, count: { $sum: 1 } } }
         ],
+
+        // =========================
+        // LMTD
+        // =========================
         lmtd: [
-          { $match: { parsedDate: { $gte: lmtdStart.toDate(), $lte: lmtdEnd.toDate() } } },
-          { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
-          { $project: { count: { $size: "$dealers" } } },
+          {
+            $match: {
+              parsedDate: {
+                $gte: lmtdStart.toDate(),
+                $lte: lmtdEnd.toDate()
+              }
+            }
+          },
+          {
+            $group: {
+              _id: `$${dealerField}`,
+              totalQty: { $sum: "$qty" }
+            }
+          },
+          { $match: { totalQty: { $gt: 0 } } },
+          { $group: { _id: null, count: { $sum: 1 } } }
         ],
+
+        // =========================
+        // FTD
+        // =========================
         ftd: [
           { $match: { [dateField]: ftdRawDate } },
-          { $group: { _id: null, dealers: { $addToSet: `$${dealerField}` } } },
-          { $project: { count: { $size: "$dealers" } } },
-        ],
-      },
-    },
+          {
+            $group: {
+              _id: `$${dealerField}`,
+              totalQty: { $sum: "$qty" }
+            }
+          },
+          { $match: { totalQty: { $gt: 0 } } },
+          { $group: { _id: null, count: { $sum: 1 } } }
+        ]
+      }
+    }
   ]);
 
   return formatWODResult(result[0], lastThreeMonths);
 }
-
 
 function formatWODResult(data, lastThreeMonths) {
   const monthMap = {};
@@ -657,8 +746,8 @@ function formatWODResult(data, lastThreeMonths) {
     monthMap[m] = 0;
   });
 
-  (data.lastThree || []).forEach((m, index) => {
-    monthMap[lastThreeMonths[index]] = m.count || 0;
+  (data.lastThree || []).forEach((m) => {
+    monthMap[m._id] = m.dealers || 0;
   });
 
   const mtd = data.mtd?.[0]?.count || 0;
@@ -669,14 +758,13 @@ function formatWODResult(data, lastThreeMonths) {
     lmtd === 0 ? 0 : ((mtd - lmtd) / lmtd) * 100;
 
   return {
-    Nov: monthMap[lastThreeMonths[0]],
-    Dec: monthMap[lastThreeMonths[1]],
-    Jan: monthMap[lastThreeMonths[2]],
+    [lastThreeMonths[0]]: monthMap[lastThreeMonths[0]],
+    [lastThreeMonths[1]]: monthMap[lastThreeMonths[1]],
+    [lastThreeMonths[2]]: monthMap[lastThreeMonths[2]],
     MTD: mtd,
     LMTD: lmtd,
     FTD: ftd,
     "G/D%": Number(growth.toFixed(2)),
-    "Exp.Ach": 0, // placeholder
+    "Exp.Ach": 0
   };
 }
-
