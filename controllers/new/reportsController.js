@@ -4,6 +4,8 @@ const TertiaryData = require("../../model/TertiaryData");
 const moment = require("moment");
 const { getDealerCodesFromFilters } = require("../../services/dealerFilterService");
 const momentTz = require("moment-timezone");
+const ProductMaster = require("../../model/ProductMaster");
+const { PRICE_SEGMENTS } = require("../../config/price_segment_config");
 
 
 // ============================================
@@ -123,6 +125,13 @@ exports.getDashboardSummary = async (req, res) => {
     isAdmin
   );
 
+  const priceSegmentTables = await getPriceSegmentSummaryActivation(
+    dealerCodes,
+    startDate,
+    endDate,
+    isAdmin
+    );
+
 
     return res.json({
       success: true,
@@ -130,6 +139,7 @@ exports.getDashboardSummary = async (req, res) => {
       tertiary,
       secondary,
       wodTables,
+      priceSegmentTables
     });
 
   } catch (error) {
@@ -469,9 +479,6 @@ wod: includeWod
 
 }
 
-
-
-
 // ============================================
 // FORMAT EXACT TABLE STRUCTURE
 // ============================================
@@ -766,5 +773,188 @@ function formatWODResult(data, lastThreeMonths) {
     FTD: ftd,
     "G/D%": Number(growth.toFixed(2)),
     "Exp.Ach": 0
+  };
+}
+
+
+
+// ============================================
+// PRICE SEGMENT SUMMARY (ACTIVATION ONLY)
+// ============================================
+
+async function getPriceSegmentSummaryActivation(
+  dealerCodes,
+  startDate,
+  endDate,
+  isAdmin
+) {
+
+  const safeCodes = Array.isArray(dealerCodes) ? dealerCodes : [];
+
+  const result = await ActivationData.aggregate([
+
+    // -----------------------------
+    // Parse Activation Date
+    // -----------------------------
+    {
+      $addFields: {
+        parsedDate: {
+          $let: {
+            vars: { parts: { $split: ["$activation_date_raw", "/"] } },
+            in: {
+              $dateFromParts: {
+                year: {
+                  $add: [2000, { $toInt: { $arrayElemAt: ["$$parts", 2] } }]
+                },
+                month: { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                day: { $toInt: { $arrayElemAt: ["$$parts", 1] } }
+              }
+            }
+          }
+        },
+        inHierarchy: {
+          $in: ["$tertiary_buyer_code", safeCodes]
+        }
+      }
+    },
+
+    // -----------------------------
+    // DATE RANGE FILTER
+    // -----------------------------
+    {
+      $match: {
+        parsedDate: {
+          $gte: startDate.toDate(),
+          $lte: endDate.toDate()
+        }
+      }
+    },
+
+    // -----------------------------
+    // PRODUCT LOOKUP
+    // -----------------------------
+    {
+      $lookup: {
+        from: "productmasters",
+        localField: "sku",
+        foreignField: "sku",
+        as: "product"
+      }
+    },
+
+    {
+      $facet: {
+
+        // RAW TOTAL
+        totalRaw: [
+          {
+            $group: {
+              _id: null,
+              totalRows: { $sum: 1 },
+              totalVal: { $sum: "$val" },
+              totalQty: { $sum: "$qty" }
+            }
+          }
+        ],
+
+        // UNMAPPED PRODUCT
+        unmappedProduct: [
+          { $match: { product: { $eq: [] } } },
+          {
+            $group: {
+              _id: null,
+              rows: { $sum: 1 },
+              totalVal: { $sum: "$val" },
+              totalQty: { $sum: "$qty" }
+            }
+          }
+        ],
+
+        // HIERARCHY EXCLUDED
+        hierarchyExcluded: [
+          { $match: { inHierarchy: false } },
+          {
+            $group: {
+              _id: null,
+              rows: { $sum: 1 },
+              totalVal: { $sum: "$val" },
+              totalQty: { $sum: "$qty" }
+            }
+          }
+        ],
+
+        // MAIN TABLE
+        tableData: [
+          { $unwind: "$product" },
+          {
+            $match: isAdmin
+              ? {}                // admin → no hierarchy filter
+              : { inHierarchy: true }  // non-admin → filter
+          },
+          {
+            $group: {
+              _id: "$product.sub_segment",
+              totalVal: { $sum: "$val" },
+              totalQty: { $sum: "$qty" }
+            }
+          }
+        ]
+      }
+    }
+  ]);
+
+  return formatPriceSegmentTable(result[0], isAdmin);
+}
+
+function formatPriceSegmentTable(data, isAdmin) {
+
+  const valueTable = [];
+  const volumeTable = [];
+
+  const segmentMap = {};
+  (data.tableData || []).forEach(r => {
+    segmentMap[r._id] = r;
+  });
+
+  PRICE_SEGMENTS.forEach(segment => {
+
+    const record = segmentMap[segment] || {};
+
+    valueTable.push({
+      Seg: segment,
+      MTD: record.totalVal || 0
+    });
+
+    volumeTable.push({
+      Seg: segment,
+      MTD: record.totalQty || 0
+    });
+  });
+
+  const raw = data.totalRaw?.[0] || {};
+  const unmapped = data.unmappedProduct?.[0] || {};
+  const excluded = data.hierarchyExcluded?.[0] || {};
+
+  return {
+    value: valueTable,
+    volume: volumeTable,
+    flagSummary: {
+
+      totalRowsInDateRange: raw.totalRows || 0,
+      totalValueInDateRange: raw.totalVal || 0,
+      totalQtyInDateRange: raw.totalQty || 0,
+
+      unmappedProductRows: unmapped.rows || 0,
+      unmappedProductValue: unmapped.totalVal || 0,
+      unmappedProductQty: unmapped.totalQty || 0,
+
+      hierarchyExcludedRows: excluded.rows || 0,
+      hierarchyExcludedValue: excluded.totalVal || 0,
+      hierarchyExcludedQty: excluded.totalQty || 0,
+
+      countedInOverall: isAdmin,
+      hasHierarchyIssue: !isAdmin && (excluded.rows || 0) > 0,
+      hasProductIssue: (unmapped.rows || 0) > 0
+    }
   };
 }
