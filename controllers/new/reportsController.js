@@ -15,6 +15,8 @@ exports.getDashboardSummary = async (req, res) => {
   try {
     let { start_date, end_date, filters } = req.body;
     const user = req.user;
+    console.log("User: ", user)
+    const DEBUG_WOD = true;
 
     const indiaNow = momentTz().tz("Asia/Kolkata");
 
@@ -622,6 +624,10 @@ async function buildWODPipeline(
   lastThreeMonths,
   isAdmin
 ) {
+  console.log("Start date end date WOD: ", startDate, endDate)
+  console.log("dealer field: ", dealerField);
+  console.log("dealerCodes: ", dealerCodes.length)
+  console.log("ftdRawDate, Model", ftdRawDate, Model, lastThreeMonths);
   const result = await Model.aggregate([
     {
       $addFields: {
@@ -742,6 +748,10 @@ async function buildWODPipeline(
       }
     }
   ]);
+  console.log("WOD DEBUG -> MTD dealers count:", result[0].mtd.length);
+  console.log("WOD DEBUG -> first 20 MTD dealers:", result[0].mtd.slice(0, 20));
+  console.log("WOD DEBUG -> Model:", Model.collection.name);
+  console.log("WOD DEBUG -> raw mtd facet:", result?.[0]?.mtd);
 
   return formatWODResult(result[0], lastThreeMonths);
 }
@@ -761,8 +771,13 @@ function formatWODResult(data, lastThreeMonths) {
   const lmtd = data.lmtd?.[0]?.count || 0;
   const ftd = data.ftd?.[0]?.count || 0;
 
+  // console.log("WOD DEBUG -> MTD:", mtd, "LMTD:", lmtd, "FTD:", ftd);
+  // console.log("WOD DEBUG -> lastThree:", data.lastThree);
+
   const growth =
     lmtd === 0 ? 0 : ((mtd - lmtd) / lmtd) * 100;
+
+  
 
   return {
     [lastThreeMonths[0]]: monthMap[lastThreeMonths[0]],
