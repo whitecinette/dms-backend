@@ -24,4 +24,7 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+userSchema.index({ role: 1, position: 1, status: 1 });
+userSchema.index({ email: 1 }, { unique: true, sparse: true });
+
 module.exports = mongoose.model("User", userSchema);

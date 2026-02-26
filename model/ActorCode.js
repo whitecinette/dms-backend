@@ -41,5 +41,9 @@ const actorCodeSchema = new mongoose.Schema(
   { timestamps: true, strict: false }
 );
 
+actorCodeSchema.index({ position: 1, status: 1 });
+actorCodeSchema.index({ parent: 1 });
+actorCodeSchema.index({ parent: 1, position: 1 });
+
 // Create the model
 module.exports = mongoose.model("ActorCode", actorCodeSchema);
