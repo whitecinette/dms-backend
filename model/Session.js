@@ -1,19 +1,32 @@
 const mongoose = require("mongoose");
 
-const sessionSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  deviceId: String,              // ANDROID_ID or generated UUID
-  deviceInfo: {
-    brand: String,               // Samsung, Xiaomi, etc.
-    model: String,               // Galaxy S21, Redmi Note 10, etc.
-    os: String,                  // Android 14, iOS 17, Windows 11
-    appVersion: String           // From Flutter app
+const sessionSchema = new mongoose.Schema(
+  {
+    // ✅ keep userId optional, but don't depend on it
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+
+    // ✅ primary stable identity
+    code: { type: String, index: true }, // user code
+
+    deviceId: { type: String, index: true }, // device UUID or whatever flutter sends
+    deviceInfo: {
+      brand: String,
+      model: String,
+      os: String,
+      appVersion: String,
+    },
+
+    ip: String,
+    userAgent: String,
+
+    loginTime: { type: Date, default: Date.now },
+    lastActive: { type: Date, default: Date.now },
+    logoutTime: Date,
+
+    // ✅ add revoked
+    status: { type: String, enum: ["active", "expired", "revoked"], default: "active" },
   },
-  ip: String,                     // Client IP
-  userAgent: String,              // Browser/app agent string
-  loginTime: { type: Date, default: Date.now },
-  lastActive: { type: Date, default: Date.now },
-  status: { type: String, enum: ["active", "expired"], default: "active" }
-}, { strict: false, timestamps: true });
+  { strict: false, timestamps: true }
+);
 
 module.exports = mongoose.model("Session", sessionSchema);
