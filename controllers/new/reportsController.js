@@ -16,20 +16,170 @@ const {
 // ============================================
 // MAIN DASHBOARD API (Exact Screenshot Table)
 // ============================================
+// exports.getDashboardSummary = async (req, res) => {
+//   try {
+//     let { start_date, end_date, filters } = req.body;
+//     const user = req.user;
+//     console.log("User: ", user)
+//     const DEBUG_WOD = true;
+
+//     const indiaNow = momentTz().tz("Asia/Kolkata");
+
+//     // If no dates provided → default to real-time safe range
+//     if (!start_date || !end_date) {
+
+//       const yesterday = indiaNow.clone().subtract(1, "day");
+
+//       start_date = yesterday.clone().startOf("month").format("YYYY-MM-DD");
+//       end_date = yesterday.format("YYYY-MM-DD");
+//     }
+
+//     const { dealerCodes = [], mddCodes = [] } =
+//       await getDealerCodesFromFilters(filters, user);
+
+//     const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
+//     const endDate = moment(end_date, "YYYY-MM-DD").endOf("day");
+
+//     const isFullMonth =
+//       startDate.date() === 1 &&
+//       endDate.date() === endDate.daysInMonth();
+
+//     let lmtdStart = startDate.clone().subtract(1, "month");
+//     let lmtdEnd = endDate.clone().subtract(1, "month");
+
+//     if (isFullMonth) {
+//       lmtdStart = lmtdStart.startOf("month");
+//       lmtdEnd = lmtdStart.clone().endOf("month");
+//     }
+
+//     const ftdRawDate = endDate.format("M/D/YY");
+
+//     const baseMonth = moment(startDate);
+
+//     const lastThreeMonths = [
+//       baseMonth.clone().subtract(3, "months").format("YYYY-MM"),
+//       baseMonth.clone().subtract(2, "months").format("YYYY-MM"),
+//       baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
+//     ];
+
+//     const isAdmin =
+//       user?.role === "admin" ||
+//       user?.role === "super_admin";
+
+//     const [activation, tertiary, secondary] = await Promise.all([
+
+//       buildReport(
+//         ActivationData,
+//         "activation_date_raw",
+//         "tertiary_buyer_code",
+//         dealerCodes,
+//         "val",
+//         "qty",
+//         lastThreeMonths,
+//         startDate,
+//         endDate,
+//         lmtdStart,
+//         lmtdEnd,
+//         ftdRawDate,
+//         true,
+//         isAdmin
+//       ),
+
+//       buildReport(
+//         TertiaryData,
+//         "invoice_date_raw",
+//         "dealer_code",
+//         dealerCodes,
+//         "net_value",
+//         "qty",
+//         lastThreeMonths,
+//         startDate,
+//         endDate,
+//         lmtdStart,
+//         lmtdEnd,
+//         ftdRawDate,
+//         true,
+//         isAdmin
+//       ),
+
+//       buildReport(
+//         SecondaryData,
+//         "invoice_date_raw",
+//         "mdd_code",
+//         mddCodes,
+//         "net_value",
+//         "qty",
+//         lastThreeMonths,
+//         startDate,
+//         endDate,
+//         lmtdStart,
+//         lmtdEnd,
+//         ftdRawDate,
+//         false,
+//         isAdmin
+//       ),
+//     ]);
+
+
+//   const wodTables = await getWODSummary(
+//     dealerCodes,
+//     startDate,
+//     endDate,
+//     lmtdStart,
+//     lmtdEnd,
+//     ftdRawDate,
+//     lastThreeMonths,
+//     isAdmin
+//   );
+
+//   const priceSegmentTables = await getPriceSegmentSummaryActivation(
+//     dealerCodes,
+//     startDate,
+//     endDate,
+//     isAdmin
+//     );
+
+//   const priceSegmentTables40k = await getPrice40kSplitSummaryActivation(
+//     dealerCodes,
+//     startDate,
+//     endDate,
+//     isAdmin
+//     );
+
+//     return res.json({
+//       success: true,
+//       activation,
+//       tertiary,
+//       secondary,
+//       wodTables,
+//       priceSegmentTables,
+//       priceSegmentTables40k
+//     });
+
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ success: false, message: error.message });
+//   }
+// };
+
 exports.getDashboardSummary = async (req, res) => {
   try {
-    let { start_date, end_date, filters } = req.body;
+    let { start_date, end_date, filters = {} } = req.body;
     const user = req.user;
-    console.log("User: ", user)
-    const DEBUG_WOD = true;
+
+    const reportType = filters?.report_type; // ✅ comes from filters
+    if (!reportType) {
+      return res.status(400).json({
+        success: false,
+        message: "filters.report_type is required",
+      });
+    }
 
     const indiaNow = momentTz().tz("Asia/Kolkata");
 
     // If no dates provided → default to real-time safe range
     if (!start_date || !end_date) {
-
       const yesterday = indiaNow.clone().subtract(1, "day");
-
       start_date = yesterday.clone().startOf("month").format("YYYY-MM-DD");
       end_date = yesterday.format("YYYY-MM-DD");
     }
@@ -55,110 +205,123 @@ exports.getDashboardSummary = async (req, res) => {
     const ftdRawDate = endDate.format("M/D/YY");
 
     const baseMonth = moment(startDate);
-
     const lastThreeMonths = [
       baseMonth.clone().subtract(3, "months").format("YYYY-MM"),
       baseMonth.clone().subtract(2, "months").format("YYYY-MM"),
       baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
     ];
 
-    const isAdmin =
-      user?.role === "admin" ||
-      user?.role === "super_admin";
+    const isAdmin = user?.role === "admin" || user?.role === "super_admin";
 
-    const [activation, tertiary, secondary] = await Promise.all([
+    // ✅ One-report-only dispatcher
+    let data;
 
-      buildReport(
-        ActivationData,
-        "activation_date_raw",
-        "tertiary_buyer_code",
-        dealerCodes,
-        "val",
-        "qty",
-        lastThreeMonths,
-        startDate,
-        endDate,
-        lmtdStart,
-        lmtdEnd,
-        ftdRawDate,
-        true,
-        isAdmin
-      ),
+    switch (reportType) {
+      case "activation":
+        data = await buildReport(
+          ActivationData,
+          "activation_date_raw",
+          "tertiary_buyer_code",
+          dealerCodes,
+          "val",
+          "qty",
+          lastThreeMonths,
+          startDate,
+          endDate,
+          lmtdStart,
+          lmtdEnd,
+          ftdRawDate,
+          true,
+          isAdmin
+        );
+        break;
 
-      buildReport(
-        TertiaryData,
-        "invoice_date_raw",
-        "dealer_code",
-        dealerCodes,
-        "net_value",
-        "qty",
-        lastThreeMonths,
-        startDate,
-        endDate,
-        lmtdStart,
-        lmtdEnd,
-        ftdRawDate,
-        true,
-        isAdmin
-      ),
+      case "tertiary":
+        data = await buildReport(
+          TertiaryData,
+          "invoice_date_raw",
+          "dealer_code",
+          dealerCodes,
+          "net_value",
+          "qty",
+          lastThreeMonths,
+          startDate,
+          endDate,
+          lmtdStart,
+          lmtdEnd,
+          ftdRawDate,
+          true,
+          isAdmin
+        );
+        break;
 
-      buildReport(
-        SecondaryData,
-        "invoice_date_raw",
-        "mdd_code",
-        mddCodes,
-        "net_value",
-        "qty",
-        lastThreeMonths,
-        startDate,
-        endDate,
-        lmtdStart,
-        lmtdEnd,
-        ftdRawDate,
-        false,
-        isAdmin
-      ),
-    ]);
+      case "secondary":
+        data = await buildReport(
+          SecondaryData,
+          "invoice_date_raw",
+          "mdd_code",
+          mddCodes,
+          "net_value",
+          "qty",
+          lastThreeMonths,
+          startDate,
+          endDate,
+          lmtdStart,
+          lmtdEnd,
+          ftdRawDate,
+          false,
+          isAdmin
+        );
+        break;
 
+      case "wod":
+        data = await getWODSummary(
+          dealerCodes,
+          startDate,
+          endDate,
+          lmtdStart,
+          lmtdEnd,
+          ftdRawDate,
+          lastThreeMonths,
+          isAdmin
+        );
+        break;
 
-  const wodTables = await getWODSummary(
-    dealerCodes,
-    startDate,
-    endDate,
-    lmtdStart,
-    lmtdEnd,
-    ftdRawDate,
-    lastThreeMonths,
-    isAdmin
-  );
+      case "price_segment":
+        data = await getPriceSegmentSummaryActivation(
+          dealerCodes,
+          startDate,
+          endDate,
+          isAdmin
+        );
+        break;
 
-  const priceSegmentTables = await getPriceSegmentSummaryActivation(
-    dealerCodes,
-    startDate,
-    endDate,
-    isAdmin
-    );
+      case "price_segment_40k":
+        data = await getPrice40kSplitSummaryActivation(
+          dealerCodes,
+          startDate,
+          endDate,
+          isAdmin
+        );
+        break;
 
-  const priceSegmentTables40k = await getPrice40kSplitSummaryActivation(
-    dealerCodes,
-    startDate,
-    endDate,
-    isAdmin
-    );
+      default:
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid filters.report_type. Use: activation | tertiary | secondary | wod | price_segment | price_segment_40k",
+        });
+    }
 
+    // ✅ respond only what's asked
     return res.json({
       success: true,
-      activation,
-      tertiary,
-      secondary,
-      wodTables,
-      priceSegmentTables,
-      priceSegmentTables40k
+      report_type: reportType,
+      [reportType]: data,
     });
-
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
