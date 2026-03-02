@@ -4,6 +4,7 @@ const csvParser = require("csv-parser");
 const { generateProductCode, cleanHeader, determinesegment, generateIdentifier, determineSegment } = require("../../helpers/productHelper");
 const { Readable } = require("stream");
 const stream = require("stream");
+const crypto = require("crypto");
 
 // Add Product for Admin
 exports.addProductForAdmin = async (req, res) => {
@@ -281,9 +282,85 @@ exports.getAllProducts = async (req, res) => {
 
 
 // Rakshita 
+// exports.uploadProductsThroughCSV = async (req, res) => {
+//   try {
+//     console.log("Reaching upload prods");
+//     if (!req.file) {
+//       return res.status(400).json({ success: false, message: "No file uploaded" });
+//     }
+
+//     let results = [];
+//     const stream = new Readable();
+//     stream.push(req.file.buffer);
+//     stream.push(null);
+
+//     let isFirstRow = true;
+//     let cleanedHeaders = [];
+
+//     stream
+//       .pipe(csvParser())
+//       .on("data", (row) => {
+//         if (isFirstRow) {
+//           cleanedHeaders = Object.keys(row).map(cleanHeader);
+//           isFirstRow = false;
+//         }
+
+//         let productEntry = {};
+//         cleanedHeaders.forEach((header, index) => {
+//           const originalKey = Object.keys(row)[index];
+//           productEntry[header] = row[originalKey].trim();
+//         });
+
+//         // Format product_product_category
+//         // productEntry.product_product_category = cleanproduct_category(productEntry.product_product_category);
+
+//         // Assign segment based on price
+//         productEntry.segment = determineSegment(Number(productEntry.price));
+
+//         // Generate product_name_code if missing
+//         if (!productEntry.product_name_code) {
+//           productEntry.product_name_code = generateIdentifier(productEntry.product_name);
+//         }
+
+//         // Generate product_code if missing
+//         if (!productEntry.product_code) {
+//           productEntry.product_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
+//         }
+
+//         // Set default status to active
+//         productEntry.status = "active";
+
+//         results.push(productEntry);
+//       })
+//       .on("end", async () => {
+//         try {
+//           if (results.length === 0) {
+//             return res.status(400).json({ success: false, message: "No valid data found in CSV." });
+//           }
+
+//           // Insert all products without checking for existing ones
+//           await Product.insertMany(results, { ordered: false });
+
+//           return res.status(201).json({ success: true, message: "Products uploaded successfully", totalEntries: results.length });
+//         } catch (error) {
+//           // console.error("Error processing product entries:", error);
+//           res.status(500).json({ success: false, message: "Internal server error" });
+//         }
+//       });
+//   } catch (error) {
+//     console.error("Error in uploadProductsThroughCSV:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// };
+
+
+// helper: generate 7-digit string
+const gen7 = () => String(crypto.randomInt(0, 10_000_000)).padStart(7, "0");
+
 exports.uploadProductsThroughCSV = async (req, res) => {
   try {
     console.log("Reaching upload prods");
+
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
@@ -307,11 +384,8 @@ exports.uploadProductsThroughCSV = async (req, res) => {
         let productEntry = {};
         cleanedHeaders.forEach((header, index) => {
           const originalKey = Object.keys(row)[index];
-          productEntry[header] = row[originalKey].trim();
+          productEntry[header] = (row[originalKey] ?? "").toString().trim(); // safe trim
         });
-
-        // Format product_product_category
-        // productEntry.product_product_category = cleanproduct_category(productEntry.product_product_category);
 
         // Assign segment based on price
         productEntry.segment = determineSegment(Number(productEntry.price));
@@ -321,11 +395,7 @@ exports.uploadProductsThroughCSV = async (req, res) => {
           productEntry.product_name_code = generateIdentifier(productEntry.product_name);
         }
 
-        // Generate product_code if missing
-        if (!productEntry.product_code) {
-          productEntry.product_code = generateIdentifier(`${productEntry.brand}_${productEntry.product_name}`);
-        }
-
+        // NOTE: product_code generation is finalized later (after we load DB existing codes)
         // Set default status to active
         productEntry.status = "active";
 
@@ -337,18 +407,121 @@ exports.uploadProductsThroughCSV = async (req, res) => {
             return res.status(400).json({ success: false, message: "No valid data found in CSV." });
           }
 
-          // Insert all products without checking for existing ones
-          await Product.insertMany(results, { ordered: false });
+          // ---------- RECTIFY START: ensure unique product_code with 7-digit suffix ----------
+          // Normalize brands similar to schema (your schema lowercases brand)
+          const brandsInCSV = [
+            ...new Set(results.map(r => (r.brand || "").toString().trim().toLowerCase()).filter(Boolean)),
+          ];
 
-          return res.status(201).json({ success: true, message: "Products uploaded successfully", totalEntries: results.length });
+          // Fetch existing {brand, product_code} for only those brands
+          const existing = await Product.find(
+            { brand: { $in: brandsInCSV }, product_code: { $type: "string", $ne: "" } },
+            { brand: 1, product_code: 1 }
+          ).lean();
+
+          const existingSet = new Set(existing.map(d => `${d.brand}|${d.product_code}`));
+          const batchSet = new Set(); // to avoid duplicates within this upload
+
+          for (const p of results) {
+            const brandNorm = (p.brand || "").toString().trim().toLowerCase();
+            p.brand = (p.brand || "").toString().trim(); // keep original trim; schema will lowercase on save
+
+            // If product_code already provided and non-empty, keep it (no logical change).
+            // Only generate if missing/empty.
+            if (!p.product_code || !p.product_code.toString().trim()) {
+              const base = generateIdentifier(`${p.brand}_${p.product_name}`); // your existing behavior
+              let code;
+              let guard = 0;
+
+              do {
+                code = `${base}_${gen7()}`; // ✅ base + unique 7 digits
+                guard++;
+                // safety guard (extremely unlikely to ever hit)
+                if (guard > 50) break;
+              } while (
+                batchSet.has(`${brandNorm}|${code}`) ||
+                existingSet.has(`${brandNorm}|${code}`)
+              );
+
+              p.product_code = code;
+              batchSet.add(`${brandNorm}|${code}`);
+            } else {
+              // if user supplied product_code, track it to avoid collisions inside the same CSV
+              const supplied = p.product_code.toString().trim();
+              p.product_code = supplied;
+              batchSet.add(`${brandNorm}|${supplied}`);
+            }
+          }
+          // ---------- RECTIFY END ----------
+
+          // Insert all products without checking for existing ones
+          // (same behavior, ordered:false)
+          try {
+            const insertedDocs = await Product.insertMany(results, { ordered: false });
+
+            console.log("CSV upload summary:", {
+              totalRows: results.length,
+              inserted: insertedDocs.length,
+              failed: results.length - insertedDocs.length,
+            });
+
+            return res.status(201).json({
+              success: true,
+              message: "Products uploaded successfully",
+              totalEntries: results.length,
+              inserted: insertedDocs.length,
+              failed: results.length - insertedDocs.length,
+            });
+          } catch (error) {
+            // compact summary (no flooding)
+            const writeErrors = error?.writeErrors || [];
+            const reasonCounts = {};
+            const samples = [];
+
+            for (const we of writeErrors) {
+              const msg =
+                we?.errmsg || we?.err?.errmsg || we?.message || error?.message || "unknown";
+
+              const key =
+                msg.includes("E11000") ? "duplicate_key" :
+                msg.includes("validation failed") ? "validation_failed" :
+                msg.includes("Cast to") ? "cast_error" :
+                "other";
+
+              reasonCounts[key] = (reasonCounts[key] || 0) + 1;
+
+              if (samples.length < 8 && typeof we?.index === "number") {
+                const r = results[we.index] || {};
+                samples.push({
+                  rowIndex: we.index,
+                  reason: key,
+                  raw: msg.slice(0, 180),
+                  brand: r.brand,
+                  product_name: r.product_name,
+                  product_code: r.product_code,
+                  model_code: r.model_code,
+                  price: r.price,
+                });
+              }
+            }
+
+            console.log("CSV upload FAILED summary:", {
+              totalRows: results.length,
+              failed: writeErrors.length,
+              reasonCounts,
+              sampleFailures: samples,
+            });
+
+            return res.status(500).json({ success: false, message: "Internal server error" });
+          }
         } catch (error) {
           console.error("Error processing product entries:", error);
-          res.status(500).json({ success: false, message: "Internal server error" });
+          return res.status(500).json({ success: false, message: "Internal server error" });
         }
       });
   } catch (error) {
     console.error("Error in uploadProductsThroughCSV:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
