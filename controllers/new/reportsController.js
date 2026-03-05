@@ -10,6 +10,11 @@ const {
   getPriceSegmentSummaryActivation,
   getPrice40kSplitSummaryActivation, // (if you created this)
 } = require("../../services/reports/segments.service");
+const {
+  getActivationPaceYtdReports,
+  getTertiaryPaceYtdReports,
+  getAllPaceYtdReports,
+} = require("../../services/reports/ytd.service"); // adjust path
 
 
 
@@ -303,6 +308,50 @@ exports.getDashboardSummary = async (req, res) => {
           endDate,
           isAdmin
         );
+        break;
+
+      // ✅ YTD PACE REPORTS (Day-of-month pace)
+      // returns table structure: { title, columns, rows }
+      case "activation_value_ytd":
+        data = (await getActivationPaceYtdReports({
+          ActivationData,
+          dealerCodes,
+          isAdmin,
+        })).activationValueYtd;
+        break;
+
+      case "activation_vol_ytd":
+        data = (await getActivationPaceYtdReports({
+          ActivationData,
+          dealerCodes,
+          isAdmin,
+        })).activationVolYtd;
+        break;
+
+      case "tertiary_value_ytd":
+        data = (await getTertiaryPaceYtdReports({
+          TertiaryData,
+          dealerCodes,
+          isAdmin,
+        })).tertiaryValueYtd;
+        break;
+
+      case "tertiary_vol_ytd":
+        data = (await getTertiaryPaceYtdReports({
+          TertiaryData,
+          dealerCodes,
+          isAdmin,
+        })).tertiaryVolYtd;
+        break;
+
+      // optional: get all 4 in one call (still only 2 DB aggregations)
+      case "ytd_all":
+        data = await getAllPaceYtdReports({
+          ActivationData,
+          TertiaryData,
+          dealerCodes,
+          isAdmin,
+        });
         break;
 
       default:
