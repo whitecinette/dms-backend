@@ -16,7 +16,11 @@ const {
   getAllPaceYtdReports,
 } = require("../../services/reports/ytd.service"); // adjust path
 
-
+const {
+  getActivationActualYtdReports,
+  getTertiaryActualYtdReports,
+  getAllActualYtdReports,
+} = require("../../services/reports/ytdActual.service");
 
 // ============================================
 // MAIN DASHBOARD API (Exact Screenshot Table)
@@ -172,7 +176,7 @@ exports.getDashboardSummary = async (req, res) => {
     let { start_date, end_date, filters = {} } = req.body;
     const user = req.user;
 
-    const reportType = filters?.report_type; // ✅ comes from filters
+    const reportType = filters?.report_type;
     if (!reportType) {
       return res.status(400).json({
         success: false,
@@ -218,7 +222,6 @@ exports.getDashboardSummary = async (req, res) => {
 
     const isAdmin = user?.role === "admin" || user?.role === "super_admin";
 
-    // ✅ One-report-only dispatcher
     let data;
 
     switch (reportType) {
@@ -310,8 +313,9 @@ exports.getDashboardSummary = async (req, res) => {
         );
         break;
 
-      // ✅ YTD PACE REPORTS (Day-of-month pace)
-      // returns table structure: { title, columns, rows }
+      // =========================
+      // YTD PACE REPORTS
+      // =========================
       case "activation_value_ytd":
         data = (await getActivationPaceYtdReports({
           ActivationData,
@@ -344,9 +348,52 @@ exports.getDashboardSummary = async (req, res) => {
         })).tertiaryVolYtd;
         break;
 
-      // optional: get all 4 in one call (still only 2 DB aggregations)
       case "ytd_all":
         data = await getAllPaceYtdReports({
+          ActivationData,
+          TertiaryData,
+          dealerCodes,
+          isAdmin,
+        });
+        break;
+
+      // =========================
+      // YTD ACTUAL REPORTS
+      // =========================
+      case "activation_value_ytd_actual":
+        data = (await getActivationActualYtdReports({
+          ActivationData,
+          dealerCodes,
+          isAdmin,
+        })).activationValueYtdActual;
+        break;
+
+      case "activation_vol_ytd_actual":
+        data = (await getActivationActualYtdReports({
+          ActivationData,
+          dealerCodes,
+          isAdmin,
+        })).activationVolYtdActual;
+        break;
+
+      case "tertiary_value_ytd_actual":
+        data = (await getTertiaryActualYtdReports({
+          TertiaryData,
+          dealerCodes,
+          isAdmin,
+        })).tertiaryValueYtdActual;
+        break;
+
+      case "tertiary_vol_ytd_actual":
+        data = (await getTertiaryActualYtdReports({
+          TertiaryData,
+          dealerCodes,
+          isAdmin,
+        })).tertiaryVolYtdActual;
+        break;
+
+      case "ytd_actual_all":
+        data = await getAllActualYtdReports({
           ActivationData,
           TertiaryData,
           dealerCodes,
@@ -358,11 +405,10 @@ exports.getDashboardSummary = async (req, res) => {
         return res.status(400).json({
           success: false,
           message:
-            "Invalid filters.report_type. Use: activation | tertiary | secondary | wod | price_segment | price_segment_40k",
+            "Invalid filters.report_type. Use: activation | tertiary | secondary | wod | price_segment | price_segment_40k | activation_value_ytd | activation_vol_ytd | tertiary_value_ytd | tertiary_vol_ytd | ytd_all | activation_value_ytd_actual | activation_vol_ytd_actual | tertiary_value_ytd_actual | tertiary_vol_ytd_actual | ytd_actual_all",
         });
     }
 
-    // ✅ respond only what's asked
     return res.json({
       success: true,
       report_type: reportType,
