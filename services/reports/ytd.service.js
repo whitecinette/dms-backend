@@ -69,77 +69,94 @@ async function fetchPaceBase({
   isAdmin = false,
 }) {
   const buildCodeMatch = () => {
-    // If you want admin to see all, allow bypass here later if needed
+    // ✅ Admin / Super Admin bypass: no code restriction
+    if (isAdmin) {
+      return {};
+    }
+
+    // ✅ Normal users: restrict to hierarchy codes
     if (Array.isArray(codes) && codes.length > 0) {
       return { [codeField]: { $in: codes } };
     }
-    // no codes => match nothing (avoid full scan)
+
+    // ✅ No codes for non-admin => match nothing
     return { [codeField]: { $in: ["__NO_CODES__"] } };
   };
 
   // ✅ Parses raw date safely (Date or String "M/D/YY")
-    const buildAddParsedDate = () => ({
+  const buildAddParsedDate = () => ({
     $addFields: {
-        __dt: {
+      __dt: {
         $cond: [
-            { $eq: [{ $type: `$${dateField}` }, "date"] },
-            `$${dateField}`,
-            {
+          { $eq: [{ $type: `$${dateField}` }, "date"] },
+          `$${dateField}`,
+          {
             $let: {
-                vars: { parts: { $split: [`$${dateField}`, "/"] } }, // ["1","12","26"]
-                in: {
+              vars: { parts: { $split: [`$${dateField}`, "/"] } },
+              in: {
                 $dateFromString: {
-                    dateString: {
+                  dateString: {
                     $concat: [
-                        { $arrayElemAt: ["$$parts", 0] }, // M
-                        "/",
-                        { $arrayElemAt: ["$$parts", 1] }, // D
-                        "/",
-                        "20",
-                        { $arrayElemAt: ["$$parts", 2] }, // YY -> 20YY
+                      { $arrayElemAt: ["$$parts", 0] },
+                      "/",
+                      { $arrayElemAt: ["$$parts", 1] },
+                      "/",
+                      "20",
+                      { $arrayElemAt: ["$$parts", 2] },
                     ],
-                    },
-                    format: "%m/%d/%Y",
-                    onError: null,
-                    onNull: null,
+                  },
+                  format: "%m/%d/%Y",
+                  onError: null,
+                  onNull: null,
                 },
-                },
+              },
             },
-            },
+          },
         ],
+      },
+    },
+  });
+
+  const buildPipeline = (start, end) => {
+    const codeMatch = buildCodeMatch();
+
+    const pipeline = [];
+
+    // ✅ Only add code match stage if needed
+    if (Object.keys(codeMatch).length > 0) {
+      pipeline.push({ $match: codeMatch });
+    }
+
+    pipeline.push(
+      buildAddParsedDate(),
+
+      // ✅ match on parsed date
+      { $match: { __dt: { $gte: start.toDate(), $lte: end.toDate() } } },
+
+      // ✅ month/day from parsed date
+      {
+        $addFields: {
+          __m: { $month: "$__dt" },
+          __d: { $dayOfMonth: "$__dt" },
         },
-    },
-    });
-
-  const buildPipeline = (start, end) => [
-    { $match: buildCodeMatch() },
-
-    buildAddParsedDate(),
-
-    // ✅ match on parsed date
-    { $match: { __dt: { $gte: start.toDate(), $lte: end.toDate() } } },
-
-    // ✅ month/day from parsed date
-    {
-      $addFields: {
-        __m: { $month: "$__dt" },
-        __d: { $dayOfMonth: "$__dt" },
       },
-    },
 
-    // ✅ pace logic: only 1st..cutoffDay for every month
-    { $match: { __d: { $lte: cutoffDay } } },
+      // ✅ pace logic: only 1st..cutoffDay for every month
+      { $match: { __d: { $lte: cutoffDay } } },
 
-    {
-      $group: {
-        _id: "$__m",
-        value: { $sum: { $ifNull: [`$${valueField}`, 0] } },
-        qty: { $sum: { $ifNull: [`$${qtyField}`, 0] } },
+      {
+        $group: {
+          _id: "$__m",
+          value: { $sum: { $ifNull: [`$${valueField}`, 0] } },
+          qty: { $sum: { $ifNull: [`$${qtyField}`, 0] } },
+        },
       },
-    },
-    { $project: { _id: 0, month: "$_id", value: 1, qty: 1 } },
-    { $sort: { month: 1 } },
-  ];
+      { $project: { _id: 0, month: "$_id", value: 1, qty: 1 } },
+      { $sort: { month: 1 } }
+    );
+
+    return pipeline;
+  };
 
   const [doc] = await Model.aggregate([
     {
