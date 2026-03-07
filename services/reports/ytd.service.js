@@ -1,10 +1,10 @@
 // ytd.service.js
 // Purpose: Build "pace" YTD/LYTD tables where each month = 1st .. cutoffDay (yesterday's day)
-// Example (today=15 Mar, cutoffDay=14): Jan = Jan1..Jan14, Feb = Feb1..Feb14, Mar = Mar1..Mar14
+// Example (today=15 Mar, cutoffDay=14):
+// Jan = Jan1..Jan14, Feb = Feb1..Feb14, Mar = Mar1..Mar14
+// For LY future months too: Apr = Apr1..Apr14, May = May1..May14, etc.
 
 const moment = require("moment-timezone");
-
-// If you already use momentTz() wrapper elsewhere, you can swap moment.tz(...) calls accordingly.
 
 const MONTH_KEYS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -16,43 +16,54 @@ function safeNumber(n) {
 function pctChange(curr, prev) {
   const c = safeNumber(curr);
   const p = safeNumber(prev);
-  if (!p) return 0; // avoid divide-by-zero; change to null if you prefer
+  if (!p) return 0;
   return ((c - p) / p) * 100;
 }
 
 /**
  * Returns:
- *  cutoffTY: moment (yesterday endOfDay in India)
- *  cutoffLY: moment (same date last year endOfDay)
- *  cutoffDay: number (1..31)
- *  cutoffMonth: number (1..12)
+ *  cutoffTY: yesterday endOfDay in India
+ *  cutoffLY: same date last year endOfDay
+ *  cutoffDay: yesterday's day-of-month
+ *  cutoffMonth: current cutoff month (1..12)
  *  tyYear, lyYear
- *  startTY, startLY (Jan 1)
+ *  startTY, startLY
+ *  endLYFull: Dec 31 LY endOfDay
  */
 function getIndiaCutoffs() {
   const indiaNow = moment.tz("Asia/Kolkata");
   const cutoffTY = indiaNow.clone().subtract(1, "day").endOf("day");
 
-  const cutoffDay = cutoffTY.date();          // e.g. 14
-  const cutoffMonth = cutoffTY.month() + 1;   // 1..12
+  const cutoffDay = cutoffTY.date();
+  const cutoffMonth = cutoffTY.month() + 1;
   const tyYear = cutoffTY.year();
   const lyYear = tyYear - 1;
 
   const startTY = moment.tz({ year: tyYear, month: 0, day: 1 }, "Asia/Kolkata").startOf("day");
-  const cutoffLY = cutoffTY.clone().subtract(1, "year").endOf("day");
   const startLY = moment.tz({ year: lyYear, month: 0, day: 1 }, "Asia/Kolkata").startOf("day");
+  const cutoffLY = cutoffTY.clone().subtract(1, "year").endOf("day");
+  const endLYFull = moment.tz({ year: lyYear, month: 11, day: 31 }, "Asia/Kolkata").endOf("day");
 
-  return { cutoffTY, cutoffLY, cutoffDay, cutoffMonth, tyYear, lyYear, startTY, startLY };
+  return {
+    cutoffTY,
+    cutoffLY,
+    cutoffDay,
+    cutoffMonth,
+    tyYear,
+    lyYear,
+    startTY,
+    startLY,
+    endLYFull,
+  };
 }
 
 /**
  * Base aggregation:
- * - Matches Jan 1 .. cutoffDate (TY or LY)
- * - Filters codes (dealerCodes etc.)
- * - Keeps only dayOfMonth <= cutoffDay (pace logic)
- * - Groups by month and sums value + qty
- *
- * Uses $facet to compute TY and LY in one DB call.
+ * - TY: Jan 1 .. cutoffTY
+ * - LY: Jan 1 .. Dec 31 LY (full LY fetch)
+ * - For every month, keeps only dayOfMonth <= cutoffDay (pace logic)
+ * - Admin bypass supported
+ * - Uses $facet to compute TY and LY in one DB call
  */
 async function fetchPaceBase({
   Model,
@@ -65,7 +76,7 @@ async function fetchPaceBase({
   startTY,
   cutoffTY,
   startLY,
-  cutoffLY,
+  endLYFull,
   isAdmin = false,
 }) {
   const buildCodeMatch = () => {
@@ -97,12 +108,12 @@ async function fetchPaceBase({
                 $dateFromString: {
                   dateString: {
                     $concat: [
-                      { $arrayElemAt: ["$$parts", 0] },
+                      { $arrayElemAt: ["$$parts", 0] }, // M
                       "/",
-                      { $arrayElemAt: ["$$parts", 1] },
+                      { $arrayElemAt: ["$$parts", 1] }, // D
                       "/",
                       "20",
-                      { $arrayElemAt: ["$$parts", 2] },
+                      { $arrayElemAt: ["$$parts", 2] }, // YY -> 20YY
                     ],
                   },
                   format: "%m/%d/%Y",
@@ -119,10 +130,8 @@ async function fetchPaceBase({
 
   const buildPipeline = (start, end) => {
     const codeMatch = buildCodeMatch();
-
     const pipeline = [];
 
-    // ✅ Only add code match stage if needed
     if (Object.keys(codeMatch).length > 0) {
       pipeline.push({ $match: codeMatch });
     }
@@ -130,10 +139,10 @@ async function fetchPaceBase({
     pipeline.push(
       buildAddParsedDate(),
 
-      // ✅ match on parsed date
+      // ✅ Date range
       { $match: { __dt: { $gte: start.toDate(), $lte: end.toDate() } } },
 
-      // ✅ month/day from parsed date
+      // ✅ Month/day from parsed date
       {
         $addFields: {
           __m: { $month: "$__dt" },
@@ -141,7 +150,7 @@ async function fetchPaceBase({
         },
       },
 
-      // ✅ pace logic: only 1st..cutoffDay for every month
+      // ✅ Pace logic for every month
       { $match: { __d: { $lte: cutoffDay } } },
 
       {
@@ -161,8 +170,11 @@ async function fetchPaceBase({
   const [doc] = await Model.aggregate([
     {
       $facet: {
+        // TY only till current cutoff date
         ty: buildPipeline(startTY, cutoffTY),
-        ly: buildPipeline(startLY, cutoffLY),
+
+        // LY full year, but each month still limited to 1..cutoffDay
+        ly: buildPipeline(startLY, endLYFull),
       },
     },
   ]).allowDiskUse(true);
@@ -175,52 +187,65 @@ async function fetchPaceBase({
 
 /**
  * Builds a single table (value or qty) from base aggregation.
- * Month columns:
- *  - For months <= cutoffMonth: number (0 if missing)
- *  - For months > cutoffMonth: null (so UI can show blank)
- * YTD:
- *  - pace YTD = sum(month columns Jan..cutoffMonth)
+ *
+ * Behavior:
+ * - LY row: shows all 12 month values
+ * - TY row: shows values only up to cutoffMonth, future months blank
+ * - G/D row: calculates only up to cutoffMonth, future months blank
+ * - YTD: compares Jan..cutoffMonth only
  */
 function buildPaceTable({ title, tyYear, lyYear, cutoffMonth, base, metric }) {
-  // metric = "value" or "qty"
   const tyByMonth = {};
   const lyByMonth = {};
 
   for (const r of base.ty) tyByMonth[r.month] = safeNumber(r[metric]);
   for (const r of base.ly) lyByMonth[r.month] = safeNumber(r[metric]);
 
-  const makeRow = (yearLabel, byMonth) => {
-    const row = { Year: yearLabel };
-    let ytd = 0;
+  // ✅ LY row: show all 12 months
+  const lyRow = { Year: String(lyYear) };
+  let lyYtd = 0;
 
-    for (let m = 1; m <= 12; m++) {
-      const key = MONTH_KEYS[m - 1];
-
-      if (m <= cutoffMonth) {
-        const v = safeNumber(byMonth[m]);
-        row[key] = v;
-        ytd += v;
-      } else {
-        row[key] = null; // future months blank
-      }
-    }
-
-    row.YTD = ytd;
-    return row;
-  };
-
-  const lyRow = makeRow(String(lyYear), lyByMonth);
-  const tyRow = makeRow(String(tyYear), tyByMonth);
-
-  const gdRow = { Year: `G/D ${lyYear} Vs ${tyYear} %` };
   for (let m = 1; m <= 12; m++) {
     const key = MONTH_KEYS[m - 1];
+    const v = safeNumber(lyByMonth[m]);
+    lyRow[key] = v;
+
+    if (m <= cutoffMonth) {
+      lyYtd += v;
+    }
+  }
+  lyRow.YTD = lyYtd;
+
+  // ✅ TY row: show only till cutoffMonth, rest blank
+  const tyRow = { Year: String(tyYear) };
+  let tyYtd = 0;
+
+  for (let m = 1; m <= 12; m++) {
+    const key = MONTH_KEYS[m - 1];
+
+    if (m <= cutoffMonth) {
+      const v = safeNumber(tyByMonth[m]);
+      tyRow[key] = v;
+      tyYtd += v;
+    } else {
+      tyRow[key] = null;
+    }
+  }
+  tyRow.YTD = tyYtd;
+
+  // ✅ Growth row: only till cutoffMonth
+  const gdRow = { Year: `G/D ${lyYear} Vs ${tyYear} %` };
+
+  for (let m = 1; m <= 12; m++) {
+    const key = MONTH_KEYS[m - 1];
+
     if (m <= cutoffMonth) {
       gdRow[key] = pctChange(tyRow[key], lyRow[key]);
     } else {
       gdRow[key] = null;
     }
   }
+
   gdRow.YTD = pctChange(tyRow.YTD, lyRow.YTD);
 
   return {
@@ -231,8 +256,7 @@ function buildPaceTable({ title, tyYear, lyYear, cutoffMonth, base, metric }) {
 }
 
 /**
- * PUBLIC FUNCTIONS (4 reports)
- * You will call these from controller after you compute dealerCodes etc.
+ * PUBLIC FUNCTIONS
  */
 
 async function getActivationPaceYtdReports({
@@ -240,8 +264,16 @@ async function getActivationPaceYtdReports({
   dealerCodes,
   isAdmin = false,
 }) {
-  const { cutoffTY, cutoffLY, cutoffDay, cutoffMonth, tyYear, lyYear, startTY, startLY } =
-    getIndiaCutoffs();
+  const {
+    cutoffTY,
+    cutoffDay,
+    cutoffMonth,
+    tyYear,
+    lyYear,
+    startTY,
+    startLY,
+    endLYFull,
+  } = getIndiaCutoffs();
 
   const base = await fetchPaceBase({
     Model: ActivationData,
@@ -251,11 +283,10 @@ async function getActivationPaceYtdReports({
     valueField: "val",
     qtyField: "qty",
     cutoffDay,
-    cutoffMonth,
     startTY,
     cutoffTY,
     startLY,
-    cutoffLY,
+    endLYFull,
     isAdmin,
   });
 
@@ -284,8 +315,16 @@ async function getTertiaryPaceYtdReports({
   dealerCodes,
   isAdmin = false,
 }) {
-  const { cutoffTY, cutoffLY, cutoffDay, cutoffMonth, tyYear, lyYear, startTY, startLY } =
-    getIndiaCutoffs();
+  const {
+    cutoffTY,
+    cutoffDay,
+    cutoffMonth,
+    tyYear,
+    lyYear,
+    startTY,
+    startLY,
+    endLYFull,
+  } = getIndiaCutoffs();
 
   const base = await fetchPaceBase({
     Model: TertiaryData,
@@ -295,11 +334,10 @@ async function getTertiaryPaceYtdReports({
     valueField: "net_value",
     qtyField: "qty",
     cutoffDay,
-    cutoffMonth,
     startTY,
     cutoffTY,
     startLY,
-    cutoffLY,
+    endLYFull,
     isAdmin,
   });
 
@@ -324,7 +362,7 @@ async function getTertiaryPaceYtdReports({
 }
 
 /**
- * Convenience: get all 4 at once (2 DB aggregations total)
+ * Convenience: get all 4 at once
  */
 async function getAllPaceYtdReports({
   ActivationData,
