@@ -5,6 +5,7 @@ const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
 const {
   uploadSamsungDumpProducts,
   syncMddDealerFromDump,
+  uploadTopDealerFromCsv,
 } = require("../controllers/new/dumpSyncController");
 
 const router = express.Router();
@@ -15,6 +16,13 @@ router.post(
   upload.single("file"),
   adminOrSuperAdminAuth,
   uploadSamsungDumpProducts
+);
+
+router.post(
+  "/admin/upload-top-dealer-from-csv",
+  upload.single("file"),
+  adminOrSuperAdminAuth,
+  uploadTopDealerFromCsv
 );
 
 router.post("/admin/sync-mdd-dealer-from-dump", upload.single("file"), adminOrSuperAdminAuth, syncMddDealerFromDump);
