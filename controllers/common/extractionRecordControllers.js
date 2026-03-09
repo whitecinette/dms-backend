@@ -9,6 +9,9 @@ const ActorCode = require("../../model/ActorCode");
 const SalesData = require("../../model/SalesData");
 const XLSX = require("xlsx");
 
+const ExcelJS = require("exceljs");
+
+
 const { BACKEND_URL } = process.env;
 
 exports.addExtractionRecord = async (req, res) => {
@@ -2592,5 +2595,554 @@ exports.getHierarchyFilters = async (req, res) => {
   } catch (error) {
     console.error("Error in getHierarchyFilters:", error);
     return res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+
+
+const normalizeCode = (value) => String(value || "").trim();
+
+const normalizeBool = (value) =>
+  value === true || String(value).toLowerCase() === "true";
+
+const formatExcelDate = (value) => {
+  if (!value) return "";
+  return moment(value).format("DD-MM-YYYY HH:mm");
+};
+
+const pct = (num, total) => {
+  if (!total) return "0%";
+  return `${Math.round((Number(num || 0) / Number(total || 0)) * 100)}%`;
+};
+
+/* ---------------------------------- */
+/* COMBINED SHEET (dealer wise)       */
+/* ---------------------------------- */
+
+const COMBINED_COLUMNS = [
+  { header: "Dealer Code", key: "dealer_code", width: 18 },
+  { header: "Dealer Name", key: "dealer_name", width: 28 },
+  { header: "Town", key: "town", width: 18 },
+  { header: "Top Outlet", key: "top_outlet", width: 14 },
+
+  { header: "SMD Code", key: "smd_code", width: 18 },
+  { header: "SMD Name", key: "smd_name", width: 24 },
+
+  { header: "ZSM Code", key: "zsm_code", width: 18 },
+  { header: "ZSM Name", key: "zsm_name", width: 24 },
+
+  { header: "ASM Code", key: "asm_code", width: 18 },
+  { header: "ASM Name", key: "asm_name", width: 24 },
+
+  { header: "MDD Code", key: "mdd_code", width: 18 },
+  { header: "MDD Name", key: "mdd_name", width: 24 },
+
+  { header: "TSE Code", key: "tse_code", width: 18 },
+  { header: "TSE Name", key: "tse_name", width: 24 },
+
+  { header: "Status", key: "status", width: 14 },
+  { header: "Done Date", key: "done_date", width: 22 },
+];
+
+const addCombinedWorksheet = (workbook, sheetName, rows = []) => {
+  const sheet = workbook.addWorksheet(sheetName);
+
+  sheet.columns = COMBINED_COLUMNS;
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.autoFilter = { from: "A1", to: "P1" };
+
+  const headerRow = sheet.getRow(1);
+  headerRow.height = 22;
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.alignment = { vertical: "middle", horizontal: "center" };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF1F4E78" },
+  };
+
+  rows.forEach((row) => {
+    const excelRow = sheet.addRow({
+      dealer_code: row.dealer_code || "",
+      dealer_name: row.dealer_name || "",
+      town: row.town || "",
+      top_outlet: row.top_outlet || "No",
+
+      smd_code: row.smd_code || "",
+      smd_name: row.smd_name || "",
+
+      zsm_code: row.zsm_code || "",
+      zsm_name: row.zsm_name || "",
+
+      asm_code: row.asm_code || "",
+      asm_name: row.asm_name || "",
+
+      mdd_code: row.mdd_code || "",
+      mdd_name: row.mdd_name || "",
+
+      tse_code: row.tse_code || "",
+      tse_name: row.tse_name || "",
+
+      status: row.status || "PENDING",
+      done_date: row.done_date || "",
+    });
+
+    excelRow.alignment = { vertical: "middle", horizontal: "center" };
+
+    const statusCell = excelRow.getCell("O");
+    if (String(row.status).toUpperCase() === "DONE") {
+      statusCell.font = { bold: true, color: { argb: "FF0A6E31" } };
+      statusCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFD9F2D9" },
+      };
+    } else {
+      statusCell.font = { bold: true, color: { argb: "FF9C0006" } };
+      statusCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFE0E0" },
+      };
+    }
+  });
+
+  return sheet;
+};
+
+/* ---------------------------------- */
+/* ROLE SUMMARY SHEETS                */
+/* ---------------------------------- */
+
+const ROLE_SUMMARY_COLUMNS = [
+  { header: "Name", key: "name", width: 26 },
+  { header: "Code", key: "code", width: 18 },
+  { header: "Position", key: "position", width: 14 },
+  { header: "Total", key: "total", width: 12 },
+  { header: "Done", key: "done", width: 12 },
+  { header: "Done Percentage", key: "done_percentage", width: 18 },
+  { header: "Pending", key: "pending", width: 12 },
+  { header: "Pending Percentage", key: "pending_percentage", width: 18 },
+  { header: "Total Top Outlets (Under)", key: "total_top_outlets", width: 24 },
+  { header: "Done Top Outlet", key: "done_top_outlet", width: 18 },
+  { header: "Done Top Outlet %", key: "done_top_outlet_percentage", width: 20 },
+  { header: "Pending Top Outlet", key: "pending_top_outlet", width: 20 },
+  { header: "Pending Top Outlet %", key: "pending_top_outlet_percentage", width: 22 },
+];
+
+const addRoleSummaryWorksheet = (workbook, sheetName, rows = []) => {
+  const sheet = workbook.addWorksheet(sheetName);
+
+  sheet.columns = ROLE_SUMMARY_COLUMNS;
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.autoFilter = { from: "A1", to: "M1" };
+
+  const headerRow = sheet.getRow(1);
+  headerRow.height = 22;
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.alignment = { vertical: "middle", horizontal: "center" };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF7A3E00" },
+  };
+
+  rows.forEach((row) => {
+    const excelRow = sheet.addRow({
+      name: row.name || "",
+      code: row.code || "",
+      position: row.position || "",
+      total: row.total || 0,
+      done: row.done || 0,
+      done_percentage: row.done_percentage || "0%",
+      pending: row.pending || 0,
+      pending_percentage: row.pending_percentage || "0%",
+      total_top_outlets: row.total_top_outlets || 0,
+      done_top_outlet: row.done_top_outlet || 0,
+      done_top_outlet_percentage: row.done_top_outlet_percentage || "0%",
+      pending_top_outlet: row.pending_top_outlet || 0,
+      pending_top_outlet_percentage: row.pending_top_outlet_percentage || "0%",
+    });
+
+    excelRow.alignment = { vertical: "middle", horizontal: "center" };
+  });
+
+  return sheet;
+};
+
+/* ---------------------------------- */
+/* BUILD DEALER ROWS                  */
+/* ---------------------------------- */
+
+const buildDealerWiseRows = async ({
+  startDate,
+  endDate,
+  topOutlet,
+  userCode,
+  userPosition,
+  userRole,
+}) => {
+  const start = startDate
+    ? moment(startDate).startOf("day").toDate()
+    : moment().startOf("month").toDate();
+
+  const end = endDate
+    ? moment(endDate).endOf("day").toDate()
+    : moment().endOf("month").toDate();
+
+  const shouldFilterTopOutlet = normalizeBool(topOutlet);
+
+  const hierarchyFilter = {
+    hierarchy_name: "default_sales_flow",
+  };
+
+  if (String(userRole).toLowerCase() !== "admin") {
+    hierarchyFilter[userPosition] = userCode;
+  }
+
+  const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+
+  if (!hierarchyEntries.length) {
+    return {
+      rows: [],
+      hierarchyEntries: [],
+      start,
+      end,
+    };
+  }
+
+  const dealerCodes = [
+    ...new Set(
+      hierarchyEntries.map((item) => normalizeCode(item.dealer)).filter(Boolean)
+    ),
+  ];
+
+  const actorCodes = [
+    ...new Set(
+      hierarchyEntries
+        .flatMap((item) => [
+          normalizeCode(item.smd),
+          normalizeCode(item.zsm),
+          normalizeCode(item.asm),
+          normalizeCode(item.mdd),
+          normalizeCode(item.tse),
+        ])
+        .filter(Boolean)
+        .filter((code) => code.toUpperCase() !== "VACANT")
+    ),
+  ];
+
+  const [dealerUsers, actorUsers] = await Promise.all([
+    User.find(
+      { code: { $in: dealerCodes } },
+      { code: 1, name: 1, town: 1, top_outlet: 1 }
+    ).lean(),
+    User.find(
+      { code: { $in: actorCodes } },
+      { code: 1, name: 1, position: 1 }
+    ).lean(),
+  ]);
+
+  const dealerMap = new Map();
+  for (const dealer of dealerUsers) {
+    dealerMap.set(normalizeCode(dealer.code), dealer);
+  }
+
+  const actorMap = new Map();
+  for (const actor of actorUsers) {
+    actorMap.set(normalizeCode(actor.code), actor);
+  }
+
+  let filteredEntries = hierarchyEntries;
+
+  if (shouldFilterTopOutlet) {
+    filteredEntries = hierarchyEntries.filter((entry) => {
+      const dealer = dealerMap.get(normalizeCode(entry.dealer));
+      return dealer?.top_outlet === true;
+    });
+  }
+
+  const filteredDealerCodes = [
+    ...new Set(
+      filteredEntries.map((item) => normalizeCode(item.dealer)).filter(Boolean)
+    ),
+  ];
+
+  if (!filteredDealerCodes.length) {
+    return {
+      rows: [],
+      hierarchyEntries: filteredEntries,
+      start,
+      end,
+    };
+  }
+
+  const extractionRecords = await ExtractionRecord.find(
+    {
+      dealer: { $in: filteredDealerCodes },
+      createdAt: { $gte: start, $lte: end },
+    },
+    { dealer: 1, createdAt: 1 }
+  )
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const doneDealerMap = new Map();
+  for (const record of extractionRecords) {
+    const dealerCode = normalizeCode(record.dealer);
+    if (!doneDealerMap.has(dealerCode)) {
+      doneDealerMap.set(dealerCode, record.createdAt);
+    }
+  }
+
+  const rows = filteredEntries.map((entry) => {
+    const dealerCode = normalizeCode(entry.dealer);
+    const dealer = dealerMap.get(dealerCode);
+    const doneDate = doneDealerMap.get(dealerCode);
+
+    const smdCode = normalizeCode(entry.smd);
+    const zsmCode = normalizeCode(entry.zsm);
+    const asmCode = normalizeCode(entry.asm);
+    const mddCode = normalizeCode(entry.mdd);
+    const tseCode = normalizeCode(entry.tse);
+
+    return {
+      dealer_code: dealerCode,
+      dealer_name: dealer?.name || "",
+      town: dealer?.town || "",
+      top_outlet: dealer?.top_outlet ? "Yes" : "No",
+
+      smd_code: smdCode,
+      smd_name: actorMap.get(smdCode)?.name || "",
+
+      zsm_code: zsmCode,
+      zsm_name: actorMap.get(zsmCode)?.name || "",
+
+      asm_code: asmCode,
+      asm_name: actorMap.get(asmCode)?.name || "",
+
+      mdd_code: mddCode,
+      mdd_name: actorMap.get(mddCode)?.name || "",
+
+      tse_code: tseCode,
+      tse_name: tseCode.toUpperCase() === "VACANT" ? "VACANT" : actorMap.get(tseCode)?.name || "",
+
+      status: doneDate ? "DONE" : "PENDING",
+      done_date: formatExcelDate(doneDate),
+    };
+  });
+
+  rows.sort((a, b) => {
+    const aStatus = a.status === "PENDING" ? 0 : 1;
+    const bStatus = b.status === "PENDING" ? 0 : 1;
+    if (aStatus !== bStatus) return aStatus - bStatus;
+
+    return String(a.dealer_name || a.dealer_code).localeCompare(
+      String(b.dealer_name || b.dealer_code)
+    );
+  });
+
+  return {
+    rows,
+    hierarchyEntries: filteredEntries,
+    start,
+    end,
+  };
+};
+
+/* ---------------------------------- */
+/* BUILD ROLE SUMMARY ROWS            */
+/* ---------------------------------- */
+
+const buildRoleSummaryRows = async ({ hierarchyEntries, start, end, role }) => {
+  const cleanRole = String(role || "").toLowerCase();
+
+  const actorCodes = [
+    ...new Set(
+      hierarchyEntries
+        .map((entry) => normalizeCode(entry[cleanRole]))
+        .filter((code) => code && code.toUpperCase() !== "VACANT")
+    ),
+  ];
+
+  if (!actorCodes.length) return [];
+
+  const actorUsers = await User.find(
+    { code: { $in: actorCodes } },
+    { code: 1, name: 1, position: 1 }
+  ).lean();
+
+  const actorMap = new Map();
+  actorUsers.forEach((user) => {
+    actorMap.set(normalizeCode(user.code), user);
+  });
+
+  const dealerCodes = [
+    ...new Set(
+      hierarchyEntries.map((entry) => normalizeCode(entry.dealer)).filter(Boolean)
+    ),
+  ];
+
+  const dealerUsers = await User.find(
+    { code: { $in: dealerCodes } },
+    { code: 1, top_outlet: 1 }
+  ).lean();
+
+  const dealerTopOutletMap = new Map();
+  dealerUsers.forEach((dealer) => {
+    dealerTopOutletMap.set(normalizeCode(dealer.code), dealer?.top_outlet === true);
+  });
+
+  const extractionRecords = await ExtractionRecord.find(
+    {
+      dealer: { $in: dealerCodes },
+      createdAt: { $gte: start, $lte: end },
+    },
+    { dealer: 1 }
+  ).lean();
+
+  const doneDealerSet = new Set(
+    extractionRecords.map((item) => normalizeCode(item.dealer)).filter(Boolean)
+  );
+
+  const summaryMap = new Map();
+
+  for (const entry of hierarchyEntries) {
+    const actorCode = normalizeCode(entry[cleanRole]);
+    const dealerCode = normalizeCode(entry.dealer);
+
+    if (!actorCode || actorCode.toUpperCase() === "VACANT" || !dealerCode) continue;
+
+    if (!summaryMap.has(actorCode)) {
+      const actorUser = actorMap.get(actorCode);
+
+      summaryMap.set(actorCode, {
+        name: actorUser?.name || "N/A",
+        code: actorCode,
+        position: String(cleanRole).toUpperCase(),
+        total: 0,
+        done: 0,
+        pending: 0,
+        total_top_outlets: 0,
+        done_top_outlet: 0,
+        pending_top_outlet: 0,
+        _dealerSet: new Set(),
+      });
+    }
+
+    const item = summaryMap.get(actorCode);
+    const isTopOutlet = dealerTopOutletMap.get(dealerCode) === true;
+    const isDone = doneDealerSet.has(dealerCode);
+
+    if (!item._dealerSet.has(dealerCode)) {
+      item._dealerSet.add(dealerCode);
+      item.total += 1;
+
+      if (isDone) item.done += 1;
+      else item.pending += 1;
+
+      if (isTopOutlet) {
+        item.total_top_outlets += 1;
+
+        if (isDone) item.done_top_outlet += 1;
+        else item.pending_top_outlet += 1;
+      }
+    }
+  }
+
+  const rows = Array.from(summaryMap.values()).map((item) => {
+    const totalTop = item.total_top_outlets || 0;
+
+    return {
+      name: item.name,
+      code: item.code,
+      position: item.position,
+      total: item.total,
+      done: item.done,
+      done_percentage: pct(item.done, item.total),
+      pending: item.pending,
+      pending_percentage: pct(item.pending, item.total),
+      total_top_outlets: item.total_top_outlets,
+      done_top_outlet: item.done_top_outlet,
+      done_top_outlet_percentage: pct(item.done_top_outlet, totalTop),
+      pending_top_outlet: item.pending_top_outlet,
+      pending_top_outlet_percentage: pct(item.pending_top_outlet, totalTop),
+    };
+  });
+
+  rows.sort((a, b) => {
+    const aPending = Number(a.pending || 0);
+    const bPending = Number(b.pending || 0);
+    if (bPending !== aPending) return bPending - aPending;
+    return String(a.name || a.code).localeCompare(String(b.name || b.code));
+  });
+
+  return rows;
+};
+
+/* ---------------------------------- */
+/* MAIN EXPORT API                    */
+/* ---------------------------------- */
+
+exports.downloadExtractionStatusRoleWiseExcel = async (req, res) => {
+  try {
+    const { startDate, endDate, topOutlet = false } = req.body;
+
+    const { code: userCode, position: userPosition, role: userRole } = req.user;
+
+    if (!userCode || !userPosition || !userRole) {
+      return res.status(400).json({
+        success: false,
+        message: "User authentication required",
+      });
+    }
+
+    const { rows, hierarchyEntries, start, end } = await buildDealerWiseRows({
+      startDate,
+      endDate,
+      topOutlet,
+      userCode,
+      userPosition,
+      userRole,
+    });
+
+    const [smdRows, zsmRows, asmRows, mddRows, tseRows] = await Promise.all([
+      buildRoleSummaryRows({ hierarchyEntries, start, end, role: "smd" }),
+      buildRoleSummaryRows({ hierarchyEntries, start, end, role: "zsm" }),
+      buildRoleSummaryRows({ hierarchyEntries, start, end, role: "asm" }),
+      buildRoleSummaryRows({ hierarchyEntries, start, end, role: "mdd" }),
+      buildRoleSummaryRows({ hierarchyEntries, start, end, role: "tse" }),
+    ]);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "OpenAI";
+    workbook.created = new Date();
+
+    addCombinedWorksheet(workbook, "Combined", rows);
+    addRoleSummaryWorksheet(workbook, "SMD", smdRows);
+    addRoleSummaryWorksheet(workbook, "ZSM", zsmRows);
+    addRoleSummaryWorksheet(workbook, "ASM", asmRows);
+    addRoleSummaryWorksheet(workbook, "MDD", mddRows);
+    addRoleSummaryWorksheet(workbook, "TSE", tseRows);
+
+    const fileName = `Extraction_Dealer_Wise_${moment(start).format(
+      "DDMMYYYY"
+    )}_to_${moment(end).format("DDMMYYYY")}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    return res.end();
+  } catch (error) {
+    console.error("Error in downloadExtractionStatusRoleWiseExcel:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };

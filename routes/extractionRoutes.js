@@ -1,6 +1,6 @@
 const express = require('express');
-const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction } = require('../controllers/common/extractionRecordControllers');
-const { userAuth } = require('../middlewares/authmiddlewares');
+const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction, downloadExtractionStatusRoleWiseExcel } = require('../controllers/common/extractionRecordControllers');
+const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
 // Define the route
@@ -16,7 +16,14 @@ router.post("/user/extraction-status-role-wise", userAuth, getExtractionStatusRo
 router.post("/user/extraction-dealers-w-status", getDealersWithStatusForExtraction);
 // router.get('/admin/get-extraction-for-uploaded-by', getExtractionRecords)
 router.get("/admin/get-extraction-records/download",  getExtractionRecordsForDownload);
+router.post(
+  "/user/extraction-status-role-wise/download",
+  adminOrSuperAdminAuth,
+  downloadExtractionStatusRoleWiseExcel
+  
+);
 
 router.get("/get-extraction-report-for-admin", getExtractionReportForAdmin);
 router.get("/get-hierarchy-filter", getHierarchyFilters);
+
 module.exports = router;
