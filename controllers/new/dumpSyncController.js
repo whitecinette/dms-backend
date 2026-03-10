@@ -6,6 +6,7 @@ const ActorCode = require("../../model/ActorCode");
 const csv = require("csv-parser");
 const { Readable } = require("stream");
 const User = require("../../model/User");
+const HierarchyEntries = require("../../model/HierarchyEntries");
 
 // ---------- file parsing (xlsx/xls/csv) ----------
 
@@ -388,6 +389,187 @@ exports.syncMddDealerFromDump = async (req, res) => {
   }
 };
 
+exports.uploadSamsungDumpHierarchy = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ message: "File is required" });
+    }
+
+    const dryRun = String(req.query.dryRun || "false").toLowerCase() === "true";
+
+    const rows = parseDumpFile(req.file.buffer, req.file.originalname);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "Empty file (parser returned 0 rows)" });
+    }
+
+    const hierarchyName = "default_sales_flow";
+
+    // keep one row per dealer
+    const dealerMap = new Map();
+
+    for (const row of rows) {
+      const buyerType = String(row["Buyer Type"] || "").trim().toLowerCase();
+      const dealer = String(row["BuyerCode"] || "").trim();
+
+      if (buyerType !== "dealer") continue;
+      if (!dealer) continue;
+
+      if (!dealerMap.has(dealer)) {
+        dealerMap.set(dealer, row);
+      }
+    }
+
+    const dealerCodes = Array.from(dealerMap.keys());
+
+    if (!dealerCodes.length) {
+      return res.status(400).json({ message: "No dealer rows found in file" });
+    }
+
+    // find already existing hierarchy entries
+    const existingEntries = await HierarchyEntries.find(
+      {
+        hierarchy_name: hierarchyName,
+        dealer: { $in: dealerCodes },
+      },
+      { dealer: 1 }
+    ).lean();
+
+    const existingDealerSet = new Set(
+      existingEntries.map((item) => String(item.dealer || "").trim())
+    );
+
+    const normalize = (value) =>
+      String(value || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+
+    // collect names needed for actor lookup
+    const asmNames = new Set();
+    const zsmNames = new Set();
+
+    for (const row of dealerMap.values()) {
+      const asmName = String(row["ABM/RSO"] || row["ABM"] || "").trim();
+      const zsmName = String(row["ZSM"] || "").trim();
+
+      if (asmName) asmNames.add(asmName);
+      if (zsmName) zsmNames.add(zsmName);
+    }
+
+    const allNames = Array.from(new Set([...asmNames, ...zsmNames]));
+
+    const actorDocs = await ActorCode.find(
+      {
+        name: { $in: allNames },
+      },
+      {
+        code: 1,
+        name: 1,
+        position: 1,
+        role: 1,
+      }
+    ).lean();
+
+    const actorMap = new Map();
+
+    for (const actor of actorDocs) {
+      const nameKey = normalize(actor.name);
+      const posKey = normalize(actor.position || actor.role);
+      actorMap.set(`${nameKey}__${posKey}`, actor);
+    }
+
+    const findActorCode = (name, positions = []) => {
+      const nameKey = normalize(name);
+      if (!nameKey) return "";
+
+      for (const pos of positions) {
+        const actor = actorMap.get(`${nameKey}__${normalize(pos)}`);
+        if (actor?.code) return String(actor.code).trim();
+      }
+
+      return "";
+    };
+
+    const toInsert = [];
+
+    for (const [dealer, row] of dealerMap.entries()) {
+      if (existingDealerSet.has(dealer)) continue;
+
+      const smd = String(row["SPD Code"] || "").trim() || "6434002";
+      const mdd = String(row["MDD Code"] || "").trim();
+
+      const asmName = String(row["ABM/RSO"] || row["ABM"] || "").trim();
+      const zsmName = String(row["ZSM"] || "").trim();
+
+      const asm = findActorCode(asmName, ["asm"]) || "";
+      const zsm = findActorCode(zsmName, ["zsm"]) || "";
+
+      toInsert.push({
+        hierarchy_name: hierarchyName,
+        smd,
+        zsm,
+        asm,
+        mdd,
+        tse: "",
+        dealer,
+      });
+    }
+
+    const summary = {
+      success: true,
+      dryRun,
+      totalRows: rows.length,
+      uniqueDealersInFile: dealerCodes.length,
+      existingInHierarchy: existingDealerSet.size,
+      toInsert: toInsert.length,
+      inserted: 0,
+      skipped: dealerCodes.length - toInsert.length,
+      errors: 0,
+    };
+
+    if (dryRun) {
+      return res.json({
+        ...summary,
+        sampleNewHierarchyEntries: toInsert.slice(0, 50),
+      });
+    }
+
+    if (!toInsert.length) {
+      return res.json({
+        ...summary,
+        message: "No new hierarchy entries to insert",
+      });
+    }
+
+    try {
+      const insertedDocs = await HierarchyEntries.insertMany(toInsert, {
+        ordered: false,
+      });
+
+      summary.inserted = insertedDocs.length;
+      summary.message = `Inserted ${summary.inserted} new hierarchy entries`;
+
+      return res.json(summary);
+    } catch (err) {
+      const writeErrors = err?.writeErrors || [];
+      summary.inserted = Math.max(0, toInsert.length - writeErrors.length);
+      summary.errors = writeErrors.length;
+      summary.message = `Inserted ${summary.inserted} new hierarchy entries (some duplicates/errors skipped)`;
+
+      return res.json(summary);
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Hierarchy dump sync failed" });
+  }
+};
+
+
+
+//////////////////////////////////////////
+////////////////////////////////////
+////////////////////////////////////////////////////
 
 function parseCsvBuffer(buffer) {
   return new Promise((resolve, reject) => {
@@ -418,7 +600,6 @@ function getRowValue(row, possibleKeys = []) {
   }
   return "";
 }
-
 
 
 exports.uploadTopDealerFromCsv = async (req, res) => {

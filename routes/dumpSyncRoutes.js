@@ -6,6 +6,7 @@ const {
   uploadSamsungDumpProducts,
   syncMddDealerFromDump,
   uploadTopDealerFromCsv,
+  uploadSamsungDumpHierarchy,
 } = require("../controllers/new/dumpSyncController");
 
 const router = express.Router();
@@ -18,6 +19,10 @@ router.post(
   uploadSamsungDumpProducts
 );
 
+router.post("/admin/sync-mdd-dealer-from-dump", upload.single("file"), adminOrSuperAdminAuth, syncMddDealerFromDump);
+
+router.post("/admin/sync-heirarchy-from-dump", upload.single("file"), adminOrSuperAdminAuth, uploadSamsungDumpHierarchy)
+
 router.post(
   "/admin/upload-top-dealer-from-csv",
   upload.single("file"),
@@ -25,7 +30,6 @@ router.post(
   uploadTopDealerFromCsv
 );
 
-router.post("/admin/sync-mdd-dealer-from-dump", upload.single("file"), adminOrSuperAdminAuth, syncMddDealerFromDump);
 
 
 module.exports = router;
