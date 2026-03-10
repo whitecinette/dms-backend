@@ -83,10 +83,10 @@ function normalizeProductCategory(segmentVal) {
 
   if (s.includes("tab") || s.includes("tablet")) return "tab";
   if (s.includes("wear") || s.includes("watch") || s.includes("buds") || s.includes("hear")) return "wearable";
-  if (s.includes("phone")) return "smart_phone";
+  if (s.includes("phone")) return "smartphone";
 
   // default (your dump is mostly phones)
-  return "smart_phone";
+  return "smartphone";
 }
 
 function cleanCode(v) {
