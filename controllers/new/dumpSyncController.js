@@ -100,14 +100,14 @@ function cleanName(v) {
 function bucketFromPrice(price) {
   if (!price || price <= 0) return "";
 
-  // include 10,000 dp in 6-10
   if (price <= 10000) return "6-10";
   if (price <= 20000) return "10-20";
   if (price <= 30000) return "20-30";
   if (price <= 40000) return "30-40";
   if (price <= 70000) return "40-70";
   if (price <= 100000) return "70-100";
-  return "100";
+  if (price <= 120000) return "100-120";
+  return "120";
 }
 
 // fallback parse from strings like "10~15K", "10-15K", "30 K - 40 K", "10 K-15 K"

@@ -2,6 +2,7 @@ const ActivationData = require("../../model/ActivationData");
 const SecondaryData = require("../../model/SecondaryData");
 const TertiaryData = require("../../model/TertiaryData");
 const ProductMaster = require("../../model/ProductMaster");
+const Product = require("../../model/Product");
 const moment = require("moment-timezone");
 const { getDealerCodesFromFilters } = require("../../services/dealerFilterService");
 
@@ -393,4 +394,117 @@ exports.getSalesReportFlags = async (req, res) => {
   }
 };
 
+
+
+
+// correct product price segments 
+
+function toNumber(val) {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") return val;
+  const s = String(val).replace(/,/g, "").trim();
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function bucketFromPrice(price) {
+  if (!price || price <= 0) return "";
+
+  if (price <= 10000) return "6-10";
+  if (price <= 20000) return "10-20";
+  if (price <= 30000) return "20-30";
+  if (price <= 40000) return "30-40";
+  if (price <= 70000) return "40-70";
+  if (price <= 100000) return "70-100";
+  if (price <= 120000) return "100-120";
+  return "120";
+}
+
+exports.recalculateProductSegmentsByFilter = async (req, res) => {
+  try {
+    let { segments = [] } = req.body;
+
+    if (!Array.isArray(segments) || !segments.length) {
+      return res.status(400).json({
+        success: false,
+        message: "segments array is required",
+      });
+    }
+
+    segments = segments.map((s) => String(s).trim()).filter(Boolean);
+
+    const products = await Product.find({
+      segment: { $in: segments },
+    }).lean();
+
+    if (!products.length) {
+      return res.status(200).json({
+        success: true,
+        matchedCount: 0,
+        modifiedCount: 0,
+        message: "No products found for given segments",
+      });
+    }
+
+    const bulkOps = [];
+    const preview = [];
+
+    for (const product of products) {
+      const price = toNumber(product.price);
+      const newSegment = bucketFromPrice(price);
+      const oldSegment = String(product.segment || "").trim();
+
+      if (!newSegment || oldSegment === newSegment) continue;
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: product._id },
+          update: {
+            $set: {
+              segment: newSegment,
+            },
+          },
+        },
+      });
+
+      if (preview.length < 20) {
+        preview.push({
+          product_code: product.product_code,
+          product_name: product.product_name,
+          price: product.price,
+          oldSegment,
+          newSegment,
+        });
+      }
+    }
+
+    if (!bulkOps.length) {
+      return res.status(200).json({
+        success: true,
+        matchedCount: products.length,
+        modifiedCount: 0,
+        message: "All matching products already have correct segments",
+      });
+    }
+
+    const result = await Product.bulkWrite(bulkOps);
+
+    return res.status(200).json({
+      success: true,
+      matchedCount: products.length,
+      modifiedCount: result.modifiedCount || 0,
+      preview,
+      message: "Product segments recalculated successfully",
+    });
+  } catch (error) {
+    console.error("Error in recalculateProductSegmentsByFilter:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+
+// correct price segments
 
