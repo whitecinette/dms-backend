@@ -83,10 +83,10 @@ function normalizeProductCategory(segmentVal) {
 
   if (s.includes("tab") || s.includes("tablet")) return "tab";
   if (s.includes("wear") || s.includes("watch") || s.includes("buds") || s.includes("hear")) return "wearable";
-  if (s.includes("phone")) return "smartphone";
+  if (s.includes("phone")) return "smart_phone";
 
   // default (your dump is mostly phones)
-  return "smartphone";
+  return "smart_phone";
 }
 
 function cleanCode(v) {
@@ -100,6 +100,7 @@ function cleanName(v) {
 function bucketFromPrice(price) {
   if (!price || price <= 0) return "";
 
+  if (price <= 6000) return "0-6";
   if (price <= 10000) return "6-10";
   if (price <= 20000) return "10-20";
   if (price <= 30000) return "20-30";
@@ -109,6 +110,7 @@ function bucketFromPrice(price) {
   if (price <= 120000) return "100-120";
   return "120";
 }
+
 
 // fallback parse from strings like "10~15K", "10-15K", "30 K - 40 K", "10 K-15 K"
 function bucketFromRangeString(rangeStr) {

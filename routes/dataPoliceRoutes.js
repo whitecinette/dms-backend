@@ -1,6 +1,6 @@
 const express = require("express");
 const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
-const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter } = require("../controllers/new/dataPolice");
+const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone } = require("../controllers/new/dataPolice");
 const router = express.Router();
 
 
@@ -23,5 +23,10 @@ router.put("/police/recalculate-segments-by-filter",
   recalculateProductSegmentsByFilter
 );
 
+router.put(
+  "/police/rename-smartphone-to-smart-phone",
+  adminOrSuperAdminAuth,
+  renameSmartphoneCategoryToSmartPhone
+);
 
 module.exports = router;

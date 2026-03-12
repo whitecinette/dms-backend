@@ -410,6 +410,7 @@ function toNumber(val) {
 function bucketFromPrice(price) {
   if (!price || price <= 0) return "";
 
+  if (price <= 6000) return "0-6";
   if (price <= 10000) return "6-10";
   if (price <= 20000) return "10-20";
   if (price <= 30000) return "20-30";
@@ -508,3 +509,39 @@ exports.recalculateProductSegmentsByFilter = async (req, res) => {
 
 // correct price segments
 
+
+//smartphone to smart_phone
+exports.renameSmartphoneCategoryToSmartPhone = async (req, res) => {
+  try {
+    const filter = { product_category: "smartphone" };
+
+    const matchedCount = await Product.countDocuments(filter);
+
+    if (!matchedCount) {
+      return res.status(200).json({
+        success: true,
+        matchedCount: 0,
+        modifiedCount: 0,
+        message: "No products found with product_category = smartphone",
+      });
+    }
+
+    const result = await Product.updateMany(filter, {
+      $set: { product_category: "smart_phone" },
+    });
+
+    return res.status(200).json({
+      success: true,
+      matchedCount,
+      modifiedCount: result.modifiedCount || 0,
+      message: "product_category updated from smartphone to smart_phone",
+    });
+  } catch (error) {
+    console.error("Error in renameSmartphoneCategoryToSmartPhone:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+//smartphone to smart_phone
