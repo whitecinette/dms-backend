@@ -622,6 +622,81 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
   }
 };
 
+
+
+exports.updateExtractionCreatedAtMonthByDateRange = async (req, res) => {
+  try {
+    const { startDate, endDate, newMonth } = req.body;
+
+    if (!startDate || !endDate || !newMonth) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate, endDate and newMonth are required",
+      });
+    }
+
+    const monthNum = Number(newMonth);
+
+    if (!Number.isInteger(monthNum) || monthNum < 1 || monthNum > 12) {
+      return res.status(400).json({
+        success: false,
+        message: "newMonth must be between 1 and 12",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const filter = {
+      createdAt: { $gte: start, $lte: end },
+      $or: [{ external: { $exists: false } }, { external: false }],
+    };
+
+    const records = await ExtractionRecord.find(filter).lean();
+
+    if (!records.length) {
+      return res.status(200).json({
+        success: true,
+        matchedCount: 0,
+        modifiedCount: 0,
+        message: "No matching records found",
+      });
+    }
+
+    const bulkOps = records.map((record) => {
+      const oldDate = new Date(record.createdAt);
+      const newDate = new Date(oldDate);
+      newDate.setUTCMonth(monthNum - 1);
+
+      return {
+        updateOne: {
+          filter: { _id: record._id },
+          update: {
+            $set: {
+              createdAt: newDate,
+            },
+          },
+        },
+      };
+    });
+
+    const result = await ExtractionRecord.collection.bulkWrite(bulkOps);
+
+    return res.status(200).json({
+      success: true,
+      matchedCount: records.length,
+      modifiedCount: result.modifiedCount || 0,
+      message: "createdAt month updated successfully",
+    });
+  } catch (error) {
+    console.error("Error in updateExtractionCreatedAtMonthByDateRange:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
 // exports.getExtractionStatusRoleWise = async (req, res) => {
 //   try {
 //     let { roles = [], startDate, endDate } = req.body;

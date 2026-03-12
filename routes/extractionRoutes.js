@@ -1,5 +1,5 @@
 const express = require('express');
-const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction, downloadExtractionStatusRoleWiseExcel } = require('../controllers/common/extractionRecordControllers');
+const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction, downloadExtractionStatusRoleWiseExcel, updateExtractionCreatedAtMonthByDateRange } = require('../controllers/common/extractionRecordControllers');
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
@@ -21,6 +21,11 @@ router.post(
   adminOrSuperAdminAuth,
   downloadExtractionStatusRoleWiseExcel
   
+);
+router.put(
+  "/extraction/update-createdat-month-by-date-range",
+  adminOrSuperAdminAuth,
+  updateExtractionCreatedAtMonthByDateRange
 );
 
 router.get("/get-extraction-report-for-admin", getExtractionReportForAdmin);
