@@ -7,6 +7,8 @@ const {
   syncMddDealerFromDump,
   uploadTopDealerFromCsv,
   uploadSamsungDumpHierarchy,
+  uploadExtractionActiveFromCsv,
+  updateDealerCatgoryFromCSV,
 } = require("../controllers/new/dumpSyncController");
 
 const router = express.Router();
@@ -30,6 +32,19 @@ router.post(
   uploadTopDealerFromCsv
 );
 
+router.post(
+  "/upload-extraction-active--dealer-from-csv",
+  adminOrSuperAdminAuth,
+  upload.single("file"),
+  uploadExtractionActiveFromCsv
+);
+
+router.post(
+  "/update-dealer-category-from-csv",
+  adminOrSuperAdminAuth,
+  upload.single("file"),
+  updateDealerCatgoryFromCSV
+);
 
 
 module.exports = router;

@@ -22,154 +22,6 @@ const {
   getAllActualYtdReports,
 } = require("../../services/reports/ytdActual.service");
 
-// ============================================
-// MAIN DASHBOARD API (Exact Screenshot Table)
-// ============================================
-// exports.getDashboardSummary = async (req, res) => {
-//   try {
-//     let { start_date, end_date, filters } = req.body;
-//     const user = req.user;
-//     console.log("User: ", user)
-//     const DEBUG_WOD = true;
-
-//     const indiaNow = momentTz().tz("Asia/Kolkata");
-
-//     // If no dates provided → default to real-time safe range
-//     if (!start_date || !end_date) {
-
-//       const yesterday = indiaNow.clone().subtract(1, "day");
-
-//       start_date = yesterday.clone().startOf("month").format("YYYY-MM-DD");
-//       end_date = yesterday.format("YYYY-MM-DD");
-//     }
-
-//     const { dealerCodes = [], mddCodes = [] } =
-//       await getDealerCodesFromFilters(filters, user);
-
-//     const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
-//     const endDate = moment(end_date, "YYYY-MM-DD").endOf("day");
-
-//     const isFullMonth =
-//       startDate.date() === 1 &&
-//       endDate.date() === endDate.daysInMonth();
-
-//     let lmtdStart = startDate.clone().subtract(1, "month");
-//     let lmtdEnd = endDate.clone().subtract(1, "month");
-
-//     if (isFullMonth) {
-//       lmtdStart = lmtdStart.startOf("month");
-//       lmtdEnd = lmtdStart.clone().endOf("month");
-//     }
-
-//     const ftdRawDate = endDate.format("M/D/YY");
-
-//     const baseMonth = moment(startDate);
-
-//     const lastThreeMonths = [
-//       baseMonth.clone().subtract(3, "months").format("YYYY-MM"),
-//       baseMonth.clone().subtract(2, "months").format("YYYY-MM"),
-//       baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
-//     ];
-
-//     const isAdmin =
-//       user?.role === "admin" ||
-//       user?.role === "super_admin";
-
-//     const [activation, tertiary, secondary] = await Promise.all([
-
-//       buildReport(
-//         ActivationData,
-//         "activation_date_raw",
-//         "tertiary_buyer_code",
-//         dealerCodes,
-//         "val",
-//         "qty",
-//         lastThreeMonths,
-//         startDate,
-//         endDate,
-//         lmtdStart,
-//         lmtdEnd,
-//         ftdRawDate,
-//         true,
-//         isAdmin
-//       ),
-
-//       buildReport(
-//         TertiaryData,
-//         "invoice_date_raw",
-//         "dealer_code",
-//         dealerCodes,
-//         "net_value",
-//         "qty",
-//         lastThreeMonths,
-//         startDate,
-//         endDate,
-//         lmtdStart,
-//         lmtdEnd,
-//         ftdRawDate,
-//         true,
-//         isAdmin
-//       ),
-
-//       buildReport(
-//         SecondaryData,
-//         "invoice_date_raw",
-//         "mdd_code",
-//         mddCodes,
-//         "net_value",
-//         "qty",
-//         lastThreeMonths,
-//         startDate,
-//         endDate,
-//         lmtdStart,
-//         lmtdEnd,
-//         ftdRawDate,
-//         false,
-//         isAdmin
-//       ),
-//     ]);
-
-
-//   const wodTables = await getWODSummary(
-//     dealerCodes,
-//     startDate,
-//     endDate,
-//     lmtdStart,
-//     lmtdEnd,
-//     ftdRawDate,
-//     lastThreeMonths,
-//     isAdmin
-//   );
-
-//   const priceSegmentTables = await getPriceSegmentSummaryActivation(
-//     dealerCodes,
-//     startDate,
-//     endDate,
-//     isAdmin
-//     );
-
-//   const priceSegmentTables40k = await getPrice40kSplitSummaryActivation(
-//     dealerCodes,
-//     startDate,
-//     endDate,
-//     isAdmin
-//     );
-
-//     return res.json({
-//       success: true,
-//       activation,
-//       tertiary,
-//       secondary,
-//       wodTables,
-//       priceSegmentTables,
-//       priceSegmentTables40k
-//     });
-
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ success: false, message: error.message });
-//   }
-// };
 
 exports.getDashboardSummary = async (req, res) => {
   try {
@@ -300,6 +152,10 @@ exports.getDashboardSummary = async (req, res) => {
           dealerCodes,
           startDate,
           endDate,
+          lmtdStart,
+          lmtdEnd,
+          ftdRawDate,
+          lastThreeMonths,
           isAdmin
         );
         break;
@@ -309,6 +165,10 @@ exports.getDashboardSummary = async (req, res) => {
           dealerCodes,
           startDate,
           endDate,
+          lmtdStart,
+          lmtdEnd,
+          ftdRawDate,
+          lastThreeMonths,
           isAdmin
         );
         break;

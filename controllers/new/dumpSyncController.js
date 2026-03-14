@@ -782,3 +782,372 @@ exports.uploadTopDealerFromCsv = async (req, res) => {
     return res.status(500).json({ message: "Top dealer CSV sync failed" });
   }
 };
+
+exports.uploadExtractionActiveFromCsv = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ message: "File is required" });
+    }
+
+    const dryRun = String(req.query.dryRun || "false").toLowerCase() === "true";
+
+    console.log("HAS FILE?", !!req.file);
+    console.log("FILE SIZE:", req.file?.size);
+    console.log("ORIGINAL:", req.file?.originalname);
+    console.log("MIMETYPE:", req.file?.mimetype);
+    console.log("FILE FIRST 8 BYTES HEX:", req.file.buffer.slice(0, 8).toString("hex"));
+    console.log("FILE FIRST 20 CHARS:", req.file.buffer.slice(0, 20).toString());
+
+    const originalname = String(req.file.originalname || "").toLowerCase();
+    if (!originalname.endsWith(".csv")) {
+      return res.status(400).json({ message: "Only CSV files are allowed" });
+    }
+
+    const rows = await parseCsvBuffer(req.file.buffer);
+
+    console.log("PARSED ROW COUNT:", rows.length);
+    if (rows.length) {
+      console.log("FIRST ROW KEYS:", Object.keys(rows[0] || {}).slice(0, 20));
+      console.log("FIRST 2 ROWS:", JSON.stringify(rows.slice(0, 2), null, 2));
+    }
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "Empty file (parser returned 0 rows)" });
+    }
+
+    const normalizedRows = [];
+    const invalidRows = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || {};
+
+      const code = String(
+        getRowValue(row, ["code", "Code", "CODE", "user_code", "UserCode", "User Code"])
+      ).trim();
+
+      const rawStatus = getRowValue(row, [
+        "extraction_active",
+        "Extraction Active",
+        "EXTRACTION_ACTIVE",
+        "ExtractionActive",
+        "status",
+        "Status",
+        "STATUS",
+      ]);
+
+      const parsedStatus = parseBoolean(rawStatus);
+
+      if (!code || parsedStatus === null) {
+        invalidRows.push({
+          rowNumber: i + 2,
+          code: code || null,
+          extraction_active: rawStatus ?? null,
+          reason: !code ? "Missing code" : "Invalid extraction_active value",
+        });
+        continue;
+      }
+
+      normalizedRows.push({
+        rowNumber: i + 2,
+        code,
+        extraction_active: parsedStatus,
+      });
+    }
+
+    if (!normalizedRows.length) {
+      return res.status(400).json({
+        message: "No valid code/extraction_active rows found in CSV",
+        invalidRows,
+      });
+    }
+
+    // dedupe by code, last one wins
+    const map = new Map();
+    for (const row of normalizedRows) {
+      map.set(row.code, row);
+    }
+
+    const finalRows = Array.from(map.values());
+    const uniqueCodes = finalRows.map((r) => r.code);
+
+    if (!uniqueCodes.length) {
+      return res.status(400).json({ message: "No valid codes found in file" });
+    }
+
+    const existingUsers = await User.find(
+      { code: { $in: uniqueCodes } },
+      { _id: 1, code: 1, name: 1, extraction_active: 1 }
+    ).lean();
+
+    const existingMap = new Map(
+      existingUsers.map((u) => [String(u.code).trim(), u])
+    );
+
+    const toUpdate = [];
+    const notFoundUsers = [];
+
+    for (const row of finalRows) {
+      const user = existingMap.get(row.code);
+
+      if (!user) {
+        notFoundUsers.push({
+          rowNumber: row.rowNumber,
+          code: row.code,
+          reason: "User not found",
+        });
+        continue;
+      }
+
+      toUpdate.push({
+        userId: user._id,
+        code: row.code,
+        name: user.name || "",
+        extraction_active: row.extraction_active,
+        oldValue:
+          typeof user.extraction_active === "boolean"
+            ? user.extraction_active
+            : undefined,
+      });
+    }
+
+    const summary = {
+      success: true,
+      dryRun,
+      totalRows: rows.length,
+      validRows: normalizedRows.length,
+      uniqueCodesInFile: uniqueCodes.length,
+      foundUsers: toUpdate.length,
+      notFound: notFoundUsers.length,
+      invalidRows: invalidRows.length,
+      toUpdate: toUpdate.length,
+      updated: 0,
+      unchanged: 0,
+      failed: 0,
+      failedUsers: [],
+      skippedUsers: [...invalidRows, ...notFoundUsers],
+    };
+
+    if (dryRun) {
+      return res.json({
+        ...summary,
+        sampleUsers: toUpdate.slice(0, 20),
+      });
+    }
+
+    if (!toUpdate.length) {
+      return res.status(400).json({
+        ...summary,
+        message: "No matching users found to update",
+      });
+    }
+
+    for (const item of toUpdate) {
+      try {
+        const result = await User.updateOne(
+          { _id: item.userId },
+          { $set: { extraction_active: item.extraction_active } }
+        );
+
+        if (result.modifiedCount > 0) {
+          summary.updated += 1;
+        } else {
+          summary.unchanged += 1;
+        }
+      } catch (err) {
+        summary.failed += 1;
+        summary.failedUsers.push({
+          code: item.code,
+          name: item.name,
+          extraction_active: item.extraction_active,
+          reason: err.message || "Update failed",
+        });
+      }
+    }
+
+    summary.message = `Processed ${summary.uniqueCodesInFile} unique codes. Updated ${summary.updated}, unchanged ${summary.unchanged}, failed ${summary.failed}`;
+
+    return res.json(summary);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Extraction active CSV sync failed" });
+  }
+};
+
+exports.updateDealerCatgoryFromCSV = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ message: "File is required" });
+    }
+
+    const dryRun = String(req.query.dryRun || "false").toLowerCase() === "true";
+
+    console.log("HAS FILE?", !!req.file);
+    console.log("FILE SIZE:", req.file?.size);
+    console.log("ORIGINAL:", req.file?.originalname);
+    console.log("MIMETYPE:", req.file?.mimetype);
+    console.log("FILE FIRST 8 BYTES HEX:", req.file.buffer.slice(0, 8).toString("hex"));
+    console.log("FILE FIRST 20 CHARS:", req.file.buffer.slice(0, 20).toString());
+
+    const originalname = String(req.file.originalname || "").toLowerCase();
+    if (!originalname.endsWith(".csv")) {
+      return res.status(400).json({ message: "Only CSV files are allowed" });
+    }
+
+    const rows = await parseCsvBuffer(req.file.buffer);
+
+    console.log("PARSED ROW COUNT:", rows.length);
+    if (rows.length) {
+      console.log("FIRST ROW KEYS:", Object.keys(rows[0] || {}).slice(0, 20));
+      console.log("FIRST 2 ROWS:", JSON.stringify(rows.slice(0, 2), null, 2));
+    }
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "Empty file (parser returned 0 rows)" });
+    }
+
+    const normalizedRows = [];
+    const invalidRows = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || {};
+
+      const code = String(
+        getRowValue(row, ["code", "Code", "CODE", "user_code", "UserCode", "User Code"])
+      ).trim();
+
+      const category = String(
+        getRowValue(row, ["category", "Category", "CATEGORY"])
+      ).trim();
+
+      if (!code || !category) {
+        invalidRows.push({
+          rowNumber: i + 2,
+          code: code || null,
+          category: category || null,
+          reason: !code ? "Missing code" : "Missing category",
+        });
+        continue;
+      }
+
+      normalizedRows.push({
+        rowNumber: i + 2,
+        code,
+        category,
+      });
+    }
+
+    if (!normalizedRows.length) {
+      return res.status(400).json({
+        message: "No valid code/category rows found in CSV",
+        invalidRows,
+      });
+    }
+
+    // dedupe by code, last one wins
+    const map = new Map();
+    for (const row of normalizedRows) {
+      map.set(row.code, row);
+    }
+
+    const finalRows = Array.from(map.values());
+    const uniqueCodes = finalRows.map((r) => r.code);
+
+    if (!uniqueCodes.length) {
+      return res.status(400).json({ message: "No valid codes found in file" });
+    }
+
+    const existingUsers = await User.find(
+      { code: { $in: uniqueCodes } },
+      { _id: 1, code: 1, name: 1, category: 1 }
+    ).lean();
+
+    const existingMap = new Map(
+      existingUsers.map((u) => [String(u.code).trim(), u])
+    );
+
+    const toUpdate = [];
+    const notFoundUsers = [];
+
+    for (const row of finalRows) {
+      const user = existingMap.get(row.code);
+
+      if (!user) {
+        notFoundUsers.push({
+          rowNumber: row.rowNumber,
+          code: row.code,
+          reason: "User not found",
+        });
+        continue;
+      }
+
+      toUpdate.push({
+        userId: user._id,
+        code: row.code,
+        name: user.name || "",
+        category: row.category,
+        oldValue: user.category || undefined,
+      });
+    }
+
+    const summary = {
+      success: true,
+      dryRun,
+      totalRows: rows.length,
+      validRows: normalizedRows.length,
+      uniqueCodesInFile: uniqueCodes.length,
+      foundUsers: toUpdate.length,
+      notFound: notFoundUsers.length,
+      invalidRows: invalidRows.length,
+      toUpdate: toUpdate.length,
+      updated: 0,
+      unchanged: 0,
+      failed: 0,
+      failedUsers: [],
+      skippedUsers: [...invalidRows, ...notFoundUsers],
+    };
+
+    if (dryRun) {
+      return res.json({
+        ...summary,
+        sampleUsers: toUpdate.slice(0, 20),
+      });
+    }
+
+    if (!toUpdate.length) {
+      return res.status(400).json({
+        ...summary,
+        message: "No matching users found to update",
+      });
+    }
+
+    for (const item of toUpdate) {
+      try {
+        const result = await User.updateOne(
+          { _id: item.userId },
+          { $set: { category: item.category } }
+        );
+
+        if (result.modifiedCount > 0) {
+          summary.updated += 1;
+        } else {
+          summary.unchanged += 1;
+        }
+      } catch (err) {
+        summary.failed += 1;
+        summary.failedUsers.push({
+          code: item.code,
+          name: item.name,
+          category: item.category,
+          reason: err.message || "Update failed",
+        });
+      }
+    }
+
+    summary.message = `Processed ${summary.uniqueCodesInFile} unique codes. Updated ${summary.updated}, unchanged ${summary.unchanged}, failed ${summary.failed}`;
+
+    return res.json(summary);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Dealer category CSV sync failed" });
+  }
+};

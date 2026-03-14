@@ -477,7 +477,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
     const results = [];
     console.log("Extraction cp 1");
 
-    // ✅ Only fetch others' data if NOT blocked
     if (!isRestricted) {
       for (let role of roles) {
         const users = await User.find({ position: role });
@@ -505,7 +504,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
 
           let dealers = Array.from(dealerSet);
 
-          // ✅ apply top_outlet filter only when toggle is true
           if (shouldFilterTopOutlet && dealers.length > 0) {
             const topOutletDealers = await User.find(
               {
@@ -524,13 +522,26 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
 
           if (dealers.length === 0) continue;
 
-          const doneDealers = await ExtractionRecord.distinct("dealer", {
+          const doneDealersFromRecord = await ExtractionRecord.distinct("dealer", {
             dealer: { $in: dealers },
             createdAt: { $gte: start, $lte: end },
           });
 
+          const autoDoneDealers = await User.find(
+            {
+              code: { $in: dealers },
+              extraction_active: false,
+            },
+            { code: 1 }
+          ).lean();
+
+          const doneDealerSet = new Set([
+            ...doneDealersFromRecord.map((d) => String(d).trim()),
+            ...autoDoneDealers.map((d) => String(d.code).trim()),
+          ]);
+
           const totalCount = dealers.length;
-          const doneCount = doneDealers.length;
+          const doneCount = doneDealerSet.size;
           const pendingCount = totalCount - doneCount;
           const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
           const pendingPercent = 100 - donePercent;
@@ -551,7 +562,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
       }
     }
 
-    // ✅ Always calculate selfData, even if blocked
     let selfData = null;
 
     const selfFilter = {
@@ -568,7 +578,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
 
     let selfDealerList = Array.from(selfDealers);
 
-    // ✅ apply top_outlet filter to self data also
     if (shouldFilterTopOutlet && selfDealerList.length > 0) {
       const selfTopOutletDealers = await User.find(
         {
@@ -588,13 +597,26 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
     }
 
     if (selfDealerList.length > 0) {
-      const selfDoneDealers = await ExtractionRecord.distinct("dealer", {
+      const selfDoneDealersFromRecord = await ExtractionRecord.distinct("dealer", {
         dealer: { $in: selfDealerList },
         createdAt: { $gte: start, $lte: end },
       });
 
+      const selfAutoDoneDealers = await User.find(
+        {
+          code: { $in: selfDealerList },
+          extraction_active: false,
+        },
+        { code: 1 }
+      ).lean();
+
+      const selfDoneDealerSet = new Set([
+        ...selfDoneDealersFromRecord.map((d) => String(d).trim()),
+        ...selfAutoDoneDealers.map((d) => String(d.code).trim()),
+      ]);
+
       const total = selfDealerList.length;
-      const done = selfDoneDealers.length;
+      const done = selfDoneDealerSet.size;
       const pending = total - done;
       const donePct = total > 0 ? Math.round((done / total) * 100) : 0;
       const pendingPct = 100 - donePct;
@@ -697,145 +719,20 @@ exports.updateExtractionCreatedAtMonthByDateRange = async (req, res) => {
   }
 };
 
-// exports.getExtractionStatusRoleWise = async (req, res) => {
-//   try {
-//     let { roles = [], startDate, endDate } = req.body;
-//     console.log("Extraction start last: ", startDate, endDate);
-//     const { code: userCode, position: userPosition, role: userRole } = req.user;
-
-//     if (!userCode || !userPosition || !userRole) {
-//       return res.status(400).json({ success: false, message: "User authentication required" });
-//     }
-
-//     const blockedRoles = ['tse', 'dealer'];
-//     const isRestricted = blockedRoles.includes(userRole.toLowerCase()) || blockedRoles.includes(userPosition.toLowerCase());
-
-//     if (!Array.isArray(roles) || roles.length === 0) {
-//       roles = ["tse"];
-//     }
-//     console.log("Extraction cp 1");
-
-//     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
-//     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
-
-//     const results = [];
-//     console.log("Extraction cp 2");
-
-//     // ✅ Only fetch others' data if NOT blocked
-//     if (!isRestricted) {
-//       for (let role of roles) {
-//         const users = await User.find({ position: role });
-
-//         for (let user of users) {
-//           const actorCode = user.code;
-
-//           const hierarchyFilter = {
-//             hierarchy_name: "default_sales_flow",
-//             [role]: actorCode
-//           };
-
-//           if (userRole !== "admin") {
-//             hierarchyFilter[userPosition] = userCode;
-//           }
-//           console.log("Extraction cp 3");
-
-//           const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
-//           const dealerSet = new Set();
-//           for (let entry of hierarchyEntries) {
-//             if (entry.dealer) dealerSet.add(entry.dealer);
-//           }
-
-//           const dealers = Array.from(dealerSet);
-//           if (dealers.length === 0) continue;
-
-//           const doneDealers = await ExtractionRecord.distinct("dealer", {
-//             dealer: { $in: dealers },
-//             createdAt: { $gte: start, $lte: end },
-//           });
-
-//           const totalCount = dealers.length;
-//           const doneCount = doneDealers.length;
-//           const pendingCount = totalCount - doneCount;
-//           const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-//           const pendingPercent = 100 - donePercent;
-//           console.log("Extraction cp 4");
-
-//           results.push({
-//             name: user.name || "N/A",
-//             code: actorCode,
-//             position: role.toUpperCase(),
-//             total: totalCount,
-//             done: doneCount,
-//             "Done Percent": `${donePercent}%`,
-//             pending: pendingCount,
-//             "Pending Percent": `${pendingPercent}%`
-//           });
-//         }
-//       }
-//     }
-
-//     // ✅ Always calculate selfData, even if blocked
-//     let selfData = null;
-
-//     const selfFilter = {
-//       hierarchy_name: "default_sales_flow",
-//       [userPosition]: userCode
-//     };
-
-//     const selfEntries = await HierarchyEntries.find(selfFilter);
-//     const selfDealers = new Set();
-
-//     for (let entry of selfEntries) {
-//       if (entry.dealer) selfDealers.add(entry.dealer);
-//     }
-
-//     const selfDealerList = Array.from(selfDealers);
-
-//     if (selfDealerList.length > 0) {
-//       const selfDoneDealers = await ExtractionRecord.distinct("dealer", {
-//         dealer: { $in: selfDealerList },
-//         createdAt: { $gte: start, $lte: end },
-//       });
-
-//       const total = selfDealerList.length;
-//       const done = selfDoneDealers.length;
-//       const pending = total - done;
-//       const donePct = total > 0 ? Math.round((done / total) * 100) : 0;
-//       const pendingPct = 100 - donePct;
-
-//       selfData = {
-//         name: req.user.name || "You",
-//         code: userCode,
-//         position: userPosition.toUpperCase(),
-//         total: total,
-//         done: done,
-//         "Done Percent": `${donePct}%`,
-//         pending: pending,
-//         "Pending Percent": `${pendingPct}%`
-//       };
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       data: results,      // empty if TSE/Dealer
-//       selfData: selfData  // always included if available
-//     });
-
-//   } catch (error) {
-//     console.error("Error in getExtractionStatusRoleWise:", error);
-//     return res.status(500).json({ success: false, message: "Internal Server Error" });
-//   }
-// };
 
 exports.getDealersWithStatusForExtraction = async (req, res) => {
   try {
     console.log("Here!<3")
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, topOutlet = false } = req.query;
     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
 
+    const shouldFilterTopOutlet =
+      String(topOutlet).toLowerCase() === "true" || topOutlet === true;
+
     // 🔐 Get user code (from req.user or fallback to req.query/params)
     const userCode = req.user?.code || req.query.code || req.params.code;
+
     // 🧑‍💼 Fetch position from DB using code
     const user = await User.findOne({ code: userCode });
     if (!user || !user.position) {
@@ -858,7 +755,28 @@ exports.getDealersWithStatusForExtraction = async (req, res) => {
       if (entry.dealer) dealerSet.add(entry.dealer);
     }
 
-    const dealerCodes = Array.from(dealerSet);
+    let dealerCodes = Array.from(dealerSet);
+
+    // ✅ apply top_outlet filter only when toggle is true
+    if (shouldFilterTopOutlet && dealerCodes.length > 0) {
+      const topOutletDealers = await User.find(
+        {
+          code: { $in: dealerCodes },
+          top_outlet: true,
+          role: "dealer",
+        },
+        { code: 1 }
+      ).lean();
+
+      const topOutletDealerSet = new Set(
+        topOutletDealers.map((d) => String(d.code).trim())
+      );
+
+      dealerCodes = dealerCodes.filter((dealerCode) =>
+        topOutletDealerSet.has(String(dealerCode).trim())
+      );
+    }
+
     if (dealerCodes.length === 0) {
       return res.status(200).json({ success: true, dealers: [] });
     }
@@ -869,22 +787,31 @@ exports.getDealersWithStatusForExtraction = async (req, res) => {
       createdAt: { $gte: start, $lte: end },
     });
 
-    const doneSet = new Set(doneDealers);
+    // 🔍 Fetch auto-done dealers (inactive for extraction)
+    const inactiveDealers = await User.distinct("code", {
+      code: { $in: dealerCodes },
+      extraction_active: false,
+      role: "dealer",
+    });
+
+    const doneSet = new Set([
+      ...doneDealers.map((d) => String(d).trim()),
+      ...inactiveDealers.map((d) => String(d).trim()),
+    ]);
 
     // 🧾 Get full dealer info
-      const allDealers = await User.find({ code: { $in: dealerCodes }, role: "dealer" });
+    const allDealers = await User.find({ code: { $in: dealerCodes }, role: "dealer" });
 
-      const dealersWithStatus = allDealers.map(dealer => ({
-        ...dealer.toObject(),
-        status: doneSet.has(dealer.code) ? "done" : "pending"
-      }));
+    const dealersWithStatus = allDealers.map(dealer => ({
+      ...dealer.toObject(),
+      status: doneSet.has(String(dealer.code).trim()) ? "done" : "pending"
+    }));
 
-      // ✅ Sort: Show 'pending' dealers on top
-      dealersWithStatus.sort((a, b) => {
-        if (a.status === b.status) return 0;
-        return a.status === 'pending' ? -1 : 1;
-      });
-
+    // ✅ Sort: Show 'pending' dealers on top
+    dealersWithStatus.sort((a, b) => {
+      if (a.status === b.status) return 0;
+      return a.status === 'pending' ? -1 : 1;
+    });
 
     res.status(200).json({
       success: true,
@@ -2911,7 +2838,7 @@ const buildDealerWiseRows = async ({
   const [dealerUsers, actorUsers] = await Promise.all([
     User.find(
       { code: { $in: dealerCodes } },
-      { code: 1, name: 1, town: 1, top_outlet: 1 }
+      { code: 1, name: 1, town: 1, top_outlet: 1, extraction_active: 1 }
     ).lean(),
     User.find(
       { code: { $in: actorCodes } },
@@ -2963,13 +2890,21 @@ const buildDealerWiseRows = async ({
     .sort({ createdAt: -1 })
     .lean();
 
-  const doneDealerMap = new Map();
-  for (const record of extractionRecords) {
-    const dealerCode = normalizeCode(record.dealer);
-    if (!doneDealerMap.has(dealerCode)) {
-      doneDealerMap.set(dealerCode, record.createdAt);
-    }
+const doneDealerMap = new Map();
+for (const record of extractionRecords) {
+  const dealerCode = normalizeCode(record.dealer);
+  if (!doneDealerMap.has(dealerCode)) {
+    doneDealerMap.set(dealerCode, record.createdAt);
   }
+}
+
+// ✅ mark extraction_active:false dealers as done too
+for (const dealerCode of filteredDealerCodes) {
+  const dealer = dealerMap.get(dealerCode);
+  if (dealer?.extraction_active === false && !doneDealerMap.has(dealerCode)) {
+    doneDealerMap.set(dealerCode, null);
+  }
+}
 
   const rows = filteredEntries.map((entry) => {
     const dealerCode = normalizeCode(entry.dealer);
@@ -3003,8 +2938,8 @@ const buildDealerWiseRows = async ({
       tse_code: tseCode,
       tse_name: tseCode.toUpperCase() === "VACANT" ? "VACANT" : actorMap.get(tseCode)?.name || "",
 
-      status: doneDate ? "DONE" : "PENDING",
-      done_date: formatExcelDate(doneDate),
+      status: doneDealerMap.has(dealerCode) ? "DONE" : "PENDING",
+      done_date: doneDate ? formatExcelDate(doneDate) : "",
     };
   });
 
@@ -3061,7 +2996,7 @@ const buildRoleSummaryRows = async ({ hierarchyEntries, start, end, role }) => {
 
   const dealerUsers = await User.find(
     { code: { $in: dealerCodes } },
-    { code: 1, top_outlet: 1 }
+    { code: 1, top_outlet: 1, extraction_active: 1 }
   ).lean();
 
   const dealerTopOutletMap = new Map();
@@ -3080,6 +3015,14 @@ const buildRoleSummaryRows = async ({ hierarchyEntries, start, end, role }) => {
   const doneDealerSet = new Set(
     extractionRecords.map((item) => normalizeCode(item.dealer)).filter(Boolean)
   );
+
+  // ✅ add extraction_active:false dealers also as done
+  dealerUsers.forEach((dealer) => {
+    const dealerCode = normalizeCode(dealer.code);
+    if (dealer?.extraction_active === false) {
+      doneDealerSet.add(dealerCode);
+    }
+  });
 
   const summaryMap = new Map();
 
@@ -3221,3 +3164,263 @@ exports.downloadExtractionStatusRoleWiseExcel = async (req, res) => {
     });
   }
 };
+
+
+
+
+// backups 
+// exports.getExtractionStatusRoleWise = async (req, res) => {
+//   try {
+//     let { roles = [], startDate, endDate, topOutlet = false } = req.body;
+//     console.log("Extraction start last: ", startDate, endDate, "topOutlet:", topOutlet);
+
+//     const { code: userCode, position: userPosition, role: userRole } = req.user;
+
+//     if (!userCode || !userPosition || !userRole) {
+//       return res.status(400).json({ success: false, message: "User authentication required" });
+//     }
+
+//     const blockedRoles = ["tse", "dealer"];
+//     const isRestricted =
+//       blockedRoles.includes(String(userRole).toLowerCase()) ||
+//       blockedRoles.includes(String(userPosition).toLowerCase());
+
+//     if (!Array.isArray(roles) || roles.length === 0) {
+//       roles = ["tse"];
+//     }
+
+//     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+//     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+
+//     const shouldFilterTopOutlet = String(topOutlet).toLowerCase() === "true" || topOutlet === true;
+
+//     const results = [];
+//     console.log("Extraction cp 1");
+
+//     // ✅ Only fetch others' data if NOT blocked
+//     if (!isRestricted) {
+//       for (let role of roles) {
+//         const users = await User.find({ position: role });
+
+//         for (let user of users) {
+//           const actorCode = user.code;
+
+//           const hierarchyFilter = {
+//             hierarchy_name: "default_sales_flow",
+//             [role]: actorCode,
+//           };
+
+//           if (userRole !== "admin") {
+//             hierarchyFilter[userPosition] = userCode;
+//           }
+
+//           console.log("Extraction cp 2");
+
+//           const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
+
+//           const dealerSet = new Set();
+//           for (let entry of hierarchyEntries) {
+//             if (entry.dealer) dealerSet.add(String(entry.dealer).trim());
+//           }
+
+//           let dealers = Array.from(dealerSet);
+
+//           // ✅ apply top_outlet filter only when toggle is true
+//           if (shouldFilterTopOutlet && dealers.length > 0) {
+//             const topOutletDealers = await User.find(
+//               {
+//                 code: { $in: dealers },
+//                 top_outlet: true,
+//               },
+//               { code: 1 }
+//             ).lean();
+
+//             const topOutletDealerSet = new Set(
+//               topOutletDealers.map((d) => String(d.code).trim())
+//             );
+
+//             dealers = dealers.filter((dealerCode) => topOutletDealerSet.has(String(dealerCode).trim()));
+//           }
+
+//           if (dealers.length === 0) continue;
+
+//           const doneDealers = await ExtractionRecord.distinct("dealer", {
+//             dealer: { $in: dealers },
+//             createdAt: { $gte: start, $lte: end },
+//           });
+
+//           const totalCount = dealers.length;
+//           const doneCount = doneDealers.length;
+//           const pendingCount = totalCount - doneCount;
+//           const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+//           const pendingPercent = 100 - donePercent;
+
+//           console.log("Extraction cp 3");
+
+//           results.push({
+//             name: user.name || "N/A",
+//             code: actorCode,
+//             position: role.toUpperCase(),
+//             total: totalCount,
+//             done: doneCount,
+//             "Done Percent": `${donePercent}%`,
+//             pending: pendingCount,
+//             "Pending Percent": `${pendingPercent}%`,
+//           });
+//         }
+//       }
+//     }
+
+//     // ✅ Always calculate selfData, even if blocked
+//     let selfData = null;
+
+//     const selfFilter = {
+//       hierarchy_name: "default_sales_flow",
+//       [userPosition]: userCode,
+//     };
+
+//     const selfEntries = await HierarchyEntries.find(selfFilter);
+//     const selfDealers = new Set();
+
+//     for (let entry of selfEntries) {
+//       if (entry.dealer) selfDealers.add(String(entry.dealer).trim());
+//     }
+
+//     let selfDealerList = Array.from(selfDealers);
+
+//     // ✅ apply top_outlet filter to self data also
+//     if (shouldFilterTopOutlet && selfDealerList.length > 0) {
+//       const selfTopOutletDealers = await User.find(
+//         {
+//           code: { $in: selfDealerList },
+//           top_outlet: true,
+//         },
+//         { code: 1 }
+//       ).lean();
+
+//       const selfTopOutletDealerSet = new Set(
+//         selfTopOutletDealers.map((d) => String(d.code).trim())
+//       );
+
+//       selfDealerList = selfDealerList.filter((dealerCode) =>
+//         selfTopOutletDealerSet.has(String(dealerCode).trim())
+//       );
+//     }
+
+//     if (selfDealerList.length > 0) {
+//       const selfDoneDealers = await ExtractionRecord.distinct("dealer", {
+//         dealer: { $in: selfDealerList },
+//         createdAt: { $gte: start, $lte: end },
+//       });
+
+//       const total = selfDealerList.length;
+//       const done = selfDoneDealers.length;
+//       const pending = total - done;
+//       const donePct = total > 0 ? Math.round((done / total) * 100) : 0;
+//       const pendingPct = 100 - donePct;
+
+//       selfData = {
+//         name: req.user.name || "You",
+//         code: userCode,
+//         position: userPosition.toUpperCase(),
+//         total: total,
+//         done: done,
+//         "Done Percent": `${donePct}%`,
+//         pending: pending,
+//         "Pending Percent": `${pendingPct}%`,
+//       };
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       data: results,
+//       selfData: selfData,
+//     });
+//   } catch (error) {
+//     console.error("Error in getExtractionStatusRoleWise:", error);
+//     return res.status(500).json({ success: false, message: "Internal Server Error" });
+//   }
+// };
+
+
+// exports.getDealersWithStatusForExtraction = async (req, res) => {
+//   try {
+//     console.log("Here!<3")
+//     const { startDate, endDat, topOutlet } = req.query;
+//     const start = startDate ? new Date(startDate) : moment().startOf("month").toDate();
+//     const end = endDate ? new Date(endDate) : moment().endOf("month").toDate();
+//     const shouldFilterTopOutlet =
+//     String(topOutlet).toLowerCase() === "true" || topOutlet === true;
+    
+
+//     // 🔐 Get user code (from req.user or fallback to req.query/params)
+//     const userCode = req.user?.code || req.query.code || req.params.code;
+//     // 🧑‍💼 Fetch position from DB using code
+//     const user = await User.findOne({ code: userCode });
+//     if (!user || !user.position) {
+//       return res.status(404).json({ success: false, message: "User not found or position missing" });
+//     }
+//     const userPosition = user.position;
+
+//     if (!userCode || !userPosition) {
+//       return res.status(400).json({ success: false, message: "User code and position required" });
+//     }
+
+//     // 🔍 Get hierarchy entries for that user
+//     const hierarchyEntries = await HierarchyEntries.find({
+//       hierarchy_name: "default_sales_flow",
+//       [userPosition]: userCode,
+//     });
+
+//     const dealerSet = new Set();
+//     for (let entry of hierarchyEntries) {
+//       if (entry.dealer) dealerSet.add(entry.dealer);
+//     }
+
+//     const dealerCodes = Array.from(dealerSet);
+//     if (dealerCodes.length === 0) {
+//       return res.status(200).json({ success: true, dealers: [] });
+//     }
+
+//       // 🔍 Fetch extraction done dealers
+//       const doneDealers = await ExtractionRecord.distinct("dealer", {
+//         dealer: { $in: dealerCodes },
+//         createdAt: { $gte: start, $lte: end },
+//       });
+
+//       // 🔍 Fetch auto-done dealers (inactive for extraction)
+//       const inactiveDealers = await User.distinct("code", {
+//         code: { $in: dealerCodes },
+//         extraction_active: false,
+//         role: "dealer",
+//       });
+
+//       const doneSet = new Set([
+//         ...doneDealers.map((d) => String(d).trim()),
+//         ...inactiveDealers.map((d) => String(d).trim()),
+//       ]);
+
+//     // 🧾 Get full dealer info
+//       const allDealers = await User.find({ code: { $in: dealerCodes }, role: "dealer" });
+
+//       const dealersWithStatus = allDealers.map(dealer => ({
+//         ...dealer.toObject(),
+//         status: doneSet.has(String(dealer.code).trim()) ? "done" : "pending"
+//       }));
+//       // ✅ Sort: Show 'pending' dealers on top
+//       dealersWithStatus.sort((a, b) => {
+//         if (a.status === b.status) return 0;
+//         return a.status === 'pending' ? -1 : 1;
+//       });
+
+
+//     res.status(200).json({
+//       success: true,
+//       dealers: dealersWithStatus,
+//     });
+
+//   } catch (error) {
+//     console.error("Error in getDealersWithStatus:", error);
+//     res.status(500).json({ success: false, message: "Internal Server Error" });
+//   }
+// };
