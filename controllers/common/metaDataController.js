@@ -687,7 +687,7 @@ exports.getSidebar = async (req, res) => {
 // ------------------------------
 const adminSidebar = () => [
   { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
-  { name: "Sales Dashboard", route: "sales_dashboard", icon: "barChart2" },
+  { name: "Sales Dashboard", route: "sales_dashboard_new", icon: "barChart2" },
   {
     name: "Extraction",
     icon: "database",
