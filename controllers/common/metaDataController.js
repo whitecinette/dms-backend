@@ -693,7 +693,7 @@ const adminSidebar = () => [
     icon: "database",
     children: [
       { name: "Add Data", route: "extraction_add", icon: "plusCircle" },
-      { name: "View Status", route: "extraction_status", icon: "clipboardList" },
+      { name: "View Status", route: "extraction_status_new", icon: "clipboardList" },
       { name: "Report", route: "extraction_report", icon: "fileText" },
     ],
   },

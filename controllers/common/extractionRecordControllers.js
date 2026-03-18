@@ -478,7 +478,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
     const shouldFilterTopOutlet = String(topOutlet).toLowerCase() === "true" || topOutlet === true;
 
     const results = [];
-    console.log("Extraction cp 1");
 
     if (!isRestricted) {
       for (let role of roles) {
@@ -496,7 +495,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
             hierarchyFilter[userPosition] = userCode;
           }
 
-          console.log("Extraction cp 2");
 
           const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter);
 
@@ -549,7 +547,6 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
           const donePercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
           const pendingPercent = 100 - donePercent;
 
-          console.log("Extraction cp 3");
 
           results.push({
             name: user.name || "N/A",

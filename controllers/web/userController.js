@@ -89,6 +89,7 @@ exports.registerUserForApp = async (req, res) => {
 // sessionchange 
 exports.loginUserForApp = async (req, res) => {
   const START = Date.now();
+  console.log("LC1 Reaching")
 
   const dlog = (tag, obj) => {
     try {
@@ -109,6 +110,7 @@ exports.loginUserForApp = async (req, res) => {
     const normalizedCode = String(code).trim();
 
     const user = await User.findOne({ code: normalizedCode });
+    console.log("LC2 code:", code)
     if (!user) return res.status(401).json({ message: "Invalid code or unauthorized access" });
 
     const isMatch = await bcrypt.compare(password, user.password);
