@@ -2,6 +2,7 @@ const moment = require("moment");
 const ActivationData = require("../../model/ActivationData");
 const Product = require("../../model/Product");
 const HierarchyEntries = require("../../model/HierarchyEntries");
+const User = require("../../model/User");
 
 
 exports.getTopSellingBySegment = async (req, res) => {
@@ -94,6 +95,26 @@ exports.getTopSellingBySegment = async (req, res) => {
     }
 
     // -----------------------------
+    // DEALER MAP
+    // -----------------------------
+    const dealerCodes = [
+      ...new Set(
+        activations
+          .map((a) => a.tertiary_buyer_code)
+          .filter(Boolean)
+      ),
+    ];
+
+    const dealerDocs = await User.find(
+      { code: { $in: dealerCodes } },
+      { code: 1, name: 1, town: 1 }
+    ).lean();
+
+    const dealerMap = {};
+    dealerDocs.forEach((d) => {
+      dealerMap[d.code] = d;
+    });
+    // -----------------------------
     // AGGREGATION
     // -----------------------------
     const result = {};
@@ -115,20 +136,23 @@ exports.getTopSellingBySegment = async (req, res) => {
 
       if (!result[segment]) result[segment] = {};
 
-      if (!result[segment][key]) {
-        result[segment][key] = {
-          model: a.model_no || "-",
-          name: product?.product_name || a.model_no || a.product_code || "-",
-          segment,
-          dp: price,
-          LM: 0,
-          MTD: 0,
-          total: 0,
-          totalValue: 0,
-          MTDValue: 0,
-          LMValue: 0,
-        };
-      }
+    if (!result[segment][key]) {
+      result[segment][key] = {
+        model: a.model_no || "-",
+        name: product?.product_name || a.model_no || a.product_code || "-",
+        segment,
+        dp: price,
+        LM: 0,
+        MTD: 0,
+        total: 0,
+        totalValue: 0,
+        MTDValue: 0,
+        LMValue: 0,
+
+        // 🔥 ADD THIS
+        dealerStats: {},
+      };
+    }
 
       // CURRENT FILTER RANGE
       if (invoiceDate >= start.toDate() && invoiceDate <= end.toDate()) {
@@ -136,6 +160,22 @@ exports.getTopSellingBySegment = async (req, res) => {
         result[segment][key].total += qty;
         result[segment][key].MTDValue += val;
         result[segment][key].totalValue += val;
+
+        const dealerCode = a.tertiary_buyer_code || "UNKNOWN";
+        const dealerInfo = dealerMap[dealerCode] || {};
+
+        if (!result[segment][key].dealerStats[dealerCode]) {
+          result[segment][key].dealerStats[dealerCode] = {
+            dealerCode,
+            dealerName: dealerInfo.name || dealerCode,
+            town: dealerInfo.town || "",
+            totalQty: 0,
+            totalValue: 0,
+          };
+        }
+
+        result[segment][key].dealerStats[dealerCode].totalQty += qty;
+        result[segment][key].dealerStats[dealerCode].totalValue += val;
       }
 
       // PREVIOUS MONTH
@@ -151,9 +191,25 @@ exports.getTopSellingBySegment = async (req, res) => {
     const finalData = {};
 
     Object.keys(result).forEach((segment) => {
-      finalData[segment] = Object.values(result[segment]).sort(
-        (a, b) => safeNum(b.total) - safeNum(a.total)
-      );
+      finalData[segment] = Object.values(result[segment])
+        .map((row) => {
+          const dealers = Object.values(row.dealerStats || {});
+
+          const topDealersByVolume = [...dealers]
+            .sort((a, b) => safeNum(b.totalQty) - safeNum(a.totalQty))
+            .slice(0, 3);
+
+          const topDealersByValue = [...dealers]
+            .sort((a, b) => safeNum(b.totalValue) - safeNum(a.totalValue))
+            .slice(0, 3);
+
+          return {
+            ...row,
+            topDealersByVolume,
+            topDealersByValue,
+          };
+        })
+        .sort((a, b) => safeNum(b.total) - safeNum(a.total));
     });
 
     // -----------------------------
