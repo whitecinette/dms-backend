@@ -1,6 +1,6 @@
 const express = require("express");
 const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
-const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone } = require("../controllers/new/dataPolice");
+const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise } = require("../controllers/new/dataPolice");
 const router = express.Router();
 
 
@@ -28,5 +28,12 @@ router.put(
   adminOrSuperAdminAuth,
   renameSmartphoneCategoryToSmartPhone
 );
+
+router.post(
+  "/download-market-sales-data-month-wise",
+  adminOrSuperAdminAuth,
+  downloadMarketSalesDataDownloadMonthWise
+);
+
 
 module.exports = router;

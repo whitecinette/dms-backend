@@ -3041,6 +3041,334 @@ exports.downloadExtractionStatusRoleWiseExcel = async (req, res) => {
 
 
 
+exports.downloadExtractionMonthWiseExcel = async (req, res) => {
+  try {
+    let {
+      month,
+      year,
+      smd = [],
+      zsm = [],
+      asm = [],
+      mdd = [],
+      tse = [],
+      dealer = [],
+      topOutlet = null,
+      extractionActive = null,
+    } = req.body;
+
+    const { code: userCode, position: userPosition, role: userRole } = req.user;
+
+    if (!userCode || !userPosition || !userRole) {
+      return res.status(400).json({
+        success: false,
+        message: "User authentication required",
+      });
+    }
+
+    month = Number(month);
+    year = Number(year);
+
+    if (!month || !year || month < 1 || month > 12) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid month and year are required",
+      });
+    }
+
+    if (typeof smd === "string") smd = smd ? smd.split(",") : [];
+    if (typeof zsm === "string") zsm = zsm ? zsm.split(",") : [];
+    if (typeof asm === "string") asm = asm ? asm.split(",") : [];
+    if (typeof mdd === "string") mdd = mdd ? mdd.split(",") : [];
+    if (typeof tse === "string") tse = tse ? tse.split(",") : [];
+    if (typeof dealer === "string") dealer = dealer ? dealer.split(",") : [];
+
+    const start = moment
+      .utc({ year, month: month - 1, day: 1 })
+      .startOf("day")
+      .toDate();
+
+    const end = moment.utc(start).add(1, "month").toDate();
+
+    const hierarchyFilter = {
+      hierarchy_name: "default_sales_flow",
+    };
+
+    if (smd.length) hierarchyFilter.smd = { $in: smd };
+    if (zsm.length) hierarchyFilter.zsm = { $in: zsm };
+    if (asm.length) hierarchyFilter.asm = { $in: asm };
+    if (mdd.length) hierarchyFilter.mdd = { $in: mdd };
+    if (tse.length) hierarchyFilter.tse = { $in: tse };
+    if (dealer.length) hierarchyFilter.dealer = { $in: dealer };
+
+    // Optional role-based restriction from logged-in user
+    // Adjust this if your access rules are different
+    if (userRole !== "admin") {
+      if (userPosition === "smd") hierarchyFilter.smd = userCode;
+      if (userPosition === "zsm") hierarchyFilter.zsm = userCode;
+      if (userPosition === "asm") hierarchyFilter.asm = userCode;
+      if (userPosition === "mdd") hierarchyFilter.mdd = userCode;
+      if (userPosition === "tse") hierarchyFilter.tse = userCode;
+      if (userPosition === "dealer") hierarchyFilter.dealer = userCode;
+    }
+
+    const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+
+    if (!hierarchyEntries.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No hierarchy entries found",
+      });
+    }
+
+    const hierarchyMap = {};
+    const dealerCodes = [];
+    const actorCodesSet = new Set();
+
+    hierarchyEntries.forEach((entry) => {
+      if (entry.dealer) {
+        hierarchyMap[entry.dealer] = entry;
+        dealerCodes.push(entry.dealer);
+      }
+
+      if (entry.smd && entry.smd !== "VACANT") actorCodesSet.add(entry.smd);
+      if (entry.zsm && entry.zsm !== "VACANT") actorCodesSet.add(entry.zsm);
+      if (entry.asm && entry.asm !== "VACANT") actorCodesSet.add(entry.asm);
+      if (entry.mdd && entry.mdd !== "VACANT") actorCodesSet.add(entry.mdd);
+      if (entry.tse && entry.tse !== "VACANT") actorCodesSet.add(entry.tse);
+      if (entry.dealer && entry.dealer !== "VACANT") actorCodesSet.add(entry.dealer);
+    });
+
+    const uniqueDealerCodes = [...new Set(dealerCodes)];
+
+    const dealerUserFilter = {
+      code: { $in: uniqueDealerCodes },
+    };
+
+    if (topOutlet === true) dealerUserFilter.top_outlet = true;
+    if (topOutlet === false && req.body.hasOwnProperty("topOutlet")) {
+      dealerUserFilter.top_outlet = false;
+    }
+
+    if (extractionActive === true) dealerUserFilter.extraction_active = true;
+    if (
+      extractionActive === false &&
+      req.body.hasOwnProperty("extractionActive")
+    ) {
+      dealerUserFilter.extraction_active = false;
+    }
+
+    const dealerUsers = await User.find(
+      dealerUserFilter,
+      {
+        code: 1,
+        name: 1,
+        top_outlet: 1,
+        extraction_active: 1,
+        latitude: 1,
+        longitude: 1,
+        district: 1,
+        taluka: 1,
+        zone: 1,
+        town: 1,
+        _id: 0,
+      }
+    ).lean();
+
+    if (!dealerUsers.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No dealer users found",
+      });
+    }
+
+    const dealerUserMap = {};
+    const filteredDealerCodes = [];
+
+    dealerUsers.forEach((user) => {
+      dealerUserMap[user.code] = user;
+      filteredDealerCodes.push(user.code);
+    });
+
+    const actorCodeDocs = await ActorCode.find(
+      { code: { $in: Array.from(actorCodesSet) } },
+      { code: 1, name: 1, position: 1, _id: 0 }
+    ).lean();
+
+    const actorCodeMap = {};
+    actorCodeDocs.forEach((item) => {
+      actorCodeMap[item.code] = {
+        name: item.name || "",
+        position: item.position || "",
+      };
+    });
+
+    const extractionRecords = await ExtractionRecord.find({
+      dealer: { $in: filteredDealerCodes },
+      createdAt: { $gte: start, $lt: end },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!extractionRecords.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No extraction records found for selected month/year",
+      });
+    }
+
+    const rows = extractionRecords.map((record, index) => {
+      const hierarchy = hierarchyMap[record.dealer] || {};
+      const dealerUser = dealerUserMap[record.dealer] || {};
+
+      const smdCode = hierarchy.smd || "";
+      const zsmCode = hierarchy.zsm || "";
+      const asmCode = hierarchy.asm || "";
+      const mddCode = hierarchy.mdd || "";
+      const tseCode = hierarchy.tse || "";
+      const dealerCode = hierarchy.dealer || record.dealer || "";
+
+      return {
+        sr_no: index + 1,
+
+        uploaded_by: record.uploaded_by || "",
+        extraction_date: record.createdAt
+          ? moment(record.createdAt).format("DD-MM-YYYY")
+          : "",
+        extraction_time: record.createdAt
+          ? moment(record.createdAt).format("HH:mm:ss")
+          : "",
+        month: record.month || String(month),
+
+        dealer_code: dealerCode,
+        dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
+        top_outlet:
+          dealerUser.top_outlet === true
+            ? "Yes"
+            : dealerUser.top_outlet === false
+            ? "No"
+            : "",
+        extraction_active:
+          dealerUser.extraction_active === true
+            ? "Yes"
+            : dealerUser.extraction_active === false
+            ? "No"
+            : "",
+       dealer_latitude:
+  dealerUser.latitude !== undefined && dealerUser.latitude !== null
+    ? Number(dealerUser.latitude.toString())
+    : "",
+dealer_longitude:
+  dealerUser.longitude !== undefined && dealerUser.longitude !== null
+    ? Number(dealerUser.longitude.toString())
+    : "",
+
+        smd_code: smdCode,
+        smd_name: actorCodeMap[smdCode]?.name || "",
+
+        zsm_code: zsmCode,
+        zsm_name: actorCodeMap[zsmCode]?.name || "",
+
+        asm_code: asmCode,
+        asm_name: actorCodeMap[asmCode]?.name || "",
+
+        mdd_code: mddCode,
+        mdd_name: actorCodeMap[mddCode]?.name || "",
+
+        tse_code: tseCode,
+        tse_name: actorCodeMap[tseCode]?.name || "",
+
+        brand: record.brand || "",
+        product_code: record.product_code || "",
+        product_name: record.product_name || "",
+        product_category: record.product_category || "",
+        segment: record.segment || "",
+        price: record.price || 0,
+        quantity: record.quantity || 0,
+        amount: record.amount || 0,
+      };
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "OpenAI";
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet("Extraction Records");
+
+    worksheet.columns = [
+      { header: "SR NO", key: "sr_no", width: 10 },
+      { header: "UPLOADED BY", key: "uploaded_by", width: 18 },
+      { header: "EXTRACTION DATE", key: "extraction_date", width: 16 },
+      { header: "EXTRACTION TIME", key: "extraction_time", width: 14 },
+      { header: "MONTH", key: "month", width: 10 },
+
+      { header: "DEALER CODE", key: "dealer_code", width: 18 },
+      { header: "DEALER NAME", key: "dealer_name", width: 28 },
+      { header: "TOP OUTLET", key: "top_outlet", width: 14 },
+      { header: "EXTRACTION ACTIVE", key: "extraction_active", width: 18 },
+      { header: "DEALER LATITUDE", key: "dealer_latitude", width: 18 },
+      { header: "DEALER LONGITUDE", key: "dealer_longitude", width: 18 },
+
+      { header: "SMD CODE", key: "smd_code", width: 16 },
+      { header: "SMD NAME", key: "smd_name", width: 24 },
+
+      { header: "ZSM CODE", key: "zsm_code", width: 16 },
+      { header: "ZSM NAME", key: "zsm_name", width: 24 },
+
+      { header: "ASM CODE", key: "asm_code", width: 16 },
+      { header: "ASM NAME", key: "asm_name", width: 24 },
+
+      { header: "MDD CODE", key: "mdd_code", width: 16 },
+      { header: "MDD NAME", key: "mdd_name", width: 24 },
+
+      { header: "TSE CODE", key: "tse_code", width: 16 },
+      { header: "TSE NAME", key: "tse_name", width: 24 },
+
+      { header: "BRAND", key: "brand", width: 16 },
+      { header: "PRODUCT CODE", key: "product_code", width: 28 },
+      { header: "PRODUCT NAME", key: "product_name", width: 28 },
+      { header: "PRODUCT CATEGORY", key: "product_category", width: 20 },
+      { header: "SEGMENT", key: "segment", width: 14 },
+      { header: "PRICE", key: "price", width: 12 },
+      { header: "QUANTITY", key: "quantity", width: 12 },
+      { header: "AMOUNT", key: "amount", width: 14 },
+    ];
+
+    rows.forEach((row) => {
+      worksheet.addRow(row);
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).alignment = { vertical: "middle", horizontal: "center" };
+
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.alignment = { vertical: "middle", horizontal: "left" };
+      });
+    });
+
+    const fileName = `Extraction_Month_Wise_${String(month).padStart(
+      2,
+      "0"
+    )}_${year}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    return res.end();
+  } catch (error) {
+    console.error("Error in downloadExtractionMonthWiseExcel:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+
 
 // backups 
 // exports.getExtractionStatusRoleWise = async (req, res) => {

@@ -1,5 +1,5 @@
 const express = require('express');
-const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction, downloadExtractionStatusRoleWiseExcel, updateExtractionCreatedAtMonthByDateRange, getExtractionReportForAdminFromActivation } = require('../controllers/common/extractionRecordControllers');
+const { addExtractionRecord, getDealerDropdownForExtraction, addExtractionRecordsFromApp, getCurrentMonthExtractionsForUser, getExtractionStatus, getExtractionRecords,getExtractionRecordsForDownload, getExtractionReport, getExtractionReportForAdmin, getExtractionReportForAsm, getExtractionReportForMdd, getHierarchyFilters, getExtractionStatusRoleWise, getDealersWithStatusForExtraction, downloadExtractionStatusRoleWiseExcel, updateExtractionCreatedAtMonthByDateRange, getExtractionReportForAdminFromActivation, downloadExtractionMonthWiseExcel } = require('../controllers/common/extractionRecordControllers');
 const { userAuth, adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
 const router = express.Router();
 
@@ -21,6 +21,11 @@ router.post(
   adminOrSuperAdminAuth,
   downloadExtractionStatusRoleWiseExcel
   
+);
+router.post(
+  "/download-extraction-month-wise-excel",
+  userAuth,
+  downloadExtractionMonthWiseExcel
 );
 router.put(
   "/extraction/update-createdat-month-by-date-range",
