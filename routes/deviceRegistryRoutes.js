@@ -1,13 +1,23 @@
 const express = require('express');
-const { adminOrSuperAdminAuth } = require('../middlewares/authmiddlewares');
-const { getPendingDevices, approveDeviceByAdmin, blockDeviceByAdmin, logoutSessionByAdmin, logoutAllSessionsByCode, getSessions } = require('../controllers/new/deviceRegistryController');
+const { adminOrSuperAdminAuth, superAdminAuth } = require('../middlewares/authmiddlewares');
+const { getDevicesAndSessions, updateDeviceStatus, deleteDevice, revokeSession } = require('../controllers/new/deviceRegistryController');
 const router = express.Router();
 
-router.get("/admin/pending-devices", adminOrSuperAdminAuth, getPendingDevices);
-router.post("/admin/approve-device", adminOrSuperAdminAuth, approveDeviceByAdmin);
-router.post("/admin/block-device", adminOrSuperAdminAuth, blockDeviceByAdmin);
-router.post("/admin/logout-session/:sessionId", adminOrSuperAdminAuth, logoutSessionByAdmin);
-router.post("/admin/logout-all/:code", adminOrSuperAdminAuth, logoutAllSessionsByCode);
-router.get("/admin/sessions", adminOrSuperAdminAuth, getSessions);
+
+// ===============================
+// DEVICES + SESSIONS (MAIN)
+// ===============================
+router.get("/admin/devices-sessions", superAdminAuth, getDevicesAndSessions);
+
+// ===============================
+// DEVICE ACTIONS
+// ===============================
+router.post("/admin/delete-device", superAdminAuth, deleteDevice);
+router.post("/admin/update-device-status", superAdminAuth, updateDeviceStatus);
+
+// ===============================
+// SESSION ACTIONS
+// ===============================
+router.post("/admin/revoke-session", superAdminAuth, revokeSession);
 
 module.exports = router;

@@ -50,7 +50,11 @@ exports.superAdminAuth = async (req, res, next) => {
     }
 
     // ✅ use decoded.id, but you can also use decoded.code if you prefer
-    const user = await User.findOne({ _id: decoded.id, role: "super_admin" });
+    const user = await User.findById(decoded.id);
+
+    if (!user || user.role !== "super_admin") {
+      return res.status(403).json({ message: "Access Denied. Super Admin only." });
+    }
     if (!user) {
       return res.status(401).send({ message: "Access Denied. You are not a super Admin" });
     }
