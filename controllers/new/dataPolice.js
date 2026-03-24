@@ -12,6 +12,9 @@ const User = require("../../model/User");
 const ActorCode = require("../../model/ActorCode");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 
+const { Readable } = require("stream");
+const csv = require("csv-parser");
+
 
 // =====================================================
 // GET PRODUCTS NOT IN PRODUCT MASTER
@@ -1018,6 +1021,637 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
+    });
+  }
+};
+
+
+
+//update upsert user/actocode
+
+
+function parseCsvBuffer(buffer) {
+  return new Promise((resolve, reject) => {
+    const rows = [];
+
+    Readable.from(buffer)
+      .pipe(csv())
+      .on("data", (data) => rows.push(data))
+      .on("end", () => resolve(rows))
+      .on("error", (err) => reject(err));
+  });
+}
+
+function parseBoolean(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+
+  if (["true", "1", "yes", "y", "on"].includes(v)) return true;
+  if (["false", "0", "no", "n", "off"].includes(v)) return false;
+
+  return false;
+}
+
+function normalizeKey(key = "") {
+  return String(key)
+    .trim()
+    .replace(/\uFEFF/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^\w]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+}
+
+function parseValue(value) {
+  if (value === undefined || value === null) return value;
+
+  const str = String(value).trim();
+
+  if (str === "") return "";
+
+  const lower = str.toLowerCase();
+
+  if (lower === "true") return true;
+  if (lower === "false") return false;
+  if (lower === "null") return null;
+  if (lower === "undefined") return undefined;
+
+  if (!Number.isNaN(Number(str)) && str !== "") {
+    return Number(str);
+  }
+
+  return str;
+}
+
+function getCodeFromRow(row = {}) {
+  const possibleKeys = [
+    "code",
+    "Code",
+    "CODE",
+    "user_code",
+    "User Code",
+    "USER CODE",
+    "USER_CODE",
+    "actorCode",
+    "actor_code",
+    "Actor Code",
+    "employee_code",
+    "Employee Code",
+  ];
+
+  for (const key of possibleKeys) {
+    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) {
+      return String(row[key]).trim();
+    }
+  }
+
+  return "";
+}
+
+function cleanObject(obj = {}) {
+  const cleaned = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) continue;
+    cleaned[key] = value;
+  }
+
+  return cleaned;
+}
+
+function buildUserPayload(rowData = {}, existingDoc = null, createNewFieldsUser = false) {
+  const payload = {};
+
+  for (const [key, value] of Object.entries(rowData)) {
+    if (
+      [
+        "code",
+        "user_code",
+        "actor_code",
+        "actorcode",
+        "employee_code",
+      ].includes(key)
+    ) {
+      continue;
+    }
+
+    if (createNewFieldsUser) {
+      payload[key] = value;
+    } else if (existingDoc && Object.prototype.hasOwnProperty.call(existingDoc, key)) {
+      payload[key] = value;
+    }
+  }
+
+  return cleanObject(payload);
+}
+
+function buildActorPayload(rowData = {}, existingDoc = null, createNewFieldsActorCode = false) {
+  const baseFields = ["code", "name", "role", "position", "status"];
+  const payload = {};
+
+  // always try to keep code synced
+  if (rowData.code) {
+    payload.code = rowData.code;
+    payload.actorCode = rowData.code;
+  }
+
+  for (const field of baseFields) {
+    if (rowData[field] !== undefined) {
+      payload[field] = rowData[field];
+    }
+  }
+
+  if (createNewFieldsActorCode) {
+    for (const [key, value] of Object.entries(rowData)) {
+      if (payload[key] !== undefined) continue;
+      payload[key] = value;
+    }
+  } else if (existingDoc) {
+    for (const [key, value] of Object.entries(rowData)) {
+      if (payload[key] !== undefined) continue;
+      if (Object.prototype.hasOwnProperty.call(existingDoc, key)) {
+        payload[key] = value;
+      }
+    }
+  }
+
+  return cleanObject(payload);
+}
+
+exports.uploadUsersDataFromCsvMaster = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV file is required",
+      });
+    }
+
+    const dryRun = String(req.query.dryRun || "false").toLowerCase() === "true";
+    const syncTarget = String(req.body.syncTarget || "both").trim().toLowerCase();
+
+    const createMissingUser = parseBoolean(req.body.createMissingUser);
+    const createMissingActorCode = parseBoolean(req.body.createMissingActorCode);
+
+    const createNewFieldsUser = parseBoolean(req.body.createNewFieldsUser);
+    const createNewFieldsActorCode = parseBoolean(req.body.createNewFieldsActorCode);
+
+    if (!["user", "actorcode", "both"].includes(syncTarget)) {
+      return res.status(400).json({
+        success: false,
+        message: "syncTarget must be one of: user, actorcode, both",
+      });
+    }
+
+    const originalname = String(req.file.originalname || "").toLowerCase();
+    if (!originalname.endsWith(".csv")) {
+      return res.status(400).json({
+        success: false,
+        message: "Only CSV files are allowed",
+      });
+    }
+
+    console.log("==== uploadUsersDataFromCsvMaster ====");
+    console.log("FILE:", req.file.originalname);
+    console.log("SIZE:", req.file.size);
+    console.log("DRY RUN:", dryRun);
+    console.log("SYNC TARGET:", syncTarget);
+    console.log("CREATE MISSING USER:", createMissingUser);
+    console.log("CREATE MISSING ACTORCODE:", createMissingActorCode);
+    console.log("CREATE NEW FIELDS USER:", createNewFieldsUser);
+    console.log("CREATE NEW FIELDS ACTORCODE:", createNewFieldsActorCode);
+
+    const rows = await parseCsvBuffer(req.file.buffer);
+
+    if (!rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV is empty",
+      });
+    }
+
+    const normalizedRows = [];
+    const invalidRows = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const rawRow = rows[i] || {};
+      const code = getCodeFromRow(rawRow);
+
+      if (!code) {
+        invalidRows.push({
+          rowNumber: i + 2,
+          code: null,
+          reason: "Missing code",
+        });
+        continue;
+      }
+
+      const normalizedData = {};
+      for (const [key, value] of Object.entries(rawRow)) {
+        const normalizedKey = normalizeKey(key);
+        normalizedData[normalizedKey] = parseValue(value);
+      }
+
+      normalizedData.code = code;
+
+      normalizedRows.push({
+        rowNumber: i + 2,
+        code,
+        data: normalizedData,
+      });
+    }
+
+    if (!normalizedRows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid rows found in CSV",
+        invalidRows,
+      });
+    }
+
+    // last row wins if duplicate code in CSV
+    const rowMap = new Map();
+    for (const item of normalizedRows) {
+      rowMap.set(item.code, item);
+    }
+
+    const finalRows = Array.from(rowMap.values());
+    const uniqueCodes = finalRows.map((item) => item.code);
+
+    let existingUsers = [];
+    let existingActors = [];
+
+    if (syncTarget === "user" || syncTarget === "both") {
+      existingUsers = await User.find({
+        code: { $in: uniqueCodes },
+      }).lean();
+    }
+
+    if (syncTarget === "actorcode" || syncTarget === "both") {
+      existingActors = await ActorCode.find({
+        $or: [
+          { code: { $in: uniqueCodes } },
+          { actorCode: { $in: uniqueCodes } },
+        ],
+      }).lean();
+    }
+
+    const existingUserMap = new Map(
+      existingUsers.map((item) => [String(item.code).trim(), item])
+    );
+
+    const existingActorMap = new Map();
+    for (const item of existingActors) {
+      if (item.code) {
+        existingActorMap.set(String(item.code).trim(), item);
+      }
+      if (item.actorCode) {
+        existingActorMap.set(String(item.actorCode).trim(), item);
+      }
+    }
+
+    const summary = {
+      success: true,
+      message: dryRun
+        ? "Dry run completed successfully"
+        : "CSV processed successfully",
+      dryRun,
+      syncTarget,
+      totalRows: rows.length,
+      validRows: normalizedRows.length,
+      invalidRowsCount: invalidRows.length,
+      uniqueCodesInFile: uniqueCodes.length,
+      createMissingUser,
+      createMissingActorCode,
+      createNewFieldsUser,
+      createNewFieldsActorCode,
+      invalidRows,
+      user: {
+        willCreate: 0,
+        willUpdate: 0,
+        updated: 0,
+        created: 0,
+        unchanged: 0,
+        failed: 0,
+        skipped: [],
+        failedUsers: [],
+        sampleUsers: [],
+      },
+      actorCode: {
+        willCreate: 0,
+        willUpdate: 0,
+        updated: 0,
+        created: 0,
+        unchanged: 0,
+        failed: 0,
+        skipped: [],
+        failedUsers: [],
+        sampleUsers: [],
+      },
+    };
+
+    const userOps = [];
+    const actorOps = [];
+
+    for (const row of finalRows) {
+      const { code, rowNumber, data } = row;
+
+      // =========================
+      // USER
+      // =========================
+      if (syncTarget === "user" || syncTarget === "both") {
+        const existingUser = existingUserMap.get(code) || null;
+        const userPayload = buildUserPayload(
+          data,
+          existingUser,
+          createNewFieldsUser
+        );
+
+        const hasPayload = Object.keys(userPayload).length > 0;
+
+        if (existingUser) {
+          if (!hasPayload) {
+            summary.user.skipped.push({
+              rowNumber,
+              code,
+              reason: "No matching fields to update in User",
+            });
+          } else {
+            summary.user.willUpdate += 1;
+
+            userOps.push({
+              mode: "update",
+              rowNumber,
+              code,
+              name: data.name || existingUser.name || "",
+              filter: { _id: existingUser._id },
+              payload: userPayload,
+              updatedFields: Object.keys(userPayload),
+            });
+
+            if (summary.user.sampleUsers.length < 20) {
+              summary.user.sampleUsers.push({
+                rowNumber,
+                code,
+                name: data.name || existingUser.name || "",
+                action: "update",
+                updatedFields: Object.keys(userPayload),
+                updatePayload: userPayload,
+              });
+            }
+          }
+        } else {
+          if (!createMissingUser) {
+            summary.user.skipped.push({
+              rowNumber,
+              code,
+              reason: "User not found and createMissingUser is false",
+            });
+          } else {
+            const createPayload = createNewFieldsUser
+              ? { code, ...data }
+              : cleanObject({
+                  code,
+                  name: data.name,
+                  role: data.role,
+                  position: data.position,
+                  status: data.status,
+                });
+
+            if (!Object.keys(createPayload).length) {
+              summary.user.skipped.push({
+                rowNumber,
+                code,
+                reason: "No fields available to create User",
+              });
+            } else {
+              summary.user.willCreate += 1;
+
+              userOps.push({
+                mode: "create",
+                rowNumber,
+                code,
+                name: data.name || "",
+                filter: { code },
+                payload: createPayload,
+                updatedFields: Object.keys(createPayload),
+              });
+
+              if (summary.user.sampleUsers.length < 20) {
+                summary.user.sampleUsers.push({
+                  rowNumber,
+                  code,
+                  name: data.name || "",
+                  action: "create",
+                  updatedFields: Object.keys(createPayload),
+                  updatePayload: createPayload,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // =========================
+      // ACTOR CODE
+      // =========================
+      if (syncTarget === "actorcode" || syncTarget === "both") {
+        const existingActor = existingActorMap.get(code) || null;
+        const actorPayload = buildActorPayload(
+          data,
+          existingActor,
+          createNewFieldsActorCode
+        );
+
+        const hasPayload = Object.keys(actorPayload).length > 0;
+
+        if (existingActor) {
+          if (!hasPayload) {
+            summary.actorCode.skipped.push({
+              rowNumber,
+              code,
+              reason: "No matching fields to update in ActorCode",
+            });
+          } else {
+            summary.actorCode.willUpdate += 1;
+
+            actorOps.push({
+              mode: "update",
+              rowNumber,
+              code,
+              name: data.name || existingActor.name || "",
+              filter: { _id: existingActor._id },
+              payload: actorPayload,
+              updatedFields: Object.keys(actorPayload),
+            });
+
+            if (summary.actorCode.sampleUsers.length < 20) {
+              summary.actorCode.sampleUsers.push({
+                rowNumber,
+                code,
+                name: data.name || existingActor.name || "",
+                action: "update",
+                updatedFields: Object.keys(actorPayload),
+                updatePayload: actorPayload,
+              });
+            }
+          }
+        } else {
+          if (!createMissingActorCode) {
+            summary.actorCode.skipped.push({
+              rowNumber,
+              code,
+              reason: "ActorCode not found and createMissingActorCode is false",
+            });
+          } else {
+            const createPayload = buildActorPayload(
+              data,
+              null,
+              createNewFieldsActorCode || true
+            );
+
+            if (!Object.keys(createPayload).length) {
+              summary.actorCode.skipped.push({
+                rowNumber,
+                code,
+                reason: "No fields available to create ActorCode",
+              });
+            } else {
+              summary.actorCode.willCreate += 1;
+
+              actorOps.push({
+                mode: "create",
+                rowNumber,
+                code,
+                name: data.name || "",
+                filter: {
+                  $or: [{ code }, { actorCode: code }],
+                },
+                payload: createPayload,
+                updatedFields: Object.keys(createPayload),
+              });
+
+              if (summary.actorCode.sampleUsers.length < 20) {
+                summary.actorCode.sampleUsers.push({
+                  rowNumber,
+                  code,
+                  name: data.name || "",
+                  action: "create",
+                  updatedFields: Object.keys(createPayload),
+                  updatePayload: createPayload,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (dryRun) {
+      return res.status(200).json(summary);
+    }
+
+    // =========================
+    // EXECUTE USER OPS
+    // =========================
+    for (const op of userOps) {
+      try {
+        if (op.mode === "update") {
+          const result = await User.updateOne(op.filter, {
+            $set: op.payload,
+          });
+
+          if (result.modifiedCount > 0) {
+            summary.user.updated += 1;
+          } else {
+            summary.user.unchanged += 1;
+          }
+        } else if (op.mode === "create") {
+          const existing = await User.findOne({ code: op.code }).lean();
+
+          if (existing) {
+            const result = await User.updateOne(
+              { _id: existing._id },
+              { $set: op.payload }
+            );
+
+            if (result.modifiedCount > 0) {
+              summary.user.updated += 1;
+            } else {
+              summary.user.unchanged += 1;
+            }
+          } else {
+            await User.create(op.payload);
+            summary.user.created += 1;
+          }
+        }
+      } catch (err) {
+        summary.user.failed += 1;
+        summary.user.failedUsers.push({
+          rowNumber: op.rowNumber,
+          code: op.code,
+          name: op.name || "",
+          action: op.mode,
+          reason: err.message || "User operation failed",
+        });
+      }
+    }
+
+    // =========================
+    // EXECUTE ACTOR OPS
+    // =========================
+    for (const op of actorOps) {
+      try {
+        if (op.mode === "update") {
+          const result = await ActorCode.updateOne(op.filter, {
+            $set: op.payload,
+          });
+
+          if (result.modifiedCount > 0) {
+            summary.actorCode.updated += 1;
+          } else {
+            summary.actorCode.unchanged += 1;
+          }
+        } else if (op.mode === "create") {
+          const existing = await ActorCode.findOne({
+            $or: [{ code: op.code }, { actorCode: op.code }],
+          }).lean();
+
+          if (existing) {
+            const result = await ActorCode.updateOne(
+              { _id: existing._id },
+              { $set: op.payload }
+            );
+
+            if (result.modifiedCount > 0) {
+              summary.actorCode.updated += 1;
+            } else {
+              summary.actorCode.unchanged += 1;
+            }
+          } else {
+            await ActorCode.create(op.payload);
+            summary.actorCode.created += 1;
+          }
+        }
+      } catch (err) {
+        summary.actorCode.failed += 1;
+        summary.actorCode.failedUsers.push({
+          rowNumber: op.rowNumber,
+          code: op.code,
+          name: op.name || "",
+          action: op.mode,
+          reason: err.message || "ActorCode operation failed",
+        });
+      }
+    }
+
+    return res.status(200).json(summary);
+  } catch (err) {
+    console.error("uploadUsersDataFromCsvMaster error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "User master CSV sync failed",
+      error: err.message,
     });
   }
 };
