@@ -7,6 +7,7 @@ const HierarchyEntries = require("../../model/HierarchyEntries");
 const { Parser } = require("json2csv");
 const ActorCode = require("../../model/ActorCode");
 const SalesData = require("../../model/SalesData");
+const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 
 const ActivationData = require("../../model/ActivationData");
 
@@ -641,6 +642,287 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
   } catch (error) {
     console.error("Error in getExtractionStatusRoleWise:", error);
     return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+exports.getExtractionStatusRoleWise = async (req, res) => {
+  try {
+    let { roles = [], startDate, endDate, topOutlet = false } = req.body;
+    console.log("Extraction start last: ", startDate, endDate, "topOutlet:", topOutlet);
+
+    const {
+      code: userCode,
+      position: rawUserPosition,
+      role: rawUserRole,
+      name: userName,
+    } = req.user || {};
+
+    if (!userCode || !rawUserPosition || !rawUserRole) {
+      return res.status(400).json({
+        success: false,
+        message: "User authentication required",
+      });
+    }
+
+    const userPosition = String(rawUserPosition).toLowerCase().trim();
+    const userRole = String(rawUserRole).toLowerCase().trim();
+
+    const blockedRoles = ["tse", "dealer"];
+    const isRestricted =
+      blockedRoles.includes(userRole) || blockedRoles.includes(userPosition);
+
+    const isAdminUser = ["admin", "super_admin"].includes(userRole);
+
+    const start = startDate
+      ? new Date(startDate)
+      : moment().startOf("month").toDate();
+
+    const end = endDate
+      ? new Date(endDate)
+      : moment().endOf("month").toDate();
+
+    const shouldFilterTopOutlet =
+      String(topOutlet).toLowerCase() === "true" || topOutlet === true;
+
+    // ==========================================
+    // ROLE DECISION LOGIC
+    // ==========================================
+    let finalRoles = [];
+
+    if (!isRestricted) {
+      if (isAdminUser) {
+        // admin/super_admin can manually send roles
+        if (!Array.isArray(roles) || roles.length === 0) {
+          finalRoles = ["tse"];
+        } else {
+          finalRoles = roles.map((r) => String(r).toLowerCase().trim());
+        }
+      } else {
+        // employee roles are auto-derived from hierarchy
+        const hierarchyDoc = await ActorTypesHierarchy.findOne({
+          name: "default_sales_flow",
+        }).lean();
+
+        if (
+          !hierarchyDoc ||
+          !Array.isArray(hierarchyDoc.hierarchy) ||
+          hierarchyDoc.hierarchy.length === 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Hierarchy definition not found for default_sales_flow",
+          });
+        }
+
+        const hierarchyOrder = hierarchyDoc.hierarchy.map((item) =>
+          String(item).toLowerCase().trim()
+        );
+
+        const selfIndex = hierarchyOrder.indexOf(userPosition);
+
+        if (selfIndex === -1) {
+          return res.status(400).json({
+            success: false,
+            message: `User position '${userPosition}' not found in hierarchy`,
+          });
+        }
+
+        finalRoles = hierarchyOrder
+          .slice(selfIndex + 1)
+          .filter((role) => role !== "dealer");
+      }
+    }
+
+    const results = [];
+
+    // ==========================================
+    // SUBORDINATE ROLE DATA
+    // ==========================================
+    if (!isRestricted && finalRoles.length > 0) {
+      for (let role of finalRoles) {
+        const users = await User.find(
+          { position: role },
+          { name: 1, code: 1, position: 1 }
+        ).lean();
+
+        for (let user of users) {
+          const actorCode = user.code;
+
+          const hierarchyFilter = {
+            hierarchy_name: "default_sales_flow",
+            [role]: actorCode,
+          };
+
+          // employees should only see users below themselves
+          if (!isAdminUser) {
+            hierarchyFilter[userPosition] = userCode;
+          }
+
+          const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
+
+          const dealerSet = new Set();
+          for (let entry of hierarchyEntries) {
+            if (entry.dealer) dealerSet.add(String(entry.dealer).trim());
+          }
+
+          let dealers = Array.from(dealerSet);
+
+          if (shouldFilterTopOutlet && dealers.length > 0) {
+            const topOutletDealers = await User.find(
+              {
+                code: { $in: dealers },
+                top_outlet: true,
+              },
+              { code: 1 }
+            ).lean();
+
+            const topOutletDealerSet = new Set(
+              topOutletDealers.map((d) => String(d.code).trim())
+            );
+
+            dealers = dealers.filter((dealerCode) =>
+              topOutletDealerSet.has(String(dealerCode).trim())
+            );
+          }
+
+          if (dealers.length === 0) continue;
+
+          const doneDealersFromRecord = await ExtractionRecord.distinct("dealer", {
+            dealer: { $in: dealers },
+            createdAt: { $gte: start, $lte: end },
+          });
+
+          const autoDoneDealers = await User.find(
+            {
+              code: { $in: dealers },
+              extraction_active: false,
+            },
+            { code: 1 }
+          ).lean();
+
+          const doneDealerSet = new Set([
+            ...doneDealersFromRecord.map((d) => String(d).trim()),
+            ...autoDoneDealers.map((d) => String(d.code).trim()),
+          ]);
+
+          const totalCount = dealers.length;
+          const doneCount = doneDealerSet.size;
+          const pendingCount = totalCount - doneCount;
+          const donePercent =
+            totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+          const pendingPercent = 100 - donePercent;
+
+          results.push({
+            name: user.name || "N/A",
+            code: actorCode,
+            position: role.toUpperCase(),
+            total: totalCount,
+            done: doneCount,
+            "Done Percent": `${donePercent}%`,
+            pending: pendingCount,
+            "Pending Percent": `${pendingPercent}%`,
+          });
+        }
+      }
+    }
+
+    // ==========================================
+    // SELF DATA
+    // ==========================================
+    let selfData = null;
+
+    const selfFilter = {
+      hierarchy_name: "default_sales_flow",
+      [userPosition]: userCode,
+    };
+
+    const selfEntries = await HierarchyEntries.find(selfFilter).lean();
+    const selfDealers = new Set();
+
+    for (let entry of selfEntries) {
+      if (entry.dealer) selfDealers.add(String(entry.dealer).trim());
+    }
+
+    let selfDealerList = Array.from(selfDealers);
+
+    if (shouldFilterTopOutlet && selfDealerList.length > 0) {
+      const selfTopOutletDealers = await User.find(
+        {
+          code: { $in: selfDealerList },
+          top_outlet: true,
+        },
+        { code: 1 }
+      ).lean();
+
+      const selfTopOutletDealerSet = new Set(
+        selfTopOutletDealers.map((d) => String(d.code).trim())
+      );
+
+      selfDealerList = selfDealerList.filter((dealerCode) =>
+        selfTopOutletDealerSet.has(String(dealerCode).trim())
+      );
+    }
+
+    if (selfDealerList.length > 0) {
+      const selfDoneDealersFromRecord = await ExtractionRecord.distinct("dealer", {
+        dealer: { $in: selfDealerList },
+        createdAt: { $gte: start, $lte: end },
+      });
+
+      const selfAutoDoneDealers = await User.find(
+        {
+          code: { $in: selfDealerList },
+          extraction_active: false,
+        },
+        { code: 1 }
+      ).lean();
+
+      const selfDoneDealerSet = new Set([
+        ...selfDoneDealersFromRecord.map((d) => String(d).trim()),
+        ...selfAutoDoneDealers.map((d) => String(d.code).trim()),
+      ]);
+
+      const total = selfDealerList.length;
+      const done = selfDoneDealerSet.size;
+      const pending = total - done;
+      const donePct = total > 0 ? Math.round((done / total) * 100) : 0;
+      const pendingPct = 100 - donePct;
+
+      selfData = {
+        name: userName || "You",
+        code: userCode,
+        position: userPosition.toUpperCase(),
+        total: total,
+        done: done,
+        "Done Percent": `${donePct}%`,
+        pending: pending,
+        "Pending Percent": `${pendingPct}%`,
+      };
+    } else {
+      selfData = {
+        name: userName || "You",
+        code: userCode,
+        position: userPosition.toUpperCase(),
+        total: 0,
+        done: 0,
+        "Done Percent": "0%",
+        pending: 0,
+        "Pending Percent": "0%",
+      };
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: results,
+      selfData,
+      rolesUsed: finalRoles,
+    });
+  } catch (error) {
+    console.error("Error in getExtractionStatusRoleWise:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };
 

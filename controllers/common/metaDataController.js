@@ -761,13 +761,16 @@ const asmTseSidebar = () => [
   {
     name: "Extraction",
     icon: "database",
-    children: [{ name: "Add Data", route: "extraction_add", icon: "plusCircle" }],
+    children: [{ name: "Add Data", route: "extraction_add", icon: "plusCircle" },
+            // { name: "View Status", route: "extraction_status_new", icon: "clipboardList" },
+    ],
+    
   },
-  { name: "Route Plan", route: "route_plan", icon: "map" },
+  // { name: "Route Plan", route: "route_plan", icon: "map" },
   {
     name: "Market Coverage",
     icon: "briefcase",
-    children: [{ name: "Beats", route: "market_beats", icon: "route" }],
+    children: [{ name: "Coverage", route: "market_coverage_mark", icon: "route" }],
   },
   {
     name: "HR",
