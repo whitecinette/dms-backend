@@ -2,7 +2,7 @@
 const express = require('express');
 const { uploadMetadata, getEmployeesForAttendanceCount, updateMetadata, listMetadata, bulkUpsertMetadata, downloadMetadata, cleanExtraTimestamps, bulkUpdateLeavesConfig, getActiveFirms, getSidebar } = require('../controllers/common/metaDataController');
 const upload = require("../helpers/multerHelper");
-const {userAuth} = require('../middlewares/authmiddlewares');
+const {userAuth, sessionGuard} = require('../middlewares/authmiddlewares');
 const { getAllEmployeesAdmins } = require('../controllers/admin/toolsController');
 const router = express.Router();
 
@@ -19,7 +19,7 @@ router.put("/leaves-config/bulk/edit", bulkUpdateLeavesConfig);
 
 //new
 router.get("/admin/firms/get-all", userAuth, getActiveFirms);
-router.get("/app/sidebar", userAuth, getSidebar);
+router.get("/app/sidebar", userAuth, sessionGuard, getSidebar);
 
 
 
