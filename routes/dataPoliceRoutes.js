@@ -1,6 +1,6 @@
 const express = require("express");
 const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
-const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise, uploadUsersDataFromCsvMaster } = require("../controllers/new/dataPolice");
+const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise, uploadUsersDataFromCsvMaster, recalculateExtractionSegmentsByDateRange } = require("../controllers/new/dataPolice");
 const { upload } = require("../services/fileUpload");
 const router = express.Router();
 
@@ -40,6 +40,12 @@ router.post("/master/update-users-from-csv",
   adminOrSuperAdminAuth,
   upload.single("file"),
   uploadUsersDataFromCsvMaster,
+);
+
+router.post(
+  "/recalculate-extraction-segments-by-date-range",
+  adminOrSuperAdminAuth,
+  recalculateExtractionSegmentsByDateRange
 );
 
 module.exports = router;

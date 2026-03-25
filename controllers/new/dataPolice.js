@@ -1655,3 +1655,116 @@ exports.uploadUsersDataFromCsvMaster = async (req, res) => {
     });
   }
 };
+
+
+// extraction records 
+
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  const num = Number(value);
+  return Number.isNaN(num) ? 0 : num;
+}
+
+exports.recalculateExtractionSegmentsByDateRange = async (req, res) => {
+  try {
+    let { startDate, endDate } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate or endDate",
+      });
+    }
+
+    // full-day coverage for end date
+    end.setHours(23, 59, 59, 999);
+
+    const records = await ExtractionRecord.find({
+      createdAt: {
+        $gte: start,
+        $lte: end,
+      },
+    }).lean();
+
+    if (!records.length) {
+      return res.status(200).json({
+        success: true,
+        matchedCount: 0,
+        modifiedCount: 0,
+        message: "No extraction records found in given date range",
+      });
+    }
+
+    const bulkOps = [];
+    const preview = [];
+
+    for (const record of records) {
+      const price = toNumber(record.price);
+      const newSegment = bucketFromPrice(price);
+      const oldSegment = String(record.segment || "").trim();
+
+      if (!newSegment || oldSegment === newSegment) continue;
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: record._id },
+          update: {
+            $set: {
+              segment: newSegment,
+            },
+          },
+        },
+      });
+
+      if (preview.length < 20) {
+        preview.push({
+          _id: record._id,
+          dealer: record.dealer,
+          brand: record.brand,
+          product_code: record.product_code,
+          product_name: record.product_name,
+          price: record.price,
+          oldSegment,
+          newSegment,
+          createdAt: record.createdAt,
+        });
+      }
+    }
+
+    if (!bulkOps.length) {
+      return res.status(200).json({
+        success: true,
+        matchedCount: records.length,
+        modifiedCount: 0,
+        message: "All matching extraction records already have correct segments",
+      });
+    }
+
+    const result = await ExtractionRecord.bulkWrite(bulkOps);
+
+    return res.status(200).json({
+      success: true,
+      matchedCount: records.length,
+      modifiedCount: result.modifiedCount || 0,
+      preview,
+      message: "Extraction record segments recalculated successfully",
+    });
+  } catch (error) {
+    console.error("Error in recalculateExtractionSegmentsByDateRange:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
