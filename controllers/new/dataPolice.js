@@ -690,6 +690,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       {
         code: 1,
         name: 1,
+        category: 1,
         top_outlet: 1,
         extraction_active: 1,
         latitude: 1,
@@ -816,6 +817,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
         dealer_code: dealerCode,
         dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
+        dealer_category: dealerUser.category || "",
         top_outlet:
           dealerUser.top_outlet === true
             ? "Yes"
@@ -888,6 +890,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
         dealer_code: dealerCode,
         dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
+        dealer_category: dealerUser.category || "", // ✅ ADD
         top_outlet:
           dealerUser.top_outlet === true
             ? "Yes"
@@ -956,6 +959,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
       { header: "DEALER CODE", key: "dealer_code", width: 18 },
       { header: "DEALER NAME", key: "dealer_name", width: 28 },
+      { header: "DEALER CATEGORY", key: "dealer_category", width: 18 },
       { header: "TOP OUTLET", key: "top_outlet", width: 14 },
       { header: "EXTRACTION ACTIVE", key: "extraction_active", width: 18 },
       { header: "DEALER LATITUDE", key: "dealer_latitude", width: 18 },
