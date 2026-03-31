@@ -1,9 +1,96 @@
 // controllers/common/dynamicDashboardController.js
 
 const MetaData = require("../../model/MetaData");
+const Attendance = require("../../model/Attendance"); // <-- change path only if needed
 
+// ================= HELPERS =================
+const getISTNow = () =>
+  new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+
+const getGreeting = () => {
+  const now = getISTNow();
+  const hour = now.getHours();
+
+  if (hour < 12) return "Good Morning";
+  if (hour < 17) return "Good Afternoon";
+  return "Good Evening";
+};
+
+const countWorkingDaysElapsed = (year, month, todayDate) => {
+  let total = 0;
+
+  for (let day = 1; day <= todayDate; day++) {
+    const d = new Date(Date.UTC(year, month, day));
+    const weekDay = d.getUTCDay(); // 0 = Sunday
+
+    if (weekDay !== 0) {
+      total += 1;
+    }
+  }
+
+  return total;
+};
+
+const getAttendanceOverview = async (code) => {
+  const nowIST = getISTNow();
+  const year = nowIST.getFullYear();
+  const month = nowIST.getMonth();
+  const todayDate = nowIST.getDate();
+
+  const monthStart = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  const todayStart = new Date(Date.UTC(year, month, todayDate, 0, 0, 0, 0));
+  const todayEnd = new Date(Date.UTC(year, month, todayDate, 23, 59, 59, 999));
+  const todayKey = todayStart.toISOString().slice(0, 10);
+
+  const records = await Attendance.find({
+    code,
+    date: { $gte: monthStart, $lte: todayEnd },
+  })
+    .sort({ date: 1 })
+    .lean();
+
+  const presentDaysSet = new Set();
+
+  for (const record of records) {
+    const status = String(record.status || "").toLowerCase();
+
+    const isPresentLike =
+      !!record.punchIn ||
+      Number(record.hoursWorked || 0) > 0 ||
+      status === "present" ||
+      status === "half day";
+
+    if (isPresentLike && record.date) {
+      const dayKey = new Date(record.date).toISOString().slice(0, 10);
+      presentDaysSet.add(dayKey);
+    }
+  }
+
+  const todayRecord = records.find((record) => {
+    if (!record.date) return false;
+    return new Date(record.date).toISOString().slice(0, 10) === todayKey;
+  });
+
+  const currentlyPunchedIn = !!todayRecord?.punchIn && !todayRecord?.punchOut;
+
+  const present = presentDaysSet.size;
+  const total = countWorkingDaysElapsed(year, month, todayDate);
+  const percentage =
+    total > 0 ? Number(((present / total) * 100).toFixed(1)) : 0;
+
+  return {
+    punchIn: currentlyPunchedIn,
+    attendance: {
+      present,
+      total,
+      percentage,
+    },
+  };
+};
+
+// ================= BASE =================
 const getBaseDashboard = (user) => ({
-  greeting: "Good Morning",
+  greeting: getGreeting(),
   quote: "Track progress, close gaps, and grow smarter every day.",
   punchIn: false,
 
@@ -76,6 +163,7 @@ const adminDashboard = (user) => {
       { title: "Add Data", route: "extraction_add", icon: "plusCircle" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Market Coverage", route: "market_coverage", icon: "mapPin" },
+      { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
 
     notifications: [
@@ -107,6 +195,7 @@ const asmDashboard = (user) => {
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
       { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
+      { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
 
     notifications: [
@@ -137,6 +226,7 @@ const mddDashboard = (user) => {
     quickActions: [
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
+      { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
 
     notifications: [
@@ -152,7 +242,6 @@ const mddDashboard = (user) => {
 // ================= ORION ASM =================
 const orionAsmDashboard = (user) => {
   const base = getBaseDashboard(user);
-  console.log("Orion ASM");
 
   return {
     ...base,
@@ -167,7 +256,7 @@ const orionAsmDashboard = (user) => {
     quickActions: [
       {
         title: "Punch In / Out",
-        route: "punch_in_out",   // ✅ FIXED
+        route: "punch_in_out",
         icon: "fingerprint",
       },
     ],
@@ -197,6 +286,7 @@ const defaultDashboard = (user) => {
 
     quickActions: [
       { title: "Profile", route: "profile", icon: "user" },
+      { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
 
     notifications: [
@@ -235,19 +325,24 @@ exports.getDynamicDashboard = async (req, res) => {
 
     if (["admin", "super_admin"].includes(role)) {
       dashboard = adminDashboard(user);
-    } 
-    else if (firm === "ORION" && position === "asm") {
+    } else if (firm === "ORION" && position === "asm") {
       dashboard = orionAsmDashboard(user);
-    } 
-    else if (["asm", "tse"].includes(position)) {
+    } else if (["asm", "tse"].includes(position)) {
       dashboard = asmDashboard(user);
-    } 
-    else if (position === "mdd") {
+    } else if (position === "mdd") {
       dashboard = mddDashboard(user);
-    } 
-    else {
+    } else {
       dashboard = defaultDashboard(user);
     }
+
+    const attendanceOverview = await getAttendanceOverview(user.code);
+
+    dashboard = {
+      ...dashboard,
+      greeting: getGreeting(),
+      punchIn: attendanceOverview.punchIn,
+      attendance: attendanceOverview.attendance,
+    };
 
     return res.json({
       success: true,
