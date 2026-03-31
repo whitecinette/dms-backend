@@ -16,7 +16,8 @@ const {
   getJaipurDealers,
   addAttendanceByAdmin,
   getAddedAttendanceByAdmin,
-  getAttendanceGeoLatest
+  getAttendanceGeoLatest,
+  getTodayAttendanceStatus,
 } = require("../controllers/common/attendanceController");
 const {
   userAuth,
@@ -39,6 +40,8 @@ router.get("/get-attandance", userAuth, getAttendanceForEmployee);
 router.get("/get-attendance/:code", getAttendanceByEmployeeForAdmin);
 router.get("/get-all-attendance", getAttendance);
 // router.get('/dealers/:code', getDealersByEmployeeCode);
+
+router.get("/today-status", userAuth, getTodayAttendanceStatus);
 
 router.get("/get-attendance-by-date/:date", userAuth, getAttendanceByDate);
 router.get("/get-latest-attendance-by-date", userAuth, getLatestAttendance);

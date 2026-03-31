@@ -897,6 +897,61 @@ exports.punchOut = async (req, res) => {
   }
 };
 
+exports.getTodayAttendanceStatus = async (req, res) => {
+  try {
+    const { code } = req.user;
+
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: "User code is missing in token.",
+      });
+    }
+
+    const formattedDate = moment().format("YYYY-MM-DD");
+
+    const attendance = await Attendance.findOne({
+      code,
+      date: formattedDate,
+    }).lean();
+
+    if (!attendance) {
+      return res.status(200).json({
+        success: true,
+        hasPunchedIn: false,
+        hasPunchedOut: false,
+        date: formattedDate,
+        status: "Pending",
+        punchIn: null,
+        punchOut: null,
+        hoursWorked: 0,
+        attendance: null,
+      });
+    }
+
+    const hasPunchedIn = !!attendance.punchIn && !attendance.punchOut;
+    const hasPunchedOut = !!attendance.punchOut;
+
+    return res.status(200).json({
+      success: true,
+      hasPunchedIn,
+      hasPunchedOut,
+      date: formattedDate,
+      status: attendance.status || "Present",
+      punchIn: attendance.punchIn || null,
+      punchOut: attendance.punchOut || null,
+      hoursWorked: attendance.hoursWorked || 0,
+      attendance,
+    });
+  } catch (error) {
+    console.error("Error fetching today attendance status:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching attendance status. Please try again later.",
+    });
+  }
+};
+
 
 
 exports.getAttendance = async (req, res) => {
