@@ -44,22 +44,14 @@ const getBaseDashboard = (user) => ({
     donePercent: 0,
   },
 
-  salesTrend: [
-    { label: "Mon", value: 0 },
-    { label: "Tue", value: 0 },
-    { label: "Wed", value: 0 },
-    { label: "Thu", value: 0 },
-    { label: "Fri", value: 0 },
-    { label: "Sat", value: 0 },
-    { label: "Sun", value: 0 },
-  ],
-
+  salesTrend: [],
   brandMix: [],
   topProducts: [],
   quickActions: [],
   notifications: [],
 });
 
+// ================= ADMIN =================
 const adminDashboard = (user) => {
   const base = getBaseDashboard(user);
 
@@ -78,42 +70,12 @@ const adminDashboard = (user) => {
     ],
 
     quickActions: [
-      {
-        title: "Sales Dashboard",
-        route: "sales_dashboard_new",
-        clickable: true,
-        icon: "barChart2",
-      },
-      {
-        title: "Extraction Status",
-        route: "extraction_status_new",
-        clickable: true,
-        icon: "clipboardList",
-      },
-      {
-        title: "Extraction Report",
-        route: "extraction_report",
-        clickable: true,
-        icon: "fileText",
-      },
-      {
-        title: "Add Data",
-        route: "extraction_add",
-        clickable: true,
-        icon: "plusCircle",
-      },
-      {
-        title: "Route Plan",
-        route: "route_plan",
-        clickable: true,
-        icon: "route",
-      },
-      {
-        title: "Market Coverage",
-        route: "market_coverage",
-        clickable: true,
-        icon: "mapPin",
-      },
+      { title: "Sales Dashboard", route: "sales_dashboard_new", icon: "barChart2" },
+      { title: "Extraction Status", route: "extraction_status_new", icon: "clipboardList" },
+      { title: "Extraction Report", route: "extraction_report", icon: "fileText" },
+      { title: "Add Data", route: "extraction_add", icon: "plusCircle" },
+      { title: "Route Plan", route: "route_plan", icon: "route" },
+      { title: "Market Coverage", route: "market_coverage", icon: "mapPin" },
     ],
 
     notifications: [
@@ -126,6 +88,7 @@ const adminDashboard = (user) => {
   };
 };
 
+// ================= ASM =================
 const asmDashboard = (user) => {
   const base = getBaseDashboard(user);
 
@@ -141,18 +104,9 @@ const asmDashboard = (user) => {
     ],
 
     quickActions: [
-      {
-        title: "Add Extraction",
-        route: "extraction_add",
-        clickable: true,
-        icon: "plusCircle",
-      },
-      {
-        title: "Market Coverage",
-        route: "market_coverage_mark",
-        clickable: true,
-        icon: "route",
-      },
+      { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
+      { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" },
+      { title: "Route Plan", route: "route_plan", icon: "route" },
     ],
 
     notifications: [
@@ -165,6 +119,7 @@ const asmDashboard = (user) => {
   };
 };
 
+// ================= MDD =================
 const mddDashboard = (user) => {
   const base = getBaseDashboard(user);
 
@@ -180,12 +135,8 @@ const mddDashboard = (user) => {
     ],
 
     quickActions: [
-      {
-        title: "Add Extraction",
-        route: "extraction_add",
-        clickable: true,
-        icon: "plusCircle",
-      },
+      { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
+      { title: "Route Plan", route: "route_plan", icon: "route" },
     ],
 
     notifications: [
@@ -198,6 +149,40 @@ const mddDashboard = (user) => {
   };
 };
 
+// ================= ORION ASM =================
+const orionAsmDashboard = (user) => {
+  const base = getBaseDashboard(user);
+  console.log("Orion ASM");
+
+  return {
+    ...base,
+
+    visibleSections: [
+      "hero_header",
+      "attendance",
+      "quick_actions",
+      "notifications",
+    ],
+
+    quickActions: [
+      {
+        title: "Punch In / Out",
+        route: "punch_in_out",   // ✅ FIXED
+        icon: "fingerprint",
+      },
+    ],
+
+    notifications: [
+      {
+        title: "ORION ASM",
+        message: "Complete attendance and market visits daily.",
+        type: "info",
+      },
+    ],
+  };
+};
+
+// ================= DEFAULT =================
 const defaultDashboard = (user) => {
   const base = getBaseDashboard(user);
 
@@ -210,6 +195,10 @@ const defaultDashboard = (user) => {
       "notifications",
     ],
 
+    quickActions: [
+      { title: "Profile", route: "profile", icon: "user" },
+    ],
+
     notifications: [
       {
         title: "Welcome",
@@ -220,9 +209,10 @@ const defaultDashboard = (user) => {
   };
 };
 
+// ================= MAIN CONTROLLER =================
 exports.getDynamicDashboard = async (req, res) => {
   try {
-    console.log("Reaching dynamic dash asm");
+    console.log("Reaching dynamic dash");
 
     const authUser = req.user;
 
@@ -245,13 +235,17 @@ exports.getDynamicDashboard = async (req, res) => {
 
     if (["admin", "super_admin"].includes(role)) {
       dashboard = adminDashboard(user);
-    } else if (firm === "ORION" && position === "asm") {
+    } 
+    else if (firm === "ORION" && position === "asm") {
       dashboard = orionAsmDashboard(user);
-    } else if (["asm", "tse"].includes(position)) {
+    } 
+    else if (["asm", "tse"].includes(position)) {
       dashboard = asmDashboard(user);
-    } else if (position === "mdd") {
+    } 
+    else if (position === "mdd") {
       dashboard = mddDashboard(user);
-    } else {
+    } 
+    else {
       dashboard = defaultDashboard(user);
     }
 
@@ -266,37 +260,4 @@ exports.getDynamicDashboard = async (req, res) => {
       message: "Failed to load dashboard",
     });
   }
-};
-
-const orionAsmDashboard = (user) => {
-  const base = getBaseDashboard(user);
-  console.log("Orion ASM")
-
-  return {
-    ...base,
-
-    visibleSections: [
-      "hero_header",
-      "attendance",
-      "quick_actions",
-      "notifications",
-    ],
-
-    quickActions: [
-      {
-        title: "Punch In / Out",
-        route: "attendance",
-        clickable: true,
-        icon: "plusCircle",
-      },
-    ],
-
-    notifications: [
-      {
-        title: "ORION ASM",
-        message: "Complete attendance and market visits daily.",
-        type: "info",
-      },
-    ],
-  };
 };
