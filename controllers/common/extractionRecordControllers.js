@@ -309,6 +309,7 @@ exports.getCurrentMonthExtractionsForUser = async (req, res) => {
 
     const startIST = new Date(startOfMonth.getTime() + istOffset);
     const endIST = new Date(endOfMonth.getTime() + istOffset);
+    console.log("Extrac rec dates: ", startIST, endIST);
 
     // Fetch extraction records
     const records = await ExtractionRecord.find({

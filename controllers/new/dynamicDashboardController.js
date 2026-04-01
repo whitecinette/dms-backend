@@ -327,7 +327,7 @@ exports.getDynamicDashboard = async (req, res) => {
       dashboard = adminDashboard(user);
     } else if (firm === "ORION" && position === "asm") {
       dashboard = orionAsmDashboard(user);
-    } else if (["asm", "tse"].includes(position)) {
+    } else if (["asm", "tse", "so"].includes(position)) {
       dashboard = asmDashboard(user);
     } else if (position === "mdd") {
       dashboard = mddDashboard(user);
