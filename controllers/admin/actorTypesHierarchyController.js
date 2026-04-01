@@ -181,7 +181,10 @@ exports.getAllActorType = async(req, res) =>{
 
 exports.getHierarchySubordinatesDSF = async (req, res) => {
   try {
-    const userPosition = req.user?.position?.toLowerCase();
+    const userPosition = String(req.user?.position || "")
+    .trim()
+    .toLowerCase();
+
     const userRole = req.user?.role?.toLowerCase();
     console.log("eac", userRole);
 
@@ -190,12 +193,17 @@ exports.getHierarchySubordinatesDSF = async (req, res) => {
       return res.status(404).json({ error: 'Hierarchy not found' });
     }
 
-    const hierarchy = hierarchyDoc.hierarchy;
+    const hierarchy = (hierarchyDoc.hierarchy || []).map(h =>
+      String(h).trim().toLowerCase()
+    );
 
     // If user is admin, return all positions
-    if (userRole === 'admin') {
-      return res.json({ position: userPosition || 'admin', subordinates: hierarchy });
-    }
+  if (["admin", "super_admin"].includes(userRole)) {
+    return res.json({
+      position: userPosition || userRole,
+      subordinates: hierarchy,
+    });
+  }
 
     if (!userPosition) {
       return res.status(400).json({ error: 'User position not found' });
@@ -204,8 +212,16 @@ exports.getHierarchySubordinatesDSF = async (req, res) => {
     const index = hierarchy.indexOf(userPosition);
 
     if (index === -1) {
-      return res.status(400).json({ error: 'User position not in hierarchy' });
+      console.log("⚠️ Position not found:", userPosition);
+      return res.json({
+        position: userPosition,
+        subordinates: [],
+      });
     }
+
+    console.log("USER POSITION RAW:", req.user?.position);
+    console.log("USER POSITION CLEAN:", userPosition);
+    console.log("HIERARCHY:", hierarchy);
 
     const subordinates = hierarchy.slice(index + 1).filter(pos => pos !== 'dealer');
     console.log("Sub: ", subordinates)

@@ -187,12 +187,14 @@ const asmDashboard = (user) => {
       "attendance",
       "top_kpis",
       "sales_overview",
+      "extraction_status",
       "quick_actions",
       "notifications",
     ],
 
     quickActions: [
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
+      { title: "Extraction Status", route: "extraction_status_new", icon: "clipboardList" },
       { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },

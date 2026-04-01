@@ -469,7 +469,7 @@ exports.punchIn = async (req, res) => {
             .filter((role) => role)
         ),
       ];
-      console.log("Queried fields from ActorTypesHierarchy:", fieldsToQuery);
+      // console.log("Queried fields from ActorTypesHierarchy:", fieldsToQuery);
 
       // Fetch HierarchyEntries containing the user's code in any field
       const orQuery = fieldsToQuery.map((key) => ({
