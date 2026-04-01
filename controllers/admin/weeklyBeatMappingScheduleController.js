@@ -770,39 +770,129 @@ const parseLatLong = (val) => {
   return 0.0;
 };
 
+// exports.addDailyBeatMapping = async (req, res) => {
+//   try {
+//     const IST_START = moment().tz("Asia/Kolkata").startOf("day").toDate(); // 12:00 AM IST
+//     const IST_END = moment().tz("Asia/Kolkata").endOf("day").toDate(); // 11:59 PM IST
+
+//     const hierarchy = await HierarchyEntries.find({
+//       hierarchy_name: "default_sales_flow",
+//     });
+
+//     // Step 1: Map ASM to all dealers & MDDs under them
+//     const asmMap = {}; // { asmCode: { dealers: Set, mdds: Set } }
+
+//     hierarchy.forEach((entry) => {
+//       const asm = entry.asm;
+//       if (!asmMap[asm]) {
+//         asmMap[asm] = { dealers: new Set(), mdds: new Set() };
+//       }
+//       if (entry.dealer) asmMap[asm].dealers.add(entry.dealer);
+//       if (entry.mdd) asmMap[asm].mdds.add(entry.mdd);
+//     });
+
+//     let insertedCount = 0;
+
+//     for (const asmCode in asmMap) {
+//       const exists = await WeeklyBeatMappingSchedule.findOne({
+//         code: asmCode,
+//         startDate: IST_START,
+//         endDate: IST_END,
+//       });
+//       if (exists) continue; // Skip if already created
+
+//       const dealerCodes = Array.from(asmMap[asmCode].dealers);
+//       const mddCodes = Array.from(asmMap[asmCode].mdds);
+
+//       const users = await User.find({
+//         code: { $in: [...dealerCodes, ...mddCodes] },
+//         position: { $in: ["dealer", "mdd"] },
+//       });
+
+//       const schedule = users.map((user) => ({
+//         code: user.code,
+//         name: user.name,
+//         latitude: user.latitude || 0.0,
+//         longitude: user.longitude || 0.0,
+//         status: "pending",
+//         distance: null,
+//         district: user.district || "",
+//         taluka: user.taluka || "",
+//         zone: user.zone || "",
+//         position: user.position || "",
+//       }));
+
+//       const total = schedule.length;
+
+//       await WeeklyBeatMappingSchedule.create({
+//         startDate: IST_START,
+//         endDate: IST_END,
+//         code: asmCode,
+//         schedule,
+//         total,
+//         done: 0,
+//         pending: total,
+//       });
+
+//       insertedCount++;
+//     }
+//     if (insertedCount === 0)
+//       return res.status(200).json({
+//         success: true,
+//         message: "Beat mapping already created for today.",
+//         totalMappedASMs: 0,
+//       });
+
+//     return res.status(201).json({
+//       success: true,
+//       message: `${insertedCount} beat mapping created successfully.`,
+//       totalMappedASMs: insertedCount,
+//     });
+//   } catch (error) {
+//     console.error("Error in daily beat mapping:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// };
+
 exports.addDailyBeatMapping = async (req, res) => {
   try {
-    const IST_START = moment().tz("Asia/Kolkata").startOf("day").toDate(); // 12:00 AM IST
-    const IST_END = moment().tz("Asia/Kolkata").endOf("day").toDate(); // 11:59 PM IST
+    const IST_START = moment().tz("Asia/Kolkata").startOf("day").toDate();
+    const IST_END = moment().tz("Asia/Kolkata").endOf("day").toDate();
 
     const hierarchy = await HierarchyEntries.find({
       hierarchy_name: "default_sales_flow",
     });
 
-    // Step 1: Map ASM to all dealers & MDDs under them
-    const asmMap = {}; // { asmCode: { dealers: Set, mdds: Set } }
+    // Map for ASM and SO
+    const actorMap = {}; 
+    // { actorCode: { dealers: Set, mdds: Set } }
 
     hierarchy.forEach((entry) => {
-      const asm = entry.asm;
-      if (!asmMap[asm]) {
-        asmMap[asm] = { dealers: new Set(), mdds: new Set() };
-      }
-      if (entry.dealer) asmMap[asm].dealers.add(entry.dealer);
-      if (entry.mdd) asmMap[asm].mdds.add(entry.mdd);
+      const actors = [entry.asm, entry.so].filter(Boolean);
+
+      actors.forEach((actorCode) => {
+        if (!actorMap[actorCode]) {
+          actorMap[actorCode] = { dealers: new Set(), mdds: new Set() };
+        }
+
+        if (entry.dealer) actorMap[actorCode].dealers.add(entry.dealer);
+        if (entry.mdd) actorMap[actorCode].mdds.add(entry.mdd);
+      });
     });
 
     let insertedCount = 0;
 
-    for (const asmCode in asmMap) {
+    for (const actorCode in actorMap) {
       const exists = await WeeklyBeatMappingSchedule.findOne({
-        code: asmCode,
+        code: actorCode,
         startDate: IST_START,
         endDate: IST_END,
       });
-      if (exists) continue; // Skip if already created
 
-      const dealerCodes = Array.from(asmMap[asmCode].dealers);
-      const mddCodes = Array.from(asmMap[asmCode].mdds);
+      if (exists) continue;
+
+      const dealerCodes = Array.from(actorMap[actorCode].dealers);
+      const mddCodes = Array.from(actorMap[actorCode].mdds);
 
       const users = await User.find({
         code: { $in: [...dealerCodes, ...mddCodes] },
@@ -827,7 +917,7 @@ exports.addDailyBeatMapping = async (req, res) => {
       await WeeklyBeatMappingSchedule.create({
         startDate: IST_START,
         endDate: IST_END,
-        code: asmCode,
+        code: actorCode,
         schedule,
         total,
         done: 0,
@@ -836,17 +926,19 @@ exports.addDailyBeatMapping = async (req, res) => {
 
       insertedCount++;
     }
-    if (insertedCount === 0)
+
+    if (insertedCount === 0) {
       return res.status(200).json({
         success: true,
         message: "Beat mapping already created for today.",
-        totalMappedASMs: 0,
+        totalMappedActors: 0,
       });
+    }
 
     return res.status(201).json({
       success: true,
       message: `${insertedCount} beat mapping created successfully.`,
-      totalMappedASMs: insertedCount,
+      totalMappedActors: insertedCount,
     });
   } catch (error) {
     console.error("Error in daily beat mapping:", error);
