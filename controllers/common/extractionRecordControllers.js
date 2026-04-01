@@ -185,22 +185,6 @@ exports.addExtractionRecordsFromApp = async (req, res) => {
       product_category: product.product_category || "",
     }));
 
-        // Hierarchy-based authorization check for TSEs
-    if (req.user.position === 'tse') {
-      const hierarchyEntry = await HierarchyEntries.findOne({
-        hierarchy_name: 'default_sales_flow',
-        tse: code,
-        dealer: dealer,
-      });
-
-      if (!hierarchyEntry || hierarchyEntry.mdd !== '4782323') {
-        return res.status(201).json({
-          success: true,
-          message: "Sorry you're not authorized to fill extraction data",
-        });
-      }
-    }
-
 
     await ExtractionRecord.insertMany(extractionEntries);
 
