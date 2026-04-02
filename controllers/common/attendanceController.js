@@ -1348,30 +1348,28 @@ exports.getLatestAttendance = async (req, res) => {
       tag,
     } = req.query;
 
-    // 1️⃣ Validate firmCodes if provided
     let userCodes = [];
     let totalEligibleUsers = 0;
+    let firmCodesArray = [];
+
     if (firmCodes) {
-      if (!firmCodes) {
-        return res
-          .status(400)
-          .json({ message: "firmCodes are required in query when provided." });
+      firmCodesArray = String(firmCodes)
+        .split(",")
+        .map((code) => code.trim())
+        .filter(Boolean);
+
+      if (!firmCodesArray.length) {
+        return res.status(400).json({
+          message: "firmCodes must be a comma-separated list.",
+        });
       }
 
-      const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
-      if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
-        return res
-          .status(400)
-          .json({ message: "firmCodes must be a comma-separated list." });
-      }
-
-      // 2️⃣ Find metadata entries where attendance is true
       const metaDataUsers = await MetaData.find({
         firm_code: { $in: firmCodesArray },
         attendance: true,
-      });
+      }).lean();
 
-      userCodes = metaDataUsers.map((meta) => meta.code);
+      userCodes = metaDataUsers.map((meta) => meta.code).filter(Boolean);
       totalEligibleUsers = userCodes.length;
 
       if (totalEligibleUsers === 0) {
@@ -1386,16 +1384,16 @@ exports.getLatestAttendance = async (req, res) => {
       }
     }
 
-    // 3️⃣ Handle firm hierarchy and role-based filtering
     let firmPositions = [];
     if (firms.length) {
-      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } }).lean();
+
       if (!firmData.length) {
         return res.status(400).json({ message: "Invalid firm IDs." });
       }
 
       firmPositions = firmData.reduce((positions, firm) => {
-        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+        if (Array.isArray(firm.hierarchy)) {
           positions.push(...firm.hierarchy);
         }
         return positions;
@@ -1403,8 +1401,9 @@ exports.getLatestAttendance = async (req, res) => {
     }
 
     let employeeFilter = { status: "active" };
+
     if (role === "super_admin" || role === "admin") {
-      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+      employeeFilter.role = { $in: ["admin", "employee", "hr", "super_admin"] };
     } else if (role === "hr") {
       employeeFilter.role = { $in: ["employee"] };
     } else {
@@ -1414,40 +1413,21 @@ exports.getLatestAttendance = async (req, res) => {
     if (firmPositions.length) {
       employeeFilter.position = { $in: firmPositions };
     }
+
     if (tag) {
       const tagArray = Array.isArray(tag) ? tag : [tag];
       employeeFilter.tags = { $in: tagArray };
     }
 
-    // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
     if (firmCodes) {
       employeeFilter.code = { $in: userCodes };
     }
 
-    // 5️⃣ Fetch employees
     const employees = await User.find(
       employeeFilter,
-      "code name position"
+      "code name position role"
     ).lean();
-    // console.log(`Total active employees found: ${employees.length}`);
-    // Log codes present in MetaData but not in active employees
-    if (firmCodes) {
-      const employeeCodes = employees.map((emp) =>
-        emp.code.trim().toLowerCase()
-      );
-      const missingCodes = userCodes.filter(
-        (code) => !employeeCodes.includes(code.trim().toLowerCase())
-      );
-      if (missingCodes.length > 0) {
-        console.log(
-          `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(
-            ", "
-          )}`
-        );
-      } else {
-        console.log("All MetaData codes found in active employees.");
-      }
-    }
+
     if (!employees.length) {
       return res.status(200).json({
         message: "No employees found",
@@ -1459,23 +1439,45 @@ exports.getLatestAttendance = async (req, res) => {
       });
     }
 
-    // 6️⃣ Create employee map
+    const employeeCodes = employees.map((emp) => emp.code).filter(Boolean);
+
+    const metaDocs = await MetaData.find({
+      code: { $in: employeeCodes },
+    })
+      .select("code firm_code")
+      .lean();
+
+    const metaMap = new Map(
+      metaDocs.map((m) => [String(m.code).trim().toLowerCase(), m])
+    );
+
     const employeeMap = employees.reduce((acc, emp) => {
-      acc[emp.code.trim().toLowerCase()] = {
+      const normalizedCode = String(emp.code).trim().toLowerCase();
+      const meta = metaMap.get(normalizedCode);
+
+      acc[normalizedCode] = {
         name: emp.name || emp.code,
         position: emp.position || "Unknown",
+        role: emp.role || "Unknown",
+        firm_code: meta?.firm_code || "N/A",
       };
       return acc;
     }, {});
 
-    // 7️⃣ Apply search filter
     let filteredCodes = employees
       .map((emp) => emp.code)
       .filter((code) => {
-        const normalizedCode = code.trim().toLowerCase();
-        const name = employeeMap[normalizedCode]?.name?.toLowerCase() || "";
+        const normalizedCode = String(code).trim().toLowerCase();
+        const employee = employeeMap[normalizedCode] || {};
         const regex = new RegExp(search, "i");
-        return regex.test(normalizedCode) || regex.test(name);
+
+        return (
+          regex.test(normalizedCode) ||
+          regex.test(employee.name || "") ||
+          regex.test(employee.firm_code || "") ||
+          regex.test(employee.position || "") ||
+          regex.test(employee.role || "")
+        );
       });
 
     if (firmCodes && filteredCodes.length === 0) {
@@ -1489,13 +1491,14 @@ exports.getLatestAttendance = async (req, res) => {
       });
     }
 
-    // 8️⃣ Build date filter
     let dateFilter = {};
     if (date) {
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
+
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
+
       dateFilter = { $gte: startOfDay, $lte: endOfDay };
     } else if (month && year) {
       const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
@@ -1503,15 +1506,13 @@ exports.getLatestAttendance = async (req, res) => {
       dateFilter = { $gte: start, $lte: end };
     }
 
-    // 9️⃣ Fetch attendance records
     const rawRecords = await Attendance.find({
-      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+      ...(Object.keys(dateFilter).length > 0 ? { date: dateFilter } : {}),
       code: { $in: filteredCodes },
     })
       .sort({ date: 1, punchIn: -1 })
       .lean();
 
-    // 10️⃣ Deduplicate records by code and date, prioritizing higher status
     const attendanceMap = new Map();
     const statusPriority = {
       Present: 6,
@@ -1522,9 +1523,10 @@ exports.getLatestAttendance = async (req, res) => {
     };
 
     for (const record of rawRecords) {
-      const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
+      const key = `${String(record.code).trim().toLowerCase()}-${new Date(record.date)
         .toISOString()
         .slice(0, 10)}`;
+
       if (!attendanceMap.has(key)) {
         attendanceMap.set(key, record);
       } else {
@@ -1540,18 +1542,20 @@ exports.getLatestAttendance = async (req, res) => {
 
     let attendanceRecords = Array.from(attendanceMap.values());
 
-    // 11️⃣ Handle absentees for single date
     if (date) {
       const presentCodes = new Set(
-        attendanceRecords.map((r) => r.code.trim().toLowerCase())
+        attendanceRecords.map((r) => String(r.code).trim().toLowerCase())
       );
+
       filteredCodes.forEach((code) => {
-        const normalizedCode = code.trim().toLowerCase();
+        const normalizedCode = String(code).trim().toLowerCase();
         if (!presentCodes.has(normalizedCode)) {
           attendanceRecords.push({
             code,
             name: employeeMap[normalizedCode]?.name || code,
             position: employeeMap[normalizedCode]?.position || "Unknown",
+            role: employeeMap[normalizedCode]?.role || "Unknown",
+            firm_code: employeeMap[normalizedCode]?.firm_code || "N/A",
             status: "Absent",
             date: new Date(date),
           });
@@ -1559,10 +1563,10 @@ exports.getLatestAttendance = async (req, res) => {
       });
     }
 
-    // 12️⃣ Handle absentees for month view
     if (!date && month && year) {
       const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
       const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+
       const allDays = [];
       let d = new Date(startDate);
       while (d <= endDate) {
@@ -1572,7 +1576,7 @@ exports.getLatestAttendance = async (req, res) => {
 
       const dateMap = new Map(
         attendanceRecords.map((record) => [
-          `${record.code.trim().toLowerCase()}-${new Date(record.date)
+          `${String(record.code).trim().toLowerCase()}-${new Date(record.date)
             .toISOString()
             .slice(0, 10)}`,
           record,
@@ -1580,7 +1584,7 @@ exports.getLatestAttendance = async (req, res) => {
       );
 
       for (const code of filteredCodes) {
-        const normalizedCode = code.trim().toLowerCase();
+        const normalizedCode = String(code).trim().toLowerCase();
         for (const day of allDays) {
           const key = `${normalizedCode}-${day.toISOString().slice(0, 10)}`;
           if (!dateMap.has(key)) {
@@ -1588,6 +1592,8 @@ exports.getLatestAttendance = async (req, res) => {
               code,
               name: employeeMap[normalizedCode]?.name || code,
               position: employeeMap[normalizedCode]?.position || "Unknown",
+              role: employeeMap[normalizedCode]?.role || "Unknown",
+              firm_code: employeeMap[normalizedCode]?.firm_code || "N/A",
               status: "Absent",
               date: new Date(day),
             });
@@ -1596,41 +1602,44 @@ exports.getLatestAttendance = async (req, res) => {
       }
     }
 
-    // 13️⃣ Attach name and position
     attendanceRecords = attendanceRecords.map((record) => {
-      const normalizedCode = record.code.trim().toLowerCase();
+      const normalizedCode = String(record.code).trim().toLowerCase();
       const employee = employeeMap[normalizedCode];
+
       return {
         ...record,
         name: employee?.name || record.code,
         position: employee?.position || "Unknown",
+        role: employee?.role || "Unknown",
+        firm_code: employee?.firm_code || "N/A",
       };
     });
 
-    // 14️⃣ Apply status filter
     if (status) {
       attendanceRecords = attendanceRecords.filter(
         (rec) => rec.status === status
       );
     }
 
-    // 15️⃣ Sort by date ASC and status priority DESC
     attendanceRecords.sort((a, b) => {
       const dateA = new Date(a.date).setHours(0, 0, 0, 0);
       const dateB = new Date(b.date).setHours(0, 0, 0, 0);
+
       if (dateA !== dateB) return dateA - dateB;
+
       const priorityA = statusPriority[a.status] || 0;
       const priorityB = statusPriority[b.status] || 0;
       return priorityB - priorityA;
     });
 
-    // 16️⃣ Pagination
     const totalRecords = attendanceRecords.length;
-    const totalPages = Math.ceil(totalRecords / limit);
-    const paginated = attendanceRecords.slice((page - 1) * limit, page * limit);
+    const totalPages = Math.ceil(totalRecords / Number(limit));
+    const paginated = attendanceRecords.slice(
+      (Number(page) - 1) * Number(limit),
+      Number(page) * Number(limit)
+    );
 
-    // 17️⃣ Return response
-    res.status(200).json({
+    return res.status(200).json({
       message: "Attendance summary fetched successfully",
       totalEligibleUsers: firmCodes ? totalEligibleUsers : employees.length,
       currentPage: Number(page),
@@ -1640,12 +1649,13 @@ exports.getLatestAttendance = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching attendance summary:", error);
-    res.status(500).json({
+    return res.status(500).json({
       message: "Error fetching attendance summary",
       error: error.message,
     });
   }
 };
+
 exports.editAttendanceByID = async (req, res) => {
   try {
     const { role } = req.user;
@@ -1712,30 +1722,28 @@ exports.downloadAllAttendance = async (req, res) => {
       tag,
     } = req.query;
 
-    // 1️⃣ Validate firmCodes if provided
     let userCodes = [];
     let totalEligibleUsers = 0;
+    let firmCodesArray = [];
+
     if (firmCodes) {
-      if (!firmCodes) {
-        return res
-          .status(400)
-          .json({ message: "firmCodes are required in query when provided." });
+      firmCodesArray = String(firmCodes)
+        .split(",")
+        .map((code) => code.trim())
+        .filter(Boolean);
+
+      if (!firmCodesArray.length) {
+        return res.status(400).json({
+          message: "firmCodes must be a comma-separated list.",
+        });
       }
 
-      const firmCodesArray = firmCodes.split(",").map((code) => code.trim());
-      if (!Array.isArray(firmCodesArray) || firmCodesArray.length === 0) {
-        return res
-          .status(400)
-          .json({ message: "firmCodes must be a comma-separated list." });
-      }
-
-      // 2️⃣ Find metadata entries where attendance is true
       const metaDataUsers = await MetaData.find({
         firm_code: { $in: firmCodesArray },
         attendance: true,
-      });
+      }).lean();
 
-      userCodes = metaDataUsers.map((meta) => meta.code);
+      userCodes = metaDataUsers.map((meta) => meta.code).filter(Boolean);
       totalEligibleUsers = userCodes.length;
 
       if (totalEligibleUsers === 0) {
@@ -1746,15 +1754,16 @@ exports.downloadAllAttendance = async (req, res) => {
       }
     }
 
-    // 3️⃣ Handle firm hierarchy and role-based filtering
     let firmPositions = [];
     if (firms.length) {
-      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } });
+      const firmData = await ActorTypesHierarchy.find({ _id: { $in: firms } }).lean();
+
       if (!firmData.length) {
         return res.status(400).json({ message: "Invalid firm IDs." });
       }
+
       firmPositions = firmData.reduce((positions, firm) => {
-        if (firm.hierarchy && Array.isArray(firm.hierarchy)) {
+        if (Array.isArray(firm.hierarchy)) {
           positions.push(...firm.hierarchy);
         }
         return positions;
@@ -1762,8 +1771,10 @@ exports.downloadAllAttendance = async (req, res) => {
     }
 
     let employeeFilter = { status: "active" };
+
+    // ✅ include all useful roles instead of restricting too much
     if (role === "super_admin" || role === "admin") {
-      employeeFilter.role = { $in: ["admin", "employee", "hr"] };
+      employeeFilter.role = { $in: ["admin", "employee", "hr", "super_admin"] };
     } else if (role === "hr") {
       employeeFilter.role = { $in: ["employee"] };
     } else {
@@ -1774,41 +1785,19 @@ exports.downloadAllAttendance = async (req, res) => {
       employeeFilter.position = { $in: firmPositions };
     }
 
-    // Add tag filter
     if (tag) {
       const tagArray = Array.isArray(tag) ? tag : [tag];
       employeeFilter.tags = { $in: tagArray };
     }
 
-    // 4️⃣ If firmCodes provided, filter employees by userCodes from MetaData
     if (firmCodes) {
       employeeFilter.code = { $in: userCodes };
     }
 
-    // 5️⃣ Fetch employees with siddha_code
     const employees = await User.find(
       employeeFilter,
-      "code name position tags siddha_code"
+      "code name position tags siddha_code role"
     ).lean();
-
-    // 6️⃣ Log codes present in MetaData but not in active employees
-    if (firmCodes) {
-      const employeeCodes = employees.map((emp) =>
-        emp.code.trim().toLowerCase()
-      );
-      const missingCodes = userCodes.filter(
-        (code) => !employeeCodes.includes(code.trim().toLowerCase())
-      );
-      if (missingCodes.length > 0) {
-        console.log(
-          `Codes in MetaData (attendance: true) but not in active employees: ${missingCodes.join(
-            ", "
-          )}`
-        );
-      } else {
-        console.log("All MetaData codes found in active employees.");
-      }
-    }
 
     if (!employees.length) {
       return res.status(200).json({
@@ -1817,27 +1806,43 @@ exports.downloadAllAttendance = async (req, res) => {
       });
     }
 
-    // 7️⃣ Include siddha_code in employeeMap
+    const employeeCodes = employees.map((emp) => emp.code).filter(Boolean);
+
+    const metaDocs = await MetaData.find({
+      code: { $in: employeeCodes },
+    })
+      .select("code firm_code")
+      .lean();
+
+    const metaMap = new Map(
+      metaDocs.map((m) => [String(m.code).trim().toLowerCase(), m])
+    );
+
     const employeeMap = employees.reduce((acc, emp) => {
-      acc[emp.code.trim().toLowerCase()] = {
-        name: emp.name,
-        position: emp.position,
-        tags: emp.tags,
-        siddha_code: emp.siddha_code,
+      const normalizedCode = String(emp.code).trim().toLowerCase();
+      const meta = metaMap.get(normalizedCode);
+
+      acc[normalizedCode] = {
+        name: emp.name || "Unknown",
+        position: emp.position || "Unknown",
+        role: emp.role || "Unknown",
+        tags: emp.tags || [],
+        siddha_code: emp.siddha_code || "N/A",
+        firm_code: meta?.firm_code || "N/A",
       };
       return acc;
     }, {});
 
-    const employeeCodes = employees.map((emp) => emp.code);
     let attendanceRecords = [];
     let dateFilter = {};
 
-    // 8️⃣ Handle date filtering
     if (date) {
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
+
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
+
       dateFilter = { $gte: startOfDay, $lte: endOfDay };
     } else if (month && year) {
       const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
@@ -1845,9 +1850,8 @@ exports.downloadAllAttendance = async (req, res) => {
       dateFilter = { $gte: start, $lte: end };
     }
 
-    // 9️⃣ Fetch attendance records
     const rawRecords = await Attendance.find({
-      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+      ...(Object.keys(dateFilter).length > 0 ? { date: dateFilter } : {}),
       code: { $in: employeeCodes },
     })
       .sort({ date: 1, punchIn: -1 })
@@ -1863,7 +1867,7 @@ exports.downloadAllAttendance = async (req, res) => {
     };
 
     for (const record of rawRecords) {
-      const key = `${record.code.trim().toLowerCase()}-${new Date(record.date)
+      const key = `${String(record.code).trim().toLowerCase()}-${new Date(record.date)
         .toISOString()
         .slice(0, 10)}`;
 
@@ -1882,18 +1886,19 @@ exports.downloadAllAttendance = async (req, res) => {
 
     attendanceRecords = Array.from(attendanceMap.values());
 
-    // 10️⃣ If a specific date is given (single day), handle absentees
     if (date) {
       const presentCodes = new Set(
-        attendanceRecords.map((r) => r.code.trim().toLowerCase())
+        attendanceRecords.map((r) => String(r.code).trim().toLowerCase())
       );
+
       employees.forEach((emp) => {
-        const empCode = emp.code.trim().toLowerCase();
+        const empCode = String(emp.code).trim().toLowerCase();
         if (!presentCodes.has(empCode)) {
           attendanceRecords.push({
             code: emp.code,
             name: emp.name,
             position: emp.position,
+            role: emp.role,
             status: "Absent",
             date: new Date(date),
             tags: emp.tags,
@@ -1903,7 +1908,6 @@ exports.downloadAllAttendance = async (req, res) => {
       });
     }
 
-    // 11️⃣ If month view, fill absent data for each day and employee
     if (!date && month && year) {
       const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
       const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
@@ -1917,7 +1921,7 @@ exports.downloadAllAttendance = async (req, res) => {
 
       const dateMap = new Map(
         attendanceRecords.map((record) => [
-          `${record.code.trim().toLowerCase()}-${new Date(record.date)
+          `${String(record.code).trim().toLowerCase()}-${new Date(record.date)
             .toISOString()
             .slice(0, 10)}`,
           record,
@@ -1925,7 +1929,7 @@ exports.downloadAllAttendance = async (req, res) => {
       );
 
       for (const emp of employees) {
-        const empCode = emp.code.trim().toLowerCase();
+        const empCode = String(emp.code).trim().toLowerCase();
         for (const day of allDays) {
           const key = `${empCode}-${day.toISOString().slice(0, 10)}`;
           if (!dateMap.has(key)) {
@@ -1933,6 +1937,7 @@ exports.downloadAllAttendance = async (req, res) => {
               code: emp.code,
               name: emp.name,
               position: emp.position,
+              role: emp.role,
               status: "Absent",
               date: new Date(day),
               tags: emp.tags,
@@ -1943,39 +1948,40 @@ exports.downloadAllAttendance = async (req, res) => {
       }
     }
 
-    // 12️⃣ Attach name, position, tags, and siddha_code
     attendanceRecords = attendanceRecords.map((record) => {
-      const normalizedCode = record.code.trim().toLowerCase();
+      const normalizedCode = String(record.code).trim().toLowerCase();
       const employee = employeeMap[normalizedCode];
 
       return {
         ...record,
         name: employee?.name || "Unknown",
         position: employee?.position || "Unknown",
+        role: employee?.role || "Unknown",
         tags: record.tags || employee?.tags || [],
         siddha_code: record.siddha_code || employee?.siddha_code || "N/A",
+        firm_code: employee?.firm_code || "N/A",
       };
     });
 
-    // 13️⃣ Filter by search
     if (search) {
       const regex = new RegExp(search, "i");
       attendanceRecords = attendanceRecords.filter(
         (rec) =>
-          regex.test(rec.code) ||
-          regex.test(rec.name) ||
-          regex.test(rec.siddha_code)
+          regex.test(rec.code || "") ||
+          regex.test(rec.name || "") ||
+          regex.test(rec.siddha_code || "") ||
+          regex.test(rec.firm_code || "") ||
+          regex.test(rec.position || "") ||
+          regex.test(rec.role || "")
       );
     }
 
-    // 14️⃣ Filter by status
     if (status) {
       attendanceRecords = attendanceRecords.filter(
         (rec) => rec.status === status
       );
     }
 
-    // 15️⃣ Sort by date ASC, and within each date, by status priority DESC
     attendanceRecords.sort((a, b) => {
       const dateA = new Date(a.date).setHours(0, 0, 0, 0);
       const dateB = new Date(b.date).setHours(0, 0, 0, 0);
@@ -1987,12 +1993,13 @@ exports.downloadAllAttendance = async (req, res) => {
       return priorityB - priorityA;
     });
 
-    // 16️⃣ Format data for CSV export
     const formattedAttendance = attendanceRecords.map((record) => ({
       Name: record.name || "Unknown",
-      Code: record.code,
+      Code: record.code || "N/A",
       "Siddha Code": record.siddha_code || "N/A",
+      Role: record.role || "Unknown",
       Position: record.position || "Unknown",
+      Firm: record.firm_code || "N/A",
       Date: record.date
         ? new Date(record.date).toISOString().split("T")[0]
         : "N/A",
@@ -2001,12 +2008,12 @@ exports.downloadAllAttendance = async (req, res) => {
             timeZone: "Asia/Kolkata",
           })
         : "N/A",
-      "Punch In Out": record.punchOut
+      "Punch Out Time": record.punchOut
         ? new Date(record.punchOut).toLocaleTimeString("en-IN", {
             timeZone: "Asia/Kolkata",
           })
         : "N/A",
-      Status: record.status,
+      Status: record.status || "N/A",
       "Working Hours": record.hoursWorked || "0",
       Tags:
         Array.isArray(record.tags) && record.tags.length
@@ -2018,14 +2025,17 @@ exports.downloadAllAttendance = async (req, res) => {
       "Name",
       "Code",
       "Siddha Code",
+      "Role",
       "Position",
+      "Firm",
       "Date",
       "Punch In Time",
-      "Punch In Out",
+      "Punch Out Time",
       "Status",
       "Working Hours",
       "Tags",
     ];
+
     const parser = new Parser({ fields });
     const csv = parser.parse(formattedAttendance);
 
@@ -2070,6 +2080,49 @@ exports.deleteAttendanceByID = async (req, res) => {
       success: false,
       message: "Internal server error",
       error: err.message,
+    });
+  }
+};
+
+exports.getAttendanceFirmOptions = async (req, res) => {
+  try {
+    const firms = await MetaData.aggregate([
+      {
+        $match: {
+          firm_code: { $exists: true, $ne: null, $ne: "" },
+        },
+      },
+      {
+        $group: {
+          _id: "$firm_code",
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          code: "$_id",
+          name: "$_id",
+          label: "$_id",
+          count: 1,
+        },
+      },
+      {
+        $sort: { code: 1 },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance firm options fetched successfully",
+      data: firms,
+    });
+  } catch (error) {
+    console.error("getAttendanceFirmOptions error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch attendance firm options",
+      error: error.message,
     });
   }
 };

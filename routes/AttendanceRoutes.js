@@ -18,6 +18,7 @@ const {
   getAddedAttendanceByAdmin,
   getAttendanceGeoLatest,
   getTodayAttendanceStatus,
+  getAttendanceFirmOptions,
 } = require("../controllers/common/attendanceController");
 const {
   userAuth,
@@ -46,6 +47,11 @@ router.get("/today-status", userAuth, getTodayAttendanceStatus);
 router.get("/get-attendance-by-date/:date", userAuth, getAttendanceByDate);
 router.get("/get-latest-attendance-by-date", userAuth, getLatestAttendance);
 router.put("/edit-attendance/:id", userAuth, editAttendanceByID);
+router.get(
+  "/attendance-firm-options",
+  userAuth,
+  getAttendanceFirmOptions
+);
 
 router.get("/attendance/geo-latest", userAuth, getAttendanceGeoLatest);
 router.get(
