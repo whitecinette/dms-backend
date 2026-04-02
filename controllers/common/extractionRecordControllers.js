@@ -3296,3 +3296,120 @@ dealer_longitude:
 };
 
 
+
+
+
+
+// caution 
+
+exports.deleteDuplicateExtractionRecordsByMonth = async (req, res) => {
+  try {
+    const { uploadedBy, month } = req.body;
+
+    if (!uploadedBy || !month) {
+      return res.status(400).json({
+        success: false,
+        message: "uploadedBy and month are required",
+      });
+    }
+
+    // expected format: YYYY-MM
+    const [year, monthNum] = month.split("-").map(Number);
+
+    if (
+      !year ||
+      !monthNum ||
+      monthNum < 1 ||
+      monthNum > 12 ||
+      String(year).length !== 4
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "month must be in YYYY-MM format",
+      });
+    }
+
+    const startDate = new Date(Date.UTC(year, monthNum - 1, 1, 0, 0, 0, 0));
+    const endDate = new Date(Date.UTC(year, monthNum, 1, 0, 0, 0, 0));
+
+    // Find duplicate groups
+    const duplicateGroups = await ExtractionRecord.aggregate([
+      {
+        $match: {
+          uploaded_by: uploadedBy,
+          createdAt: {
+            $gte: startDate,
+            $lt: endDate,
+          },
+        },
+      },
+      {
+        $sort: {
+          createdAt: 1,
+          _id: 1,
+        },
+      },
+      {
+        $group: {
+          _id: {
+            uploaded_by: "$uploaded_by",
+            dealer: "$dealer",
+            product_code: "$product_code",
+            amount: "$amount",
+          },
+          ids: { $push: "$_id" },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $match: {
+          count: { $gt: 1 },
+        },
+      },
+    ]);
+
+    if (!duplicateGroups.length) {
+      return res.status(200).json({
+        success: true,
+        message: "No duplicate records found for this uploader and month",
+        totalDuplicateGroups: 0,
+        totalDeletedRecords: 0,
+      });
+    }
+
+    const idsToDelete = [];
+
+    for (const group of duplicateGroups) {
+      // keep first record, delete rest
+      const duplicateIds = group.ids.slice(1);
+      idsToDelete.push(...duplicateIds);
+    }
+
+    let deletedCount = 0;
+
+    if (idsToDelete.length > 0) {
+      const deleteResult = await ExtractionRecord.deleteMany({
+        _id: { $in: idsToDelete },
+      });
+
+      deletedCount = deleteResult.deletedCount || 0;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Duplicate extraction records deleted successfully",
+      uploadedBy,
+      month,
+      totalDuplicateGroups: duplicateGroups.length,
+      totalDeletedRecords: deletedCount,
+      deletedIds: idsToDelete,
+    });
+  } catch (error) {
+    console.error("deleteDuplicateExtractionRecordsByMonth error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while deleting duplicate extraction records",
+      error: error.message,
+    });
+  }
+};
