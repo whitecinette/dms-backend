@@ -465,7 +465,7 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
     const isRestricted =
       blockedRoles.includes(userRole) || blockedRoles.includes(userPosition);
 
-    const isAdminUser = ["admin", "super_admin"].includes(userRole);
+    const isAdminUser = ["admin", "super_admin", "hr"].includes(userRole);
 
     const start = startDate
       ? new Date(startDate)
@@ -625,11 +625,13 @@ exports.getExtractionStatusRoleWise = async (req, res) => {
     // ==========================================
     let selfData = null;
 
-    const selfFilter = {
+    let selfFilter = {
       hierarchy_name: "default_sales_flow",
-      [userPosition]: userCode,
     };
 
+    if (!isAdminUser) {
+      selfFilter[userPosition] = userCode;
+    }
     const selfEntries = await HierarchyEntries.find(selfFilter).lean();
     const selfDealers = new Set();
 
@@ -2402,6 +2404,12 @@ exports.getHierarchyFilters = async (req, res) => {
 };
 
 
+/* ---------------------------------- */
+/*\   */
+/* ---------------------------------- *//* ---------------------------------- */
+/* DOWNLOAD EXTRACTION STATUS     */
+/* ---------------------------------- */
+
 
 
 const normalizeCode = (value) => String(value || "").trim();
@@ -2600,9 +2608,12 @@ const buildDealerWiseRows = async ({
     hierarchy_name: "default_sales_flow",
   };
 
-  if (String(userRole).toLowerCase() !== "admin") {
-    hierarchyFilter[userPosition] = userCode;
-  }
+    const normalizedRole = String(userRole || "").toLowerCase().trim();
+    const isBypassRole = ["admin", "super_admin", "hr"].includes(normalizedRole);
+
+    if (!isBypassRole) {
+      hierarchyFilter[userPosition] = userCode;
+    }
 
   const hierarchyEntries = await HierarchyEntries.find(hierarchyFilter).lean();
 
@@ -2965,6 +2976,12 @@ exports.downloadExtractionStatusRoleWiseExcel = async (req, res) => {
     });
   }
 };
+
+/* ---------------------------------- */
+/*\   */
+/* ---------------------------------- *//* ---------------------------------- */
+/* DOWNLOAD EXTRACTION STATUS     */
+/* ---------------------------------- */
 
 
 

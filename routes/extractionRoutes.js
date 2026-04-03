@@ -18,7 +18,7 @@ router.post("/user/extraction-dealers-w-status", getDealersWithStatusForExtracti
 router.get("/admin/get-extraction-records/download",  getExtractionRecordsForDownload);
 router.post(
   "/user/extraction-status-role-wise/download",
-  adminOrSuperAdminAuth,
+  userAuth,
   downloadExtractionStatusRoleWiseExcel
   
 );
