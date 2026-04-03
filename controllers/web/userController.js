@@ -165,9 +165,15 @@ exports.loginUserForApp = async (req, res) => {
       });
     }
 
-    // ✅ SINGLE SESSION (optional via env)
-    const SINGLE = String(process.env.FLUTTER_SINGLE_SESSION || "true") === "true";
-    if (SINGLE) {
+
+    // ✅ SINGLE SESSION for normal users, MULTI SESSION for admin/super_admin
+    const GLOBAL_SINGLE = String(process.env.FLUTTER_SINGLE_SESSION || "true") === "true";
+
+    const allowMultiSessionRoles = ["admin", "super_admin"];
+    const shouldEnforceSingleSession =
+      GLOBAL_SINGLE && !allowMultiSessionRoles.includes(user.role);
+
+    if (shouldEnforceSingleSession) {
       await Session.updateMany(
         { code: normalizedCode, status: "active" },
         { $set: { status: "revoked", logoutTime: new Date() } }
