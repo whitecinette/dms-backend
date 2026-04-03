@@ -163,6 +163,7 @@ const adminDashboard = (user) => {
       { title: "Add Data", route: "extraction_add", icon: "plusCircle" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Market Coverage", route: "market_coverage", icon: "mapPin" },
+      { title: "Geotagging", route: "geo_tagging", icon: "map" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
 
@@ -196,6 +197,7 @@ const asmDashboard = (user) => {
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
       { title: "Extraction Status", route: "extraction_status_new", icon: "clipboardList" },
       { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" },
+      { title: "Geotagging", route: "geo_tagging", icon: "map" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],

@@ -657,7 +657,7 @@ exports.getSidebar = async (req, res) => {
     // ✅ 5️⃣ Otherwise, use firm-based logic
     else if (firm === "SiddhaCorp_01") {
       if (position === "zsm") sidebar = zsmSidebar();
-      else if (["asm", "tse"].includes(position)) sidebar = asmTseSidebar();
+      else if (["asm", "tse", "so"].includes(position)) sidebar = asmTseSidebar();
       else sidebar = restSidebar();
     } 
     
