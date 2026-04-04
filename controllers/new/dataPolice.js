@@ -571,7 +571,11 @@ const normalizeMongoNumber = (value) => {
 };
 
 exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
+    console.log("DOWNLOAD HIT");
+    console.log("BODY:", req.body);
+    console.log("USER:", req.user);
   try {
+
     let {
       month,
       year,

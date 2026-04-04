@@ -93,21 +93,30 @@ exports.adminAuth = async (req, res, next) => {
     return res.status(500).json({ message: "Invalid or expired token." });
   }
 };
+
 exports.adminOrSuperAdminAuth = async (req, res, next) => {
   try {
     const token = getToken(req);
+    console.log("AUTH HEADER:", req.headers.authorization);
+    console.log("TOKEN EXISTS:", !!token);
+
     if (!token) {
       return res.status(401).send({ message: "Access Denied. No token provided." });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("DECODED TOKEN:", decoded);
 
     const s = await checkSession(decoded);
+    console.log("SESSION CHECK:", s);
+
     if (!s.ok) {
       return res.status(401).json({ message: "No access. Session invalid." });
     }
 
     const user = await User.findById(decoded.id);
+    console.log("AUTH USER:", user?.code, user?.role, user?.position);
+
     if (!user) {
       return res.status(401).json({ message: "Access Denied. User not found." });
     }
@@ -120,10 +129,42 @@ exports.adminOrSuperAdminAuth = async (req, res, next) => {
     req.session = s.session;
     next();
   } catch (err) {
-    console.log(err);
+    console.log("AUTH ERROR:", err);
     return res.status(500).json({ message: "Invalid or expired token." });
   }
 };
+
+// exports.adminOrSuperAdminAuth = async (req, res, next) => {
+//   try {
+//     const token = getToken(req);
+//     if (!token) {
+//       return res.status(401).send({ message: "Access Denied. No token provided." });
+//     }
+
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+//     const s = await checkSession(decoded);
+//     if (!s.ok) {
+//       return res.status(401).json({ message: "No access. Session invalid." });
+//     }
+
+//     const user = await User.findById(decoded.id);
+//     if (!user) {
+//       return res.status(401).json({ message: "Access Denied. User not found." });
+//     }
+
+//     if (!["admin", "super_admin"].includes(user.role)) {
+//       return res.status(403).json({ message: "Access Denied. You are not authorized." });
+//     }
+
+//     req.user = user;
+//     req.session = s.session;
+//     next();
+//   } catch (err) {
+//     console.log(err);
+//     return res.status(500).json({ message: "Invalid or expired token." });
+//   }
+// };
 exports.authMiddleware = async (req, res, next) => {
   try {
     const token = getToken(req);

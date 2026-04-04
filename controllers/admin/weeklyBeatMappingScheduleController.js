@@ -1019,7 +1019,7 @@ exports.getBeatMappingReport = async (req, res) => {
     // Prepare response
     const result = Object.values(dealerMap).map((d) => {
       const isDone = d.doneCount > 0;
-      console.log("time: ", toIST(d.latestMarkedDoneAt));
+      // console.log("time: ", toIST(d.latestMarkedDoneAt));
       return {
         code: d.code,
         name: d.name,
