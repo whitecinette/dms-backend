@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../model/User");
 const Session = require("../model/Session");
 
+const MetaData = require("../model/MetaData");
+
 const SESSION_ENFORCEMENT = String(process.env.SESSION_ENFORCEMENT || "false") === "true";
 
 const getToken = (req) => {
@@ -293,6 +295,42 @@ exports.sessionGuard = async (req, res, next) => {
       success: false,
       error: "SESSION_INVALID",
       message: "Session expired. Please login again.",
+    });
+  }
+};
+
+
+
+exports.attendanceAdminAccess = async (req, res, next) => {
+  try {
+    const { role, code } = req.user || {};
+
+    if (["admin", "super_admin", "hr"].includes(role)) {
+      return next();
+    }
+
+    if (!code) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access",
+      });
+    }
+
+    const meta = await MetaData.findOne({ code }).lean();
+
+    if (meta?.attendance_access === true) {
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      message: "You are not authorized to access attendance dashboard",
+    });
+  } catch (error) {
+    console.error("attendanceAdminAccess error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Authorization check failed",
     });
   }
 };

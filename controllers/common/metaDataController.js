@@ -710,6 +710,11 @@ const adminSidebar = () => [
     name: "HR",
     icon: "users",
     children: [
+      {
+        name: "Attendance Dashboard",
+        route: "attendance_admin_dashboard",
+        icon: "layoutDashboard",
+      },
       { name: "Attendance & Leave", route: "attendance", icon: "calendarCheck2" },
       { name: "Bill Upload", route: "bill_upload", icon: "fileUp" },
     ],
