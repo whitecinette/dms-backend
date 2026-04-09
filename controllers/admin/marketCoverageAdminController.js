@@ -15,6 +15,26 @@ const toUniqueStrings = (values = []) => {
     .filter(Boolean))];
 };
 
+const parseLatLong = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === "object" && value.$numberDecimal !== undefined) {
+    const parsed = Number(value.$numberDecimal);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === "object" && typeof value.toString === "function") {
+    const parsed = Number(value.toString());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const toIST = (d) => (d ? moment.utc(d).tz("Asia/Kolkata").format() : null);
+
 async function getHierarchy() {
   const doc = await ActorTypesHierarchy.findOne(
     { name: DEFAULT_FLOW_NAME },
@@ -155,6 +175,89 @@ function getDoneVsTotal(scheduleDocs = []) {
   };
 }
 
+async function getScopedEmployees({ scope, effectivePositions = [], searchRegex = null }) {
+  const userQuery = { status: "active" };
+
+  if (effectivePositions.length) {
+    userQuery.position = { $in: effectivePositions };
+  }
+
+  if (!scope.isPrivileged) {
+    userQuery.code = { $in: scope.allowedCodes };
+  }
+
+  if (searchRegex) {
+    userQuery.$or = [{ code: searchRegex }, { name: searchRegex }];
+  }
+
+  return User.find(userQuery, {
+    code: 1,
+    name: 1,
+    position: 1,
+    role: 1,
+    status: 1,
+    firm: 1,
+    firmCode: 1,
+    _id: 0,
+  }).lean();
+}
+
+async function getScheduledCodesInRange({ start, end }) {
+  if (!start || !end) return [];
+  const codes = await WeeklyBeatMappingSchedule.distinct("code", {
+    startDate: { $lte: end },
+    endDate: { $gte: start },
+  });
+  return [...new Set((codes || []).map((c) => String(c || "").trim()).filter(Boolean))];
+}
+
+async function getUsersByHierarchyScope(scope) {
+  if (scope.isPrivileged) {
+    return User.find({}, {
+      district: 1,
+      taluka: 1,
+      zone: 1,
+      town: 1,
+      code: 1,
+      position: 1,
+      _id: 0,
+    }).lean();
+  }
+
+  if (!scope.position || !scope.code) return [];
+
+  const hierarchyEntries = await HierarchyEntries.find(
+    {
+      hierarchy_name: DEFAULT_FLOW_NAME,
+      [scope.position]: scope.code,
+    },
+    { mdd: 1, dealer: 1, _id: 0 }
+  ).lean();
+
+  const allowedCodes = new Set();
+  for (const entry of hierarchyEntries) {
+    const mddCode = String(entry?.mdd || "").trim();
+    const dealerCode = String(entry?.dealer || "").trim();
+    if (mddCode) allowedCodes.add(mddCode);
+    if (dealerCode) allowedCodes.add(dealerCode);
+  }
+
+  if (!allowedCodes.size) return [];
+
+  return User.find(
+    { code: { $in: [...allowedCodes] } },
+    {
+      district: 1,
+      taluka: 1,
+      zone: 1,
+      town: 1,
+      code: 1,
+      position: 1,
+      _id: 0,
+    }
+  ).lean();
+}
+
 exports.getMarketCoverageDashboardRoles = async (req, res) => {
   try {
     const hierarchy = await getHierarchy();
@@ -203,39 +306,69 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
     const searchRegex = compileSearchQuery(search);
 
     const requestedPositions = toUniqueStrings(positions);
-    const effectivePositions = requestedPositions.length
-      ? requestedPositions
-      : (scope.isPrivileged ? ["asm"] : scope.scopePositions);
+    const effectivePositions = requestedPositions;
 
-    const userQuery = {
-      status: "active",
-    };
-
-    if (effectivePositions.length) {
-      userQuery.position = { $in: effectivePositions };
+    const scheduledCodes = await getScheduledCodesInRange({ start, end });
+    if (!scheduledCodes.length) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: {
+          totalEmployees: 0,
+          startDate,
+          endDate,
+          scope: {
+            role: scope.role,
+            position: scope.position,
+            privileged: scope.isPrivileged,
+          },
+        },
+      });
     }
 
-    if (!scope.isPrivileged) {
-      userQuery.code = { $in: scope.allowedCodes };
+    const scopedCodes = scope.isPrivileged
+      ? scheduledCodes
+      : scheduledCodes.filter((code) => scope.allowedCodes.includes(code));
+
+    if (!scopedCodes.length) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: {
+          totalEmployees: 0,
+          startDate,
+          endDate,
+          scope: {
+            role: scope.role,
+            position: scope.position,
+            privileged: scope.isPrivileged,
+          },
+        },
+      });
     }
 
-    if (searchRegex) {
-      userQuery.$or = [
-        { code: searchRegex },
-        { name: searchRegex },
-      ];
-    }
-
-    const users = await User.find(userQuery, {
-      code: 1,
-      name: 1,
-      position: 1,
-      role: 1,
-      status: 1,
-      firm: 1,
-      firmCode: 1,
-      _id: 0,
-    }).lean();
+    const users = await User.find(
+      {
+        status: "active",
+        code: { $in: scopedCodes },
+        ...(effectivePositions.length
+          ? { position: { $in: effectivePositions } }
+          : {}),
+        ...(searchRegex
+          ? { $or: [{ code: searchRegex }, { name: searchRegex }] }
+          : {}),
+      },
+      {
+        code: 1,
+        name: 1,
+        position: 1,
+        role: 1,
+        status: 1,
+        firm: 1,
+        firmCode: 1,
+        _id: 0,
+      }
+    ).lean();
 
     const userCodes = users.map((user) => String(user.code || "").trim()).filter(Boolean);
 
@@ -308,6 +441,692 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getMarketCoverageDashboardOverview:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
+  try {
+    let {
+      startDate,
+      endDate,
+      positions = [],
+      search = "",
+      recentDays = 7,
+    } = req.body || {};
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required",
+      });
+    }
+
+    const hierarchy = await getHierarchy();
+    const scope = await getScopeForUser(req.user, hierarchy);
+
+    const start = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
+    const end = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+
+    const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
+    const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
+    const safeRecentDays = Math.max(Number(recentDays) || 7, 1);
+    const recentStart = moment
+      .tz("Asia/Kolkata")
+      .subtract(safeRecentDays - 1, "days")
+      .startOf("day")
+      .toDate();
+
+    const requestedPositions = toUniqueStrings(positions);
+    const effectivePositions = requestedPositions;
+    const searchRegex = compileSearchQuery(search);
+    const scheduledCodes = await getScheduledCodesInRange({ start, end });
+    const scopedCodes = scope.isPrivileged
+      ? scheduledCodes
+      : scheduledCodes.filter((code) => scope.allowedCodes.includes(code));
+
+    const users = scopedCodes.length
+      ? await User.find(
+          {
+            status: "active",
+            code: { $in: scopedCodes },
+            ...(effectivePositions.length
+              ? { position: { $in: effectivePositions } }
+              : {}),
+            ...(searchRegex
+              ? { $or: [{ code: searchRegex }, { name: searchRegex }] }
+              : {}),
+          },
+          {
+            code: 1,
+            name: 1,
+            position: 1,
+            role: 1,
+            status: 1,
+            firm: 1,
+            firmCode: 1,
+            _id: 0,
+          }
+        ).lean()
+      : [];
+
+    const userCodes = users
+      .map((user) => String(user.code || "").trim())
+      .filter(Boolean);
+
+    if (!userCodes.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          summary: {
+            employees: 0,
+            planned: 0,
+            done: 0,
+            pending: 0,
+            coveragePct: 0,
+            activeEmployees: 0,
+            notStartedToday: 0,
+            noVisitRecently: 0,
+            mapVisited: 0,
+            mapNotVisited: 0,
+          },
+          positionPerformance: [],
+          employeePerformance: [],
+          noVisitToday: [],
+          noVisitRecent: [],
+          map: {
+            center: { lat: 26.9124, lng: 75.7873 },
+            pins: [],
+            counts: { total: 0, visited: 0, notVisited: 0 },
+          },
+        },
+      });
+    }
+
+    const overlapRangeQuery = {
+      code: { $in: userCodes },
+      startDate: { $lte: end },
+      endDate: { $gte: start },
+    };
+    const overlapTodayQuery = {
+      code: { $in: userCodes },
+      startDate: { $lte: todayEnd },
+      endDate: { $gte: todayStart },
+    };
+    const overlapRecentQuery = {
+      code: { $in: userCodes },
+      startDate: { $lte: todayEnd },
+      endDate: { $gte: recentStart },
+    };
+
+    const [rangeSchedules, todaySchedules, recentSchedules] = await Promise.all([
+      WeeklyBeatMappingSchedule.find(overlapRangeQuery).lean(),
+      WeeklyBeatMappingSchedule.find(overlapTodayQuery).lean(),
+      WeeklyBeatMappingSchedule.find(overlapRecentQuery).lean(),
+    ]);
+
+    const rangeMap = groupSchedulesByCode(rangeSchedules);
+    const todayMap = groupSchedulesByCode(todaySchedules);
+    const recentMap = groupSchedulesByCode(recentSchedules);
+
+    const positionAgg = new Map();
+    const pinAgg = new Map();
+    const employeePerformance = [];
+    const noVisitToday = [];
+    const noVisitRecent = [];
+
+    let totalPlanned = 0;
+    let totalDone = 0;
+    let activeEmployees = 0;
+    let notStartedToday = 0;
+    const userNameByCode = new Map(
+      users.map((u) => [String(u.code || "").trim(), String(u.name || "").trim()])
+    );
+
+    for (const user of users) {
+      const userCode = String(user.code || "").trim();
+      const userName = String(user.name || "").trim();
+      const userPosition = normalize(user.position);
+      const userRange = rangeMap.get(userCode) || [];
+      const userToday = todayMap.get(userCode) || [];
+      const userRecent = recentMap.get(userCode) || [];
+
+      const plannedDealers = new Set();
+      const doneDealers = new Set();
+      const todayPlanned = new Set();
+      const todayDone = new Set();
+      const recentDone = new Set();
+
+      let firstVisitAt = null;
+      let lastVisitAt = null;
+
+      const consumeSchedules = (docs, plannedSet, doneSet) => {
+        for (const doc of docs) {
+          for (const dealer of doc.schedule || []) {
+            const dealerCode = String(dealer?.code || "").trim();
+            if (!dealerCode) continue;
+            plannedSet.add(dealerCode);
+
+            const dealerDone = normalize(dealer?.status) === "done";
+            if (dealerDone) {
+              doneSet.add(dealerCode);
+              const markedAt = dealer?.markedDoneAt
+                ? new Date(dealer.markedDoneAt)
+                : null;
+              if (markedAt) {
+                if (!firstVisitAt || markedAt < firstVisitAt) firstVisitAt = markedAt;
+                if (!lastVisitAt || markedAt > lastVisitAt) lastVisitAt = markedAt;
+              }
+            }
+          }
+        }
+      };
+
+      consumeSchedules(userRange, plannedDealers, doneDealers);
+      consumeSchedules(userToday, todayPlanned, todayDone);
+      consumeSchedules(userRecent, new Set(), recentDone);
+
+      const planned = plannedDealers.size;
+      const done = doneDealers.size;
+      const pending = Math.max(planned - done, 0);
+      const coveragePct = planned ? Number(((done / planned) * 100).toFixed(1)) : 0;
+
+      totalPlanned += planned;
+      totalDone += done;
+      if (done > 0) activeEmployees += 1;
+      if (todayPlanned.size > 0 && todayDone.size === 0) notStartedToday += 1;
+
+      employeePerformance.push({
+        code: userCode,
+        name: userName,
+        position: userPosition,
+        planned,
+        done,
+        pending,
+        coveragePct,
+        firstVisitAtIST: toIST(firstVisitAt),
+        lastVisitAtIST: toIST(lastVisitAt),
+        isActiveInRange: done > 0,
+      });
+
+      if (todayDone.size === 0) {
+        noVisitToday.push({
+          code: userCode,
+          name: userName,
+          position: userPosition,
+          plannedToday: todayPlanned.size,
+          lastVisitAtIST: toIST(lastVisitAt),
+        });
+      }
+
+      if (recentDone.size === 0) {
+        noVisitRecent.push({
+          code: userCode,
+          name: userName,
+          position: userPosition,
+          daysWithoutVisit: safeRecentDays,
+          lastVisitAtIST: toIST(lastVisitAt),
+        });
+      }
+
+      if (!positionAgg.has(userPosition)) {
+        positionAgg.set(userPosition, {
+          position: userPosition || "unknown",
+          users: 0,
+          activeUsers: 0,
+          planned: 0,
+          done: 0,
+        });
+      }
+      const posNode = positionAgg.get(userPosition);
+      posNode.users += 1;
+      posNode.activeUsers += done > 0 ? 1 : 0;
+      posNode.planned += planned;
+      posNode.done += done;
+    }
+
+    for (const doc of rangeSchedules) {
+      const ownerCode = String(doc?.code || "").trim();
+      for (const dealer of doc.schedule || []) {
+        const dealerCode = String(dealer?.code || "").trim();
+        if (!dealerCode) continue;
+
+        const lat = parseLatLong(dealer?.latitude ?? dealer?.lat);
+        const lng = parseLatLong(dealer?.longitude ?? dealer?.long);
+        if (lat === null || lng === null) continue;
+
+        if (!pinAgg.has(dealerCode)) {
+          pinAgg.set(dealerCode, {
+            code: dealerCode,
+            name: dealer?.name || "",
+            lat,
+            lng,
+            zone: dealer?.zone || "",
+            district: dealer?.district || "",
+            taluka: dealer?.taluka || "",
+            town: dealer?.town || "",
+            plannedBy: new Set(),
+            visitedBy: new Set(),
+            visitCount: 0,
+            latestVisitedAt: null,
+            visitLogs: [],
+          });
+        }
+
+        const pin = pinAgg.get(dealerCode);
+        pin.plannedBy.add(ownerCode);
+        if (normalize(dealer?.status) === "done") {
+          pin.visitedBy.add(ownerCode);
+          pin.visitCount += 1;
+          const markedAt = dealer?.markedDoneAt ? new Date(dealer.markedDoneAt) : null;
+          if (markedAt && (!pin.latestVisitedAt || markedAt > pin.latestVisitedAt)) {
+            pin.latestVisitedAt = markedAt;
+          }
+          pin.visitLogs.push({
+            byCode: ownerCode,
+            byName: userNameByCode.get(ownerCode) || ownerCode,
+            visitedAt: markedAt || null,
+          });
+        }
+      }
+    }
+
+    const rawPins = [...pinAgg.values()].map((pin) => ({
+      code: pin.code,
+      name: pin.name,
+      lat: pin.lat,
+      lng: pin.lng,
+      zone: pin.zone,
+      district: pin.district,
+      taluka: pin.taluka,
+      town: pin.town,
+      status: pin.visitedBy.size > 0 ? "visited" : "not_visited",
+      visitCount: pin.visitCount,
+      assignedUsers: [...pin.plannedBy],
+      visitedUsers: [...pin.visitedBy],
+      visitedByNames: [...pin.visitedBy]
+        .map((code) => userNameByCode.get(code) || code)
+        .filter(Boolean),
+      latestVisitedAtIST: toIST(pin.latestVisitedAt),
+      visitLogs: (pin.visitLogs || [])
+        .sort((a, b) => {
+          const atA = a?.visitedAt ? new Date(a.visitedAt).getTime() : 0;
+          const atB = b?.visitedAt ? new Date(b.visitedAt).getTime() : 0;
+          return atB - atA;
+        })
+        .slice(0, 8)
+        .map((log) => ({
+          byCode: log.byCode,
+          byName: log.byName,
+          visitedAtIST: toIST(log.visitedAt),
+        })),
+    }));
+
+    const dealerCodes = rawPins.map((p) => p.code).filter(Boolean);
+    const [dealerUsers, dealerHierarchyEntries] = await Promise.all([
+      dealerCodes.length
+        ? User.find(
+            { code: { $in: dealerCodes } },
+            {
+              code: 1,
+              name: 1,
+              category: 1,
+              town: 1,
+              zone: 1,
+              top_outlet: 1,
+              position: 1,
+              role: 1,
+              _id: 0,
+            }
+          ).lean()
+        : Promise.resolve([]),
+      dealerCodes.length
+        ? HierarchyEntries.find(
+            {
+              hierarchy_name: DEFAULT_FLOW_NAME,
+              dealer: { $in: dealerCodes },
+            },
+            { dealer: 1, mdd: 1, _id: 0 }
+          ).lean()
+        : Promise.resolve([]),
+    ]);
+
+    const dealerByCode = new Map(
+      dealerUsers.map((d) => [String(d.code || "").trim(), d])
+    );
+
+    const mddCodeByDealer = new Map();
+    for (const row of dealerHierarchyEntries) {
+      const dealerCode = String(row?.dealer || "").trim();
+      const mddCode = String(row?.mdd || "").trim();
+      if (!dealerCode || !mddCode) continue;
+      if (!mddCodeByDealer.has(dealerCode)) {
+        mddCodeByDealer.set(dealerCode, mddCode);
+      }
+    }
+
+    const mddCodes = [...new Set([...mddCodeByDealer.values()].filter(Boolean))];
+    const mddUsers = mddCodes.length
+      ? await User.find(
+          { code: { $in: mddCodes } },
+          { code: 1, name: 1, _id: 0 }
+        ).lean()
+      : [];
+    const mddNameByCode = new Map(
+      mddUsers.map((m) => [String(m.code || "").trim(), String(m.name || "").trim()])
+    );
+
+    const pins = rawPins.map((pin) => {
+      const dealer = dealerByCode.get(pin.code) || {};
+      const mddCode = mddCodeByDealer.get(pin.code) || "";
+      const mddName = mddCode ? (mddNameByCode.get(mddCode) || "") : "";
+      const dealerTown = String(dealer?.town || "").trim();
+      const dealerZone = String(dealer?.zone || "").trim();
+      const dealerCategory = String(dealer?.category || "").trim();
+      const isTopDealer = dealer?.top_outlet === true;
+
+      return {
+        ...pin,
+        dealerCode: pin.code,
+        dealerName: String(dealer?.name || pin.name || "").trim(),
+        mddCode,
+        mddName,
+        topDealer: isTopDealer,
+        category: dealerCategory || null,
+        town: dealerTown || pin.town || null,
+        zone: dealerZone || pin.zone || null,
+      };
+    });
+
+    const visitedPinCount = pins.filter((p) => p.status === "visited").length;
+    const notVisitedPinCount = Math.max(pins.length - visitedPinCount, 0);
+
+    let centerLat = 26.9124;
+    let centerLng = 75.7873;
+    if (pins.length) {
+      centerLat = pins.reduce((sum, p) => sum + p.lat, 0) / pins.length;
+      centerLng = pins.reduce((sum, p) => sum + p.lng, 0) / pins.length;
+    }
+
+    const positionPerformance = [...positionAgg.values()]
+      .map((node) => ({
+        ...node,
+        pending: Math.max(node.planned - node.done, 0),
+        coveragePct: node.planned
+          ? Number(((node.done / node.planned) * 100).toFixed(1))
+          : 0,
+      }))
+      .sort((a, b) => {
+        if (a.position < b.position) return -1;
+        if (a.position > b.position) return 1;
+        return 0;
+      });
+
+    employeePerformance.sort((a, b) => b.coveragePct - a.coveragePct);
+
+    const totalPending = Math.max(totalPlanned - totalDone, 0);
+    const coveragePct = totalPlanned
+      ? Number(((totalDone / totalPlanned) * 100).toFixed(1))
+      : 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          employees: users.length,
+          planned: totalPlanned,
+          done: totalDone,
+          pending: totalPending,
+          coveragePct,
+          activeEmployees,
+          notStartedToday,
+          noVisitRecently: noVisitRecent.length,
+          mapVisited: visitedPinCount,
+          mapNotVisited: notVisitedPinCount,
+        },
+        positionPerformance,
+        employeePerformance,
+        noVisitToday,
+        noVisitRecent,
+        map: {
+          center: {
+            lat: Number(centerLat.toFixed(6)),
+            lng: Number(centerLng.toFixed(6)),
+          },
+          pins,
+          counts: {
+            total: pins.length,
+            visited: visitedPinCount,
+            notVisited: notVisitedPinCount,
+          },
+        },
+      },
+      meta: {
+        startDate,
+        endDate,
+        recentDays: safeRecentDays,
+        scope: {
+          role: scope.role,
+          position: scope.position,
+          privileged: scope.isPrivileged,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error in getMarketCoverageDashboardAnalytics:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+exports.getMarketCoverageDashboardDropdown = async (req, res) => {
+  try {
+    const hierarchy = await getHierarchy();
+    const scope = await getScopeForUser(req.user, hierarchy);
+    const users = await getUsersByHierarchyScope(scope);
+
+    const districts = new Set();
+    const talukas = new Set();
+    const zones = new Set();
+    const towns = new Set();
+    const positions = new Set();
+
+    for (const user of users) {
+      const district = String(user?.district || "").trim();
+      const taluka = String(user?.taluka || "").trim();
+      const zone = String(user?.zone || "").trim();
+      const town = String(user?.town || "").trim();
+      const position = normalize(user?.position);
+
+      if (district && district.toUpperCase() !== "NA") districts.add(district);
+      if (taluka && taluka.toUpperCase() !== "NA") talukas.add(taluka);
+      if (zone && zone.toUpperCase() !== "NA") zones.add(zone);
+      if (town && town.toUpperCase() !== "NA") towns.add(town);
+      if (["dealer", "mdd"].includes(position)) positions.add(position);
+    }
+
+    return res.status(200).json({
+      success: true,
+      status: ["done", "pending"],
+      ["dealer/mdd"]: positions.size ? [...positions].sort() : ["dealer", "mdd"],
+      taluka: [...talukas].sort(),
+      district: [...districts].sort(),
+      zone: [...zones].sort(),
+      town: [...towns].sort(),
+    });
+  } catch (error) {
+    console.error("Error in getMarketCoverageDashboardDropdown:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+exports.getMarketCoverageDashboardReport = async (req, res) => {
+  try {
+    let {
+      startDate,
+      endDate,
+      status = [],
+      zone = [],
+      district = [],
+      taluka = [],
+      town = [],
+      code,
+    } = req.body || {};
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required",
+      });
+    }
+
+    const hierarchy = await getHierarchy();
+    const scope = await getScopeForUser(req.user, hierarchy);
+
+    const targetCode = String(
+      scope.isPrivileged ? (code || "") : (code || scope.code || "")
+    ).trim();
+
+    if (!targetCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee code is required",
+      });
+    }
+
+    if (!scope.isPrivileged && !scope.allowedCodes.includes(targetCode)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this employee's data",
+      });
+    }
+
+    const start = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
+    const end = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+
+    const schedules = await WeeklyBeatMappingSchedule.find({
+      code: targetCode,
+      startDate: { $lte: end },
+      endDate: { $gte: start },
+    }).lean();
+
+    const dealerMap = {};
+    for (const entry of schedules) {
+      for (const dealer of entry.schedule || []) {
+        const dealerCode = String(dealer?.code || "").trim();
+        if (!dealerCode) continue;
+
+        if (!dealerMap[dealerCode]) {
+          dealerMap[dealerCode] = {
+            code: dealerCode,
+            name: dealer?.name || "",
+            zone: dealer?.zone || "Unknown",
+            district: dealer?.district || "Unknown",
+            taluka: dealer?.taluka || "Unknown",
+            town: dealer?.town || "Unknown",
+            position: dealer?.position || "dealer",
+            doneCount: 0,
+            latitude: parseLatLong(dealer?.latitude ?? dealer?.lat),
+            longitude: parseLatLong(dealer?.longitude ?? dealer?.long),
+            latestMarkedDoneAt: null,
+          };
+        }
+
+        if (normalize(dealer?.status) === "done") {
+          dealerMap[dealerCode].doneCount += 1;
+          const markedAt = dealer?.markedDoneAt ? new Date(dealer.markedDoneAt) : null;
+          if (
+            markedAt &&
+            (!dealerMap[dealerCode].latestMarkedDoneAt ||
+              markedAt > dealerMap[dealerCode].latestMarkedDoneAt)
+          ) {
+            dealerMap[dealerCode].latestMarkedDoneAt = markedAt;
+          }
+        }
+      }
+    }
+
+    const result = Object.values(dealerMap).map((d) => {
+      const isDone = d.doneCount > 0;
+      return {
+        code: d.code,
+        name: d.name,
+        zone: d.zone,
+        district: d.district,
+        taluka: d.taluka,
+        town: d.town,
+        position: d.position,
+        status: isDone ? "done" : "pending",
+        visits: isDone ? d.doneCount : 0,
+        latitude: d.latitude,
+        longitude: d.longitude,
+        markedDoneAtIST: isDone ? toIST(d.latestMarkedDoneAt) : null,
+      };
+    });
+
+    const normalizedStatus = toUniqueStrings(status);
+    const normalizedZone = toUniqueStrings(zone);
+    const normalizedDistrict = toUniqueStrings(district);
+    const normalizedTaluka = toUniqueStrings(taluka);
+    const normalizedTown = toUniqueStrings(town);
+
+    const filtered = result.filter((entry) => {
+      const matchStatus =
+        !normalizedStatus.length || normalizedStatus.includes(normalize(entry.status));
+      const matchZone =
+        !normalizedZone.length || normalizedZone.includes(normalize(entry.zone));
+      const matchDistrict =
+        !normalizedDistrict.length || normalizedDistrict.includes(normalize(entry.district));
+      const matchTaluka =
+        !normalizedTaluka.length || normalizedTaluka.includes(normalize(entry.taluka));
+      const matchTown =
+        !normalizedTown.length || normalizedTown.includes(normalize(entry.town));
+
+      return matchStatus && matchZone && matchDistrict && matchTaluka && matchTown;
+    });
+
+    const total = filtered.length;
+    const done = filtered.filter((d) => normalize(d.status) === "done").length;
+    const pending = Math.max(total - done, 0);
+
+    const monthStart = moment(start).tz("Asia/Kolkata").startOf("month").startOf("day").toDate();
+    const monthEnd = moment(start).tz("Asia/Kolkata").endOf("month").endOf("day").toDate();
+
+    const overallSchedules = await WeeklyBeatMappingSchedule.find({
+      code: targetCode,
+      startDate: { $lte: monthEnd },
+      endDate: { $gte: monthStart },
+    }).lean();
+
+    const overallDealerMap = {};
+    for (const entry of overallSchedules) {
+      for (const dealer of entry.schedule || []) {
+        const dealerCode = String(dealer?.code || "").trim();
+        if (!dealerCode) continue;
+        if (!overallDealerMap[dealerCode]) {
+          overallDealerMap[dealerCode] = { doneCount: 0 };
+        }
+        if (normalize(dealer?.status) === "done") {
+          overallDealerMap[dealerCode].doneCount += 1;
+        }
+      }
+    }
+
+    const ovTotal = Object.keys(overallDealerMap).length;
+    const ovDone = Object.values(overallDealerMap).filter((d) => d.doneCount > 0).length;
+    const ovPending = Math.max(ovTotal - ovDone, 0);
+
+    return res.status(200).json({
+      success: true,
+      total,
+      done,
+      pending,
+      ovTotal,
+      ovDone,
+      ovPending,
+      data: filtered,
+    });
+  } catch (error) {
+    console.error("Error in getMarketCoverageDashboardReport:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
