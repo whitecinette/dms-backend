@@ -213,6 +213,23 @@ const incrementStatusBucket = (bucket, status) => {
   else bucket.pending += 1;
 };
 
+const ensureDailyTrendBucket = (map, dayKey) => {
+  if (!map.has(dayKey)) {
+    map.set(dayKey, {
+      date: dayKey,
+      totalEligible: 0,
+      present: 0,
+      absent: 0,
+      halfDay: 0,
+      leave: 0,
+      pending: 0,
+      notPunchedOut: 0,
+    });
+  }
+
+  return map.get(dayKey);
+};
+
 const buildEligibleEmployees = async ({ firmCodes = [], positions = [], search = "" }) => {
   const metaQuery = { attendance: true };
 
@@ -435,6 +452,7 @@ exports.getAttendanceAdminOverview = async (req, res) => {
     };
 
     const dailyTrendMap = new Map();
+    const dailyRecordedCodesMap = new Map();
     const firmWiseSelectedMap = new Map();
 
     let selectedHoursTotal = 0;
@@ -496,24 +514,17 @@ exports.getAttendanceAdminOverview = async (req, res) => {
 
       if (range.viewMode === "month") {
         const dayKey = getDayKeyFromAttendanceDate(row.date);
-        if (!dailyTrendMap.has(dayKey)) {
-          dailyTrendMap.set(dayKey, {
-            date: dayKey,
-            present: 0,
-            absent: 0,
-            halfDay: 0,
-            leave: 0,
-            pending: 0,
-            notPunchedOut: 0,
-          });
-        }
-
-        const dayBucket = dailyTrendMap.get(dayKey);
+        const dayBucket = ensureDailyTrendBucket(dailyTrendMap, dayKey);
         incrementStatusBucket(dayBucket, row.status);
 
         if (row.punchIn && !row.punchOut) {
           dayBucket.notPunchedOut += 1;
         }
+
+        if (!dailyRecordedCodesMap.has(dayKey)) {
+          dailyRecordedCodesMap.set(dayKey, new Set());
+        }
+        dailyRecordedCodesMap.get(dayKey).add(row.code);
       }
     }
 
@@ -529,19 +540,23 @@ exports.getAttendanceAdminOverview = async (req, res) => {
 
       while (cursor <= end) {
         const key = cursor.toFormat("yyyy-MM-dd");
-        if (!dailyTrendMap.has(key)) {
-          dailyTrendMap.set(key, {
-            date: key,
-            present: 0,
-            absent: 0,
-            halfDay: 0,
-            leave: 0,
-            pending: 0,
-            notPunchedOut: 0,
-          });
-        }
+        const dayBucket = ensureDailyTrendBucket(dailyTrendMap, key);
+        dayBucket.totalEligible = employees.length;
+
+        const recordedCodes = dailyRecordedCodesMap.get(key);
+        const recordedCount = recordedCodes ? recordedCodes.size : 0;
+        const missingAbsent = employees.length - recordedCount;
+        dayBucket.absent += missingAbsent > 0 ? missingAbsent : 0;
+
         cursor = cursor.plus({ days: 1 });
       }
+
+      const explicitMonthAbsent = monthSummary.absent;
+      const derivedMonthAbsent = dailyTrendMap.size > 0
+        ? [...dailyTrendMap.values()].reduce((sum, day) => sum + safeNum(day.absent), 0)
+        : 0;
+
+      monthSummary.absent = Math.max(explicitMonthAbsent, derivedMonthAbsent);
     }
 
     return res.status(200).json({
