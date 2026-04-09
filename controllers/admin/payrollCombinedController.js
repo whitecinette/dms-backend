@@ -53,7 +53,7 @@ exports.getAttendanceMatrix = async (req, res) => {
   // Step 2. Filter users based on MDD rule
   users = users.filter(user => {
     // If position is ASM → always include
-    if (user.position === "asm") {
+    if (user.position === "asm" || user.position === "so") {
       return true;
     }
 
