@@ -217,6 +217,14 @@ const incrementStatusBucket = (bucket, status) => {
   else bucket.pending += 1;
 };
 
+const getStatusShortCode = (status) => {
+  if (status === "Present") return "P";
+  if (status === "Absent") return "A";
+  if (status === "Half Day") return "HD";
+  if (status === "Leave") return "L";
+  return "PN";
+};
+
 const ensureDailyTrendBucket = (map, dayKey) => {
   if (!map.has(dayKey)) {
     map.set(dayKey, {
@@ -694,6 +702,126 @@ exports.getAttendanceAdminEmployees = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch attendance admin employees",
+    });
+  }
+};
+
+exports.getAttendanceAdminMatrix = async (req, res) => {
+  try {
+    const defaultMY = getDefaultMonthYearIST();
+
+    const month = Number(req.body?.month || defaultMY.month);
+    const year = Number(req.body?.year || defaultMY.year);
+
+    const firmCodes = Array.isArray(req.body?.firmCodes) ? req.body.firmCodes : [];
+    const positions = Array.isArray(req.body?.positions) ? req.body.positions : [];
+    const statuses = normalizeStatuses(req.body?.statuses);
+    const search = req.body?.search || "";
+    const page = Math.max(Number(req.body?.page || 1), 1);
+    const limit = Math.max(Number(req.body?.limit || 15), 1);
+    const skip = (page - 1) * limit;
+
+    const range = resolveAttendanceRange({
+      viewMode: "month",
+      month,
+      year,
+      date: null,
+    });
+
+    const { employees, eligibleCodes } = await buildEligibleEmployees({
+      firmCodes,
+      positions,
+      search,
+    });
+
+    const { monthByCode, selectedMap } = await fetchAttendanceMaps({
+      eligibleCodes,
+      selectedStartUTC: range.selectedStartUTC,
+      selectedEndUTC: range.selectedEndUTC,
+      monthStartUTC: range.monthStartUTC,
+      monthEndUTC: range.monthEndUTC,
+    });
+
+    const days = [];
+    let cursor = range.monthStartIST.startOf("day");
+    const end = range.monthEndIST.startOf("day");
+
+    while (cursor <= end) {
+      days.push({
+        key: cursor.toFormat("yyyy-MM-dd"),
+        day: cursor.day,
+        weekdayShort: cursor.toFormat("ccc"),
+      });
+      cursor = cursor.plus({ days: 1 });
+    }
+
+    let rows = employees.map((emp) => {
+      const monthlyEntries = monthByCode.get(emp.code) || [];
+      const selectedAttendance = selectedMap.get(emp.code);
+      const selectedDayCard = getSelectedDayCardFromAttendance(selectedAttendance);
+      const monthSummary = getEmptyMonthSummary();
+      const dayStatusMap = new Map();
+
+      for (const row of monthlyEntries) {
+        incrementStatusBucket(monthSummary, row.status);
+        dayStatusMap.set(
+          getDayKeyFromAttendanceDate(row.date),
+          getStatusShortCode(row.status)
+        );
+      }
+
+      const matrix = days.map((day) => ({
+        date: day.key,
+        code: dayStatusMap.get(day.key) || "A",
+      }));
+
+      return {
+        code: emp.code,
+        name: emp.name,
+        position: emp.position || "",
+        firm_code: emp.firm_code || "",
+        firm_name: emp.firm_name || "",
+        todayStatus: selectedDayCard.status,
+        stats: {
+          present: monthSummary.present,
+          absent: monthSummary.absent,
+          leave: monthSummary.leave,
+          halfDay: monthSummary.halfDay,
+        },
+        matrix,
+      };
+    });
+
+    if (statuses.length > 0) {
+      rows = rows.filter((row) => statuses.includes(row.todayStatus));
+    }
+
+    rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    const total = rows.length;
+    const paginatedRows = rows.slice(skip, skip + limit);
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance admin matrix fetched successfully",
+      data: {
+        month: range.month,
+        year: range.year,
+        days,
+        rows: paginatedRows,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("getAttendanceAdminMatrix error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch attendance admin matrix",
     });
   }
 };

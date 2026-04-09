@@ -158,6 +158,11 @@ const adminDashboard = (user) => {
 
     quickActions: [
       { title: "Sales Dashboard", route: "sales_dashboard_new", icon: "barChart2" },
+      {
+        title: "Attendance Dashboard",
+        route: "attendance_admin_dashboard",
+        icon: "calendarCheck2",
+      },
       { title: "Extraction Status", route: "extraction_status_new", icon: "clipboardList" },
       { title: "Extraction Report", route: "extraction_report", icon: "fileText" },
       { title: "Add Data", route: "extraction_add", icon: "plusCircle" },

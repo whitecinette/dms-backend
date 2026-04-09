@@ -5,6 +5,7 @@ const {
   getAttendanceAdminFilters,
   getAttendanceAdminOverview,
   getAttendanceAdminEmployees,
+  getAttendanceAdminMatrix,
   getAttendanceAdminEmployeeDetail,
 } = require("../controllers/admin/attendanceForAdminController");
 
@@ -29,6 +30,13 @@ router.post(
   userAuth,
   attendanceAdminAccess,
   getAttendanceAdminEmployees
+);
+
+router.post(
+  "/attendance-admin/matrix",
+  userAuth,
+  attendanceAdminAccess,
+  getAttendanceAdminMatrix
 );
 
 router.get(
