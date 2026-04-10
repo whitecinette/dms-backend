@@ -6,6 +6,7 @@ const {
   getMarketCoverageDashboardDropdown,
   getMarketCoverageDashboardReport,
   getMarketCoverageDashboardAnalytics,
+  getMarketCoverageUserTimeline,
 } = require("../controllers/admin/marketCoverageAdminController");
 
 const router = express.Router();
@@ -15,5 +16,6 @@ router.post("/admin/market-coverage/dashboard/overview", userAuth, getMarketCove
 router.get("/admin/market-coverage/dashboard/dropdown", userAuth, getMarketCoverageDashboardDropdown);
 router.post("/admin/market-coverage/dashboard/report", userAuth, getMarketCoverageDashboardReport);
 router.post("/admin/market-coverage/dashboard/analytics", userAuth, getMarketCoverageDashboardAnalytics);
+router.post("/admin/market-coverage/dashboard/user-timeline", userAuth, getMarketCoverageUserTimeline);
 
 module.exports = router;

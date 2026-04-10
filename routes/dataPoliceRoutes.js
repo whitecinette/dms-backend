@@ -1,6 +1,6 @@
 const express = require("express");
-const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
-const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise, uploadUsersDataFromCsvMaster, recalculateExtractionSegmentsByDateRange } = require("../controllers/new/dataPolice");
+const { adminOrSuperAdminAuth, superAdminAuth } = require("../middlewares/authmiddlewares");
+const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise, dryRunExtractionDuplicateCleanup, cleanupExtractionDuplicates, uploadUsersDataFromCsvMaster, recalculateExtractionSegmentsByDateRange } = require("../controllers/new/dataPolice");
 const { upload } = require("../services/fileUpload");
 const router = express.Router();
 
@@ -34,6 +34,18 @@ router.post(
   "/download-market-sales-data-month-wise",
   adminOrSuperAdminAuth,
   downloadMarketSalesDataDownloadMonthWise
+);
+
+router.post(
+  "/police/extraction-duplicates/dry-run",
+  superAdminAuth,
+  dryRunExtractionDuplicateCleanup
+);
+
+router.post(
+  "/police/extraction-duplicates/cleanup",
+  superAdminAuth,
+  cleanupExtractionDuplicates
 );
 
 router.post("/master/update-users-from-csv",

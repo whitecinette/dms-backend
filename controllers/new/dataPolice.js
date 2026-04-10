@@ -570,6 +570,122 @@ const normalizeMongoNumber = (value) => {
   return "";
 };
 
+const normalizeDuplicateValue = (value) =>
+  value === null || value === undefined
+    ? ""
+    : String(value).trim().toLowerCase();
+
+const normalizeDuplicateDateOnly = (value) => {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    return moment(value).format("YYYY-MM-DD");
+  }
+
+  const parsedDate = moment(value, ["DD-MM-YYYY", moment.ISO_8601], true);
+  if (parsedDate.isValid()) {
+    return parsedDate.format("YYYY-MM-DD");
+  }
+
+  return normalizeDuplicateValue(value);
+};
+
+const getExtractionRecordProductName = (record = {}) =>
+  record.product_name || record.priduct_name || "";
+
+const buildExtractionDuplicateKey = (record = {}) =>
+  [
+    "extraction",
+    normalizeDuplicateDateOnly(record.createdAt || record.sale_date),
+    normalizeDuplicateValue(record.uploaded_by),
+    normalizeDuplicateValue(record.dealer_code || record.dealer),
+    normalizeDuplicateValue(record.brand),
+    normalizeDuplicateValue(record.product_code),
+    normalizeDuplicateValue(getExtractionRecordProductName(record)),
+    normalizeDuplicateValue(record.segment),
+    normalizeDuplicateValue(record.price),
+    normalizeDuplicateValue(record.quantity),
+    normalizeDuplicateValue(record.amount),
+  ].join("||");
+
+const getMonthDateRange = (month, year) => {
+  const start = moment
+    .utc({ year: Number(year), month: Number(month) - 1, day: 1 })
+    .startOf("day")
+    .toDate();
+
+  const end = moment.utc(start).add(1, "month").toDate();
+
+  return { start, end };
+};
+
+const analyzeExtractionDuplicates = (records = []) => {
+  const duplicateMap = new Map();
+
+  records.forEach((record) => {
+    const key = buildExtractionDuplicateKey(record);
+    const bucket = duplicateMap.get(key) || [];
+    bucket.push(record);
+    duplicateMap.set(key, bucket);
+  });
+
+  const duplicateGroups = [];
+
+  duplicateMap.forEach((groupRecords, key) => {
+    if (groupRecords.length < 2) return;
+
+    const sortedRecords = [...groupRecords].sort((a, b) => {
+      const timeDiff =
+        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+
+      if (timeDiff !== 0) return timeDiff;
+
+      return String(a._id).localeCompare(String(b._id));
+    });
+
+    const keepRecord = sortedRecords[0];
+    const deleteRecords = sortedRecords.slice(1);
+
+    duplicateGroups.push({
+      key,
+      totalRecords: sortedRecords.length,
+      keepRecord,
+      deleteRecords,
+      sample: {
+        date: keepRecord.createdAt
+          ? moment(keepRecord.createdAt).format("DD-MM-YYYY")
+          : "",
+        uploaded_by: keepRecord.uploaded_by || "",
+        dealer: keepRecord.dealer || "",
+        brand: keepRecord.brand || "",
+        product_code: keepRecord.product_code || "",
+        product_name: getExtractionRecordProductName(keepRecord),
+        segment: keepRecord.segment || "",
+        price: keepRecord.price || 0,
+        quantity: keepRecord.quantity || 0,
+        amount: keepRecord.amount || 0,
+      },
+    });
+  });
+
+  const duplicateRecordCount = duplicateGroups.reduce(
+    (sum, group) => sum + group.totalRecords,
+    0
+  );
+  const duplicateCopyCount = duplicateGroups.reduce(
+    (sum, group) => sum + group.deleteRecords.length,
+    0
+  );
+
+  return {
+    totalRecordsScanned: records.length,
+    duplicateGroupCount: duplicateGroups.length,
+    duplicateRecordCount,
+    duplicateCopyCount,
+    duplicateGroups,
+  };
+};
+
 exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     console.log("DOWNLOAD HIT");
     console.log("BODY:", req.body);
@@ -946,6 +1062,24 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       ...item,
     }));
 
+    const duplicateKeyCountMap = new Map();
+
+    rows.forEach((row) => {
+      if (normalizeDuplicateValue(row.source) !== "extraction") return;
+
+      const duplicateKey = buildExtractionDuplicateKey(row);
+      duplicateKeyCountMap.set(
+        duplicateKey,
+        (duplicateKeyCountMap.get(duplicateKey) || 0) + 1
+      );
+    });
+
+    const duplicateExtractionKeys = new Set(
+      [...duplicateKeyCountMap.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([key]) => key)
+    );
+
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "OpenAI";
     workbook.created = new Date();
@@ -996,7 +1130,20 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     ];
 
     rows.forEach((row) => {
-      worksheet.addRow(row);
+      const worksheetRow = worksheet.addRow(row);
+      const isDuplicateExtractionRow =
+        normalizeDuplicateValue(row.source) === "extraction" &&
+        duplicateExtractionKeys.has(buildExtractionDuplicateKey(row));
+
+      if (isDuplicateExtractionRow) {
+        worksheetRow.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF4CCCC" },
+          };
+        });
+      }
     });
 
     worksheet.getRow(1).font = { bold: true };
@@ -1026,6 +1173,195 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     return res.end();
   } catch (error) {
     console.error("Error in downloadMarketSalesDataDownloadMonthWise:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+exports.dryRunExtractionDuplicateCleanup = async (req, res) => {
+  try {
+    let { month, year, dealerCodes = [] } = req.body || {};
+
+    month = Number(month);
+    year = Number(year);
+
+    if (!month || !year || month < 1 || month > 12) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid month and year are required",
+      });
+    }
+
+    if (typeof dealerCodes === "string") {
+      dealerCodes = dealerCodes
+        .split(/[\n,]+/)
+        .map((code) => code.trim())
+        .filter(Boolean);
+    }
+
+    if (!Array.isArray(dealerCodes)) {
+      return res.status(400).json({
+        success: false,
+        message: "dealerCodes must be an array or comma-separated string",
+      });
+    }
+
+    const normalizedDealerCodes = [...new Set(
+      dealerCodes.map((code) => String(code).trim()).filter(Boolean)
+    )];
+
+    const { start, end } = getMonthDateRange(month, year);
+
+    const query = {
+      createdAt: { $gte: start, $lt: end },
+    };
+
+    if (normalizedDealerCodes.length) {
+      query.dealer = { $in: normalizedDealerCodes };
+    }
+
+    const records = await ExtractionRecord.find(query)
+      .sort({ createdAt: 1, _id: 1 })
+      .lean();
+
+    const analysis = analyzeExtractionDuplicates(records);
+
+    return res.status(200).json({
+      success: true,
+      dryRun: true,
+      month,
+      year,
+      dealerCodes: normalizedDealerCodes,
+      stats: {
+        totalRecordsScanned: analysis.totalRecordsScanned,
+        duplicateGroupCount: analysis.duplicateGroupCount,
+        duplicateRecordCount: analysis.duplicateRecordCount,
+        duplicateCopyCount: analysis.duplicateCopyCount,
+        recordsToKeep:
+          analysis.duplicateRecordCount - analysis.duplicateCopyCount,
+      },
+      sampleGroups: analysis.duplicateGroups.slice(0, 50).map((group) => ({
+        key: group.key,
+        totalRecords: group.totalRecords,
+        keepRecordId: group.keepRecord._id,
+        duplicateRecordIds: group.deleteRecords.map((record) => record._id),
+        sample: group.sample,
+      })),
+      message: analysis.duplicateCopyCount
+        ? "Duplicate extraction records found"
+        : "No duplicate extraction records found",
+    });
+  } catch (error) {
+    console.error("Error in dryRunExtractionDuplicateCleanup:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+exports.cleanupExtractionDuplicates = async (req, res) => {
+  try {
+    let { month, year, dealerCodes = [] } = req.body || {};
+
+    month = Number(month);
+    year = Number(year);
+
+    if (!month || !year || month < 1 || month > 12) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid month and year are required",
+      });
+    }
+
+    if (typeof dealerCodes === "string") {
+      dealerCodes = dealerCodes
+        .split(/[\n,]+/)
+        .map((code) => code.trim())
+        .filter(Boolean);
+    }
+
+    if (!Array.isArray(dealerCodes)) {
+      return res.status(400).json({
+        success: false,
+        message: "dealerCodes must be an array or comma-separated string",
+      });
+    }
+
+    const normalizedDealerCodes = [...new Set(
+      dealerCodes.map((code) => String(code).trim()).filter(Boolean)
+    )];
+
+    const { start, end } = getMonthDateRange(month, year);
+
+    const query = {
+      createdAt: { $gte: start, $lt: end },
+    };
+
+    if (normalizedDealerCodes.length) {
+      query.dealer = { $in: normalizedDealerCodes };
+    }
+
+    const records = await ExtractionRecord.find(query)
+      .sort({ createdAt: 1, _id: 1 })
+      .lean();
+
+    const analysis = analyzeExtractionDuplicates(records);
+    const duplicateIdsToDelete = analysis.duplicateGroups.flatMap((group) =>
+      group.deleteRecords.map((record) => record._id)
+    );
+
+    if (!duplicateIdsToDelete.length) {
+      return res.status(200).json({
+        success: true,
+        dryRun: false,
+        month,
+        year,
+        dealerCodes: normalizedDealerCodes,
+        stats: {
+          totalRecordsScanned: analysis.totalRecordsScanned,
+          duplicateGroupCount: 0,
+          duplicateRecordCount: 0,
+          duplicateCopyCount: 0,
+          deletedCount: 0,
+        },
+        message: "No duplicate extraction records found for cleanup",
+      });
+    }
+
+    const deleteResult = await ExtractionRecord.deleteMany({
+      _id: { $in: duplicateIdsToDelete },
+    });
+
+    return res.status(200).json({
+      success: true,
+      dryRun: false,
+      month,
+      year,
+      dealerCodes: normalizedDealerCodes,
+      stats: {
+        totalRecordsScanned: analysis.totalRecordsScanned,
+        duplicateGroupCount: analysis.duplicateGroupCount,
+        duplicateRecordCount: analysis.duplicateRecordCount,
+        duplicateCopyCount: analysis.duplicateCopyCount,
+        deletedCount: deleteResult.deletedCount || 0,
+        recordsKept:
+          analysis.duplicateRecordCount - analysis.duplicateCopyCount,
+      },
+      deletedRecordIds: duplicateIdsToDelete,
+      sampleGroups: analysis.duplicateGroups.slice(0, 50).map((group) => ({
+        key: group.key,
+        totalRecords: group.totalRecords,
+        keepRecordId: group.keepRecord._id,
+        deletedRecordIds: group.deleteRecords.map((record) => record._id),
+        sample: group.sample,
+      })),
+      message: "Duplicate extraction records cleaned successfully",
+    });
+  } catch (error) {
+    console.error("Error in cleanupExtractionDuplicates:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",

@@ -1130,3 +1130,262 @@ exports.getMarketCoverageDashboardReport = async (req, res) => {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+exports.getMarketCoverageUserTimeline = async (req, res) => {
+  try {
+    let { code, startDate, endDate, status = "all" } = req.body || {};
+
+    if (!code || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "code, startDate and endDate are required",
+      });
+    }
+
+    const hierarchy = await getHierarchy();
+    const scope = await getScopeForUser(req.user, hierarchy);
+    const targetCode = String(code).trim();
+
+    if (!scope.isPrivileged && !scope.allowedCodes.includes(targetCode)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this employee timeline",
+      });
+    }
+
+    const start = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
+    const end = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
+    const normalizedStatus = normalize(status || "all");
+
+    const [employee, schedules] = await Promise.all([
+      User.findOne({ code: targetCode }, { code: 1, name: 1, position: 1, _id: 0 }).lean(),
+      WeeklyBeatMappingSchedule.find({
+        code: targetCode,
+        startDate: { $lte: end },
+        endDate: { $gte: start },
+      }).lean(),
+    ]);
+
+    const plannedByCode = new Map();
+    const visitedByCode = new Map();
+    const dayBuckets = new Map();
+
+    for (const doc of schedules) {
+      const dayLabel = moment(doc.startDate).tz("Asia/Kolkata").format("YYYY-MM-DD");
+
+      if (!dayBuckets.has(dayLabel)) {
+        dayBuckets.set(dayLabel, []);
+      }
+
+      for (const dealer of doc.schedule || []) {
+        const dealerCode = String(dealer?.code || "").trim();
+        if (!dealerCode) continue;
+
+        const eventStatus = normalize(dealer?.status) === "done" ? "done" : "pending";
+
+        if (!plannedByCode.has(dealerCode)) {
+          plannedByCode.set(dealerCode, {
+            code: dealerCode,
+            name: dealer?.name || "",
+            town: dealer?.town || "",
+            zone: dealer?.zone || "",
+            category: null,
+            topDealer: false,
+          });
+        }
+
+        const visitedAt = dealer?.markedDoneAt ? new Date(dealer.markedDoneAt) : null;
+        if (eventStatus === "done") {
+          if (!visitedByCode.has(dealerCode)) {
+            visitedByCode.set(dealerCode, {
+              count: 0,
+              lastVisitedAt: null,
+            });
+          }
+          const node = visitedByCode.get(dealerCode);
+          node.count += 1;
+          if (visitedAt && (!node.lastVisitedAt || visitedAt > node.lastVisitedAt)) {
+            node.lastVisitedAt = visitedAt;
+          }
+        }
+
+        if (normalizedStatus !== "all" && normalizedStatus !== eventStatus) {
+          continue;
+        }
+
+        dayBuckets.get(dayLabel).push({
+          dealerCode,
+          dealerName: dealer?.name || "",
+          status: eventStatus,
+          town: dealer?.town || "",
+          zone: dealer?.zone || "",
+          latitude: parseLatLong(dealer?.latitude ?? dealer?.lat),
+          longitude: parseLatLong(dealer?.longitude ?? dealer?.long),
+          visitedAtIST: toIST(visitedAt),
+          sortAt: visitedAt || doc.startDate,
+          sortTs: (visitedAt || doc.startDate)?.getTime?.() || 0,
+        });
+      }
+    }
+
+    const dealerCodes = [...plannedByCode.keys()];
+    const [dealerUsers, hierarchyEntries] = await Promise.all([
+      dealerCodes.length
+        ? User.find(
+            { code: { $in: dealerCodes } },
+            { code: 1, category: 1, top_outlet: 1, town: 1, zone: 1, _id: 0 }
+          ).lean()
+        : Promise.resolve([]),
+      dealerCodes.length
+        ? HierarchyEntries.find(
+            { hierarchy_name: DEFAULT_FLOW_NAME, dealer: { $in: dealerCodes } },
+            { dealer: 1, mdd: 1, _id: 0 }
+          ).lean()
+        : Promise.resolve([]),
+    ]);
+
+    const dealerUserByCode = new Map(dealerUsers.map((d) => [String(d.code || "").trim(), d]));
+    const mddByDealer = new Map();
+    for (const row of hierarchyEntries) {
+      const dCode = String(row?.dealer || "").trim();
+      const mddCode = String(row?.mdd || "").trim();
+      if (dCode && mddCode && !mddByDealer.has(dCode)) mddByDealer.set(dCode, mddCode);
+    }
+
+    const mddCodes = [...new Set([...mddByDealer.values()].filter(Boolean))];
+    const mddUsers = mddCodes.length
+      ? await User.find({ code: { $in: mddCodes } }, { code: 1, name: 1, _id: 0 }).lean()
+      : [];
+    const mddNameByCode = new Map(
+      mddUsers.map((m) => [String(m.code || "").trim(), String(m.name || "").trim()])
+    );
+
+    for (const [dealerCode, dealer] of plannedByCode.entries()) {
+      const u = dealerUserByCode.get(dealerCode) || {};
+      dealer.category = u?.category || null;
+      dealer.topDealer = u?.top_outlet === true;
+      dealer.town = u?.town || dealer.town || "";
+      dealer.zone = u?.zone || dealer.zone || "";
+      dealer.mddCode = mddByDealer.get(dealerCode) || "";
+      dealer.mddName = dealer.mddCode ? (mddNameByCode.get(dealer.mddCode) || "") : "";
+    }
+
+    const timelineDays = [...dayBuckets.entries()]
+      .map(([date, events]) => ({
+        date,
+        dayLabel: moment.tz(date, "Asia/Kolkata").format("ddd, DD MMM"),
+        events: (() => {
+          const sorted = events
+            .sort((a, b) => (a.sortTs || 0) - (b.sortTs || 0));
+
+          return sorted.map((e, idx) => {
+            const dealer = plannedByCode.get(e.dealerCode) || {};
+            const prev = idx > 0 ? sorted[idx - 1] : null;
+            const gapMinutes = prev
+              ? Math.max(
+                  0,
+                  Math.round(((e.sortTs || 0) - (prev.sortTs || 0)) / 60000)
+                )
+              : null;
+            return {
+              dealerCode: e.dealerCode,
+              dealerName: e.dealerName,
+              status: e.status,
+              town: dealer.town || e.town || "",
+              zone: dealer.zone || e.zone || "",
+              category: dealer.category || null,
+              topDealer: dealer.topDealer === true,
+              mddCode: dealer.mddCode || "",
+              mddName: dealer.mddName || "",
+              latitude: e.latitude,
+              longitude: e.longitude,
+              visitedAtIST: e.visitedAtIST,
+              dealerTotalVisits: (visitedByCode.get(e.dealerCode)?.count || 0),
+              visitOrder: idx + 1,
+              isFirstVisit: idx == 0,
+              isLastVisit: idx == (sorted.length - 1),
+              gapFromPrevMinutes: gapMinutes,
+            };
+          });
+        })(),
+      }))
+      .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+    const untouchedDealers = [...plannedByCode.values()]
+      .filter((dealer) => !visitedByCode.has(dealer.code))
+      .map((dealer) => ({
+        code: dealer.code,
+        name: dealer.name,
+        mddCode: dealer.mddCode || "",
+        mddName: dealer.mddName || "",
+        topDealer: dealer.topDealer === true,
+        category: dealer.category || null,
+        town: dealer.town || null,
+        zone: dealer.zone || null,
+      }));
+
+    const dealerVisitCounts = [...plannedByCode.values()]
+      .map((dealer) => {
+        const visitMeta = visitedByCode.get(dealer.code) || {
+          count: 0,
+          lastVisitedAt: null,
+        };
+        return {
+          code: dealer.code,
+          name: dealer.name,
+          visits: visitMeta.count || 0,
+          lastVisitedAtIST: toIST(visitMeta.lastVisitedAt),
+          mddCode: dealer.mddCode || "",
+          mddName: dealer.mddName || "",
+          topDealer: dealer.topDealer === true,
+          category: dealer.category || null,
+          town: dealer.town || null,
+          zone: dealer.zone || null,
+        };
+      })
+      .sort((a, b) => b.visits - a.visits);
+
+    const visitedDealers = visitedByCode.size;
+    const plannedDealers = plannedByCode.size;
+    const untouchedCount = Math.max(plannedDealers - visitedDealers, 0);
+    const coveragePct = plannedDealers
+      ? Number(((visitedDealers / plannedDealers) * 100).toFixed(1))
+      : 0;
+
+    const allVisitedAt = [...visitedByCode.values()]
+      .map((v) => v.lastVisitedAt)
+      .filter(Boolean)
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          code: targetCode,
+          name: employee?.name || "",
+          position: normalize(employee?.position),
+        },
+        summary: {
+          plannedDealers,
+          visitedDealers,
+          untouchedDealers: untouchedCount,
+          coveragePct,
+          totalVisitEvents: [...visitedByCode.values()].reduce((s, x) => s + x.count, 0),
+          firstVisitAtIST: toIST(allVisitedAt[0] || null),
+          lastVisitAtIST: toIST(allVisitedAt[allVisitedAt.length - 1] || null),
+        },
+        timelineDays,
+        untouchedDealers,
+        dealerVisitCounts,
+      },
+      meta: {
+        startDate,
+        endDate,
+        status: normalizedStatus,
+      },
+    });
+  } catch (error) {
+    console.error("Error in getMarketCoverageUserTimeline:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
