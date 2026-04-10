@@ -657,7 +657,8 @@ exports.getSidebar = async (req, res) => {
     // ✅ 5️⃣ Otherwise, use firm-based logic
     else if (firm === "SiddhaCorp_01") {
       if (position === "zsm") sidebar = zsmSidebar();
-      else if (["asm", "tse", "so"].includes(position)) sidebar = asmTseSidebar();
+      else if (position === "asm") sidebar = asmSidebar();
+      else if (["tse", "so"].includes(position)) sidebar = tseSoSidebar();
       else sidebar = restSidebar();
     } 
     
@@ -702,8 +703,9 @@ const adminSidebar = () => [
     name: "Market Coverage",
     icon: "briefcase",
     children: [
-      { name: "Overview", route: "market_overview", icon: "map" },
-      { name: "Beats", route: "market_beats", icon: "route" },
+      { name: "Overview", route: "market_coverage", icon: "map" },
+      { name: "Beats", route: "market_coverage_mark", icon: "route" },
+      { name: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
     ],
   },
   {
@@ -742,8 +744,9 @@ const zsmSidebar = () => [
     name: "Market Coverage",
     icon: "briefcase",
     children: [
-      { name: "Overview", route: "market_overview", icon: "map" },
-      { name: "Beats", route: "market_beats", icon: "route" },
+      { name: "Overview", route: "market_coverage", icon: "map" },
+      { name: "Beats", route: "market_coverage_mark", icon: "route" },
+      { name: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
     ],
   },
   {
@@ -760,7 +763,7 @@ const zsmSidebar = () => [
   // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 
-const asmTseSidebar = () => [
+const asmSidebar = () => [
   { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
   { name: "Sales Dashboard", route: "sales_dashboard", icon: "barChart2" },
   {
@@ -775,7 +778,11 @@ const asmTseSidebar = () => [
   {
     name: "Market Coverage",
     icon: "briefcase",
-    children: [{ name: "Coverage", route: "market_coverage_mark", icon: "route" }],
+    children: [
+      { name: "Overview", route: "market_coverage", icon: "map" },
+      { name: "Coverage", route: "market_coverage_mark", icon: "route" },
+      { name: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
+    ],
   },
   {
     name: "HR",
@@ -791,8 +798,45 @@ const asmTseSidebar = () => [
   // { name: "Logout", route: "logout", icon: "logOut" },
 ];
 
+const tseSoSidebar = () => [
+  { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  { name: "Sales Dashboard", route: "sales_dashboard", icon: "barChart2" },
+  {
+    name: "Extraction",
+    icon: "database",
+    children: [{ name: "Add Data", route: "extraction_add", icon: "plusCircle" }],
+  },
+  {
+    name: "Market Coverage",
+    icon: "briefcase",
+    children: [
+      { name: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
+    ],
+  },
+  {
+    name: "HR",
+    icon: "users",
+    children: [
+      { name: "Attendance & Leave", route: "attendance", icon: "calendarCheck2" },
+      { name: "Bill Upload", route: "bill_upload", icon: "fileUp" },
+    ],
+  },
+  { name: "Geotagging", route: "geo_tagging", icon: "mapPin" },
+  { name: "Punch In/Out", route: "punch_in_out", icon: "fingerprint" },
+  { name: "Profile", route: "profile", icon: "user" },
+];
+
 const mddSidebar = () => [
   { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  {
+    name: "Market Coverage",
+    icon: "briefcase",
+    children: [
+      { name: "Overview", route: "market_coverage", icon: "map" },
+      { name: "Coverage", route: "market_coverage_mark", icon: "route" },
+      { name: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
+    ],
+  },
   {
     name: "Extraction",
     icon: "database",
@@ -803,6 +847,15 @@ const mddSidebar = () => [
 
 const restSidebar = () => [
   { name: "Dashboard", route: "dashboard", icon: "layoutDashboard" },
+  {
+    name: "Market Coverage",
+    icon: "briefcase",
+    children: [
+      { name: "Overview", route: "market_coverage", icon: "map" },
+      { name: "Coverage", route: "market_coverage_mark", icon: "route" },
+      { name: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
+    ],
+  },
   {
     name: "HR",
     icon: "users",

@@ -168,6 +168,7 @@ const adminDashboard = (user) => {
       { title: "Add Data", route: "extraction_add", icon: "plusCircle" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Market Coverage", route: "market_coverage", icon: "mapPin" },
+      { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
       { title: "Geotagging", route: "geo_tagging", icon: "map" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
@@ -201,7 +202,9 @@ const asmDashboard = (user) => {
     quickActions: [
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
       { title: "Extraction Status", route: "extraction_status_new", icon: "clipboardList" },
+      { title: "Coverage Dashboard", route: "market_coverage", icon: "map" },
       { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" },
+      { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
       { title: "Geotagging", route: "geo_tagging", icon: "map" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
@@ -234,6 +237,8 @@ const mddDashboard = (user) => {
 
     quickActions: [
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
+      { title: "Coverage Dashboard", route: "market_coverage", icon: "map" },
+      { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
       { title: "Route Plan", route: "route_plan", icon: "route" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
@@ -263,6 +268,16 @@ const orionAsmDashboard = (user) => {
     ],
 
     quickActions: [
+      {
+        title: "Coverage Dashboard",
+        route: "market_coverage",
+        icon: "map",
+      },
+      {
+        title: "My Timeline",
+        route: "market_timeline_self",
+        icon: "calendarCheck2",
+      },
       {
         title: "Punch In / Out",
         route: "punch_in_out",
@@ -294,6 +309,8 @@ const defaultDashboard = (user) => {
     ],
 
     quickActions: [
+      { title: "Coverage Dashboard", route: "market_coverage", icon: "map" },
+      { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
       { title: "Profile", route: "profile", icon: "user" },
       { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
     ],
@@ -302,6 +319,34 @@ const defaultDashboard = (user) => {
       {
         title: "Welcome",
         message: "Your dashboard is being prepared.",
+        type: "info",
+      },
+    ],
+  };
+};
+
+const tseSoDashboard = (user) => {
+  const base = getBaseDashboard(user);
+
+  return {
+    ...base,
+    visibleSections: [
+      "hero_header",
+      "attendance",
+      "quick_actions",
+      "notifications",
+    ],
+    quickActions: [
+      { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
+      { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
+      { title: "Geotagging", route: "geo_tagging", icon: "map" },
+      { title: "Route Plan", route: "route_plan", icon: "route" },
+      { title: "Punch In / Out", route: "punch_in_out", icon: "fingerprint" },
+    ],
+    notifications: [
+      {
+        title: "Reminder",
+        message: "Use timeline to track your market visits.",
         type: "info",
       },
     ],
@@ -336,8 +381,10 @@ exports.getDynamicDashboard = async (req, res) => {
       dashboard = adminDashboard(user);
     } else if (firm === "ORION" && position === "asm") {
       dashboard = orionAsmDashboard(user);
-    } else if (["asm", "tse", "so"].includes(position)) {
+    } else if (position === "asm") {
       dashboard = asmDashboard(user);
+    } else if (["tse", "so"].includes(position)) {
+      dashboard = tseSoDashboard(user);
     } else if (position === "mdd") {
       dashboard = mddDashboard(user);
     } else {

@@ -5,6 +5,7 @@ const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 
 const PRIVILEGED_ROLES = new Set(["admin", "super_admin", "hr"]);
+const DASHBOARD_BLOCKED_POSITIONS = new Set(["tse", "so"]);
 const DEFAULT_FLOW_NAME = "default_sales_flow";
 
 const normalize = (value) => String(value || "").trim().toLowerCase();
@@ -175,6 +176,28 @@ function getDoneVsTotal(scheduleDocs = []) {
   };
 }
 
+function collectDealerCodesFromSchedules(scheduleDocs = []) {
+  const dealerCodes = new Set();
+  for (const doc of scheduleDocs) {
+    for (const dealer of doc?.schedule || []) {
+      const dealerCode = String(dealer?.code || "").trim();
+      if (dealerCode) dealerCodes.add(dealerCode);
+    }
+  }
+  return dealerCodes;
+}
+
+function filterSchedulesByDealerSet(scheduleDocs = [], allowedDealerCodes = null) {
+  if (!allowedDealerCodes) return scheduleDocs;
+  return scheduleDocs.map((doc) => ({
+    ...doc,
+    schedule: (doc?.schedule || []).filter((dealer) => {
+      const dealerCode = String(dealer?.code || "").trim();
+      return dealerCode && allowedDealerCodes.has(dealerCode);
+    }),
+  }));
+}
+
 async function getScopedEmployees({ scope, effectivePositions = [], searchRegex = null }) {
   const userQuery = { status: "active" };
 
@@ -262,10 +285,21 @@ exports.getMarketCoverageDashboardRoles = async (req, res) => {
   try {
     const hierarchy = await getHierarchy();
     const scope = await getScopeForUser(req.user, hierarchy);
+    if (!scope.isPrivileged && DASHBOARD_BLOCKED_POSITIONS.has(scope.position)) {
+      return res.status(403).json({
+        success: false,
+        message: "Dashboard is not available for this position. Use timeline view.",
+      });
+    }
 
-    const positions = scope.isPrivileged
+    const basePositions = scope.isPrivileged
       ? hierarchy.filter((p) => p !== "dealer")
-      : scope.scopePositions;
+      : [scope.position, ...scope.scopePositions];
+    const positions = [...new Set(
+      basePositions
+        .map((p) => normalize(p))
+        .filter((p) => p && p !== "dealer")
+    )];
 
     return res.status(200).json({
       success: true,
@@ -285,7 +319,7 @@ exports.getMarketCoverageDashboardRoles = async (req, res) => {
 
 exports.getMarketCoverageDashboardOverview = async (req, res) => {
   try {
-    let { startDate, endDate, positions = [], search = "" } = req.body || {};
+    let { startDate, endDate, positions = [], search = "", topOutlet = false } = req.body || {};
 
     if (!startDate || !endDate) {
       return res.status(400).json({
@@ -296,6 +330,12 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
 
     const hierarchy = await getHierarchy();
     const scope = await getScopeForUser(req.user, hierarchy);
+    if (!scope.isPrivileged && DASHBOARD_BLOCKED_POSITIONS.has(scope.position)) {
+      return res.status(403).json({
+        success: false,
+        message: "Dashboard is not available for this position. Use timeline view.",
+      });
+    }
 
     const start = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
     const end = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
@@ -309,28 +349,11 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
     const effectivePositions = requestedPositions;
 
     const scheduledCodes = await getScheduledCodesInRange({ start, end });
-    if (!scheduledCodes.length) {
-      return res.status(200).json({
-        success: true,
-        data: [],
-        meta: {
-          totalEmployees: 0,
-          startDate,
-          endDate,
-          scope: {
-            role: scope.role,
-            position: scope.position,
-            privileged: scope.isPrivileged,
-          },
-        },
-      });
-    }
-
-    const scopedCodes = scope.isPrivileged
+    const scopedScheduledCodes = scope.isPrivileged
       ? scheduledCodes
       : scheduledCodes.filter((code) => scope.allowedCodes.includes(code));
 
-    if (!scopedCodes.length) {
+    if (!scopedScheduledCodes.length) {
       return res.status(200).json({
         success: true,
         data: [],
@@ -350,7 +373,7 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
     const users = await User.find(
       {
         status: "active",
-        code: { $in: scopedCodes },
+        code: { $in: scopedScheduledCodes },
         ...(effectivePositions.length
           ? { position: { $in: effectivePositions } }
           : {}),
@@ -389,7 +412,7 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
       });
     }
 
-    const [rangeSchedules, monthSchedules] = await Promise.all([
+    let [rangeSchedules, monthSchedules] = await Promise.all([
       WeeklyBeatMappingSchedule.find({
         code: { $in: userCodes },
         startDate: { $lte: end },
@@ -402,10 +425,32 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
       }).lean(),
     ]);
 
+    const topOnly = topOutlet === true;
+    if (topOnly) {
+      const dealerCodes = new Set([
+        ...collectDealerCodesFromSchedules(rangeSchedules),
+        ...collectDealerCodesFromSchedules(monthSchedules),
+      ]);
+      if (dealerCodes.size) {
+        const topDealers = await User.find(
+          { code: { $in: [...dealerCodes] }, top_outlet: true },
+          { code: 1, _id: 0 }
+        ).lean();
+        const topDealerCodes = new Set(
+          topDealers.map((d) => String(d.code || "").trim()).filter(Boolean)
+        );
+        rangeSchedules = filterSchedulesByDealerSet(rangeSchedules, topDealerCodes);
+        monthSchedules = filterSchedulesByDealerSet(monthSchedules, topDealerCodes);
+      } else {
+        rangeSchedules = [];
+        monthSchedules = [];
+      }
+    }
+
     const rangeMap = groupSchedulesByCode(rangeSchedules);
     const monthMap = groupSchedulesByCode(monthSchedules);
 
-    const data = users.map((user) => {
+    const rawData = users.map((user) => {
       const code = String(user.code || "").trim();
       const todayCounts = getDoneVsTotal(rangeMap.get(code) || []);
       const monthCounts = getDoneVsTotal(monthMap.get(code) || []);
@@ -424,6 +469,9 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
         ovPending: monthCounts.pending,
       };
     });
+    const data = topOnly
+      ? rawData.filter((row) => (row.total > 0 || row.ovTotal > 0))
+      : rawData;
 
     return res.status(200).json({
       success: true,
@@ -432,6 +480,7 @@ exports.getMarketCoverageDashboardOverview = async (req, res) => {
         totalEmployees: data.length,
         startDate,
         endDate,
+        topOutlet: topOnly,
         scope: {
           role: scope.role,
           position: scope.position,
@@ -453,6 +502,7 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
       positions = [],
       search = "",
       recentDays = 7,
+      topOutlet = false,
     } = req.body || {};
 
     if (!startDate || !endDate) {
@@ -464,6 +514,12 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
 
     const hierarchy = await getHierarchy();
     const scope = await getScopeForUser(req.user, hierarchy);
+    if (!scope.isPrivileged && DASHBOARD_BLOCKED_POSITIONS.has(scope.position)) {
+      return res.status(403).json({
+        success: false,
+        message: "Dashboard is not available for this position. Use timeline view.",
+      });
+    }
 
     const start = moment.tz(startDate, "Asia/Kolkata").startOf("day").toDate();
     const end = moment.tz(endDate, "Asia/Kolkata").endOf("day").toDate();
@@ -481,15 +537,15 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
     const effectivePositions = requestedPositions;
     const searchRegex = compileSearchQuery(search);
     const scheduledCodes = await getScheduledCodesInRange({ start, end });
-    const scopedCodes = scope.isPrivileged
+    const scopedScheduledCodes = scope.isPrivileged
       ? scheduledCodes
       : scheduledCodes.filter((code) => scope.allowedCodes.includes(code));
 
-    const users = scopedCodes.length
+    const users = scopedScheduledCodes.length
       ? await User.find(
           {
             status: "active",
-            code: { $in: scopedCodes },
+            code: { $in: scopedScheduledCodes },
             ...(effectivePositions.length
               ? { position: { $in: effectivePositions } }
               : {}),
@@ -559,11 +615,36 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
       endDate: { $gte: recentStart },
     };
 
-    const [rangeSchedules, todaySchedules, recentSchedules] = await Promise.all([
+    let [rangeSchedules, todaySchedules, recentSchedules] = await Promise.all([
       WeeklyBeatMappingSchedule.find(overlapRangeQuery).lean(),
       WeeklyBeatMappingSchedule.find(overlapTodayQuery).lean(),
       WeeklyBeatMappingSchedule.find(overlapRecentQuery).lean(),
     ]);
+
+    const topOnly = topOutlet === true;
+    if (topOnly) {
+      const dealerCodes = new Set([
+        ...collectDealerCodesFromSchedules(rangeSchedules),
+        ...collectDealerCodesFromSchedules(todaySchedules),
+        ...collectDealerCodesFromSchedules(recentSchedules),
+      ]);
+      if (dealerCodes.size) {
+        const topDealers = await User.find(
+          { code: { $in: [...dealerCodes] }, top_outlet: true },
+          { code: 1, _id: 0 }
+        ).lean();
+        const topDealerCodes = new Set(
+          topDealers.map((d) => String(d.code || "").trim()).filter(Boolean)
+        );
+        rangeSchedules = filterSchedulesByDealerSet(rangeSchedules, topDealerCodes);
+        todaySchedules = filterSchedulesByDealerSet(todaySchedules, topDealerCodes);
+        recentSchedules = filterSchedulesByDealerSet(recentSchedules, topDealerCodes);
+      } else {
+        rangeSchedules = [];
+        todaySchedules = [];
+        recentSchedules = [];
+      }
+    }
 
     const rangeMap = groupSchedulesByCode(rangeSchedules);
     const todayMap = groupSchedulesByCode(todaySchedules);
@@ -625,6 +706,10 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
       consumeSchedules(userRange, plannedDealers, doneDealers);
       consumeSchedules(userToday, todayPlanned, todayDone);
       consumeSchedules(userRecent, new Set(), recentDone);
+
+      if (topOnly && plannedDealers.size === 0 && todayPlanned.size === 0) {
+        continue;
+      }
 
       const planned = plannedDealers.size;
       const done = doneDealers.size;
@@ -873,7 +958,7 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
       success: true,
       data: {
         summary: {
-          employees: users.length,
+          employees: employeePerformance.length,
           planned: totalPlanned,
           done: totalDone,
           pending: totalPending,
@@ -905,6 +990,7 @@ exports.getMarketCoverageDashboardAnalytics = async (req, res) => {
         startDate,
         endDate,
         recentDays: safeRecentDays,
+        topOutlet: topOnly,
         scope: {
           role: scope.role,
           position: scope.position,
@@ -922,6 +1008,12 @@ exports.getMarketCoverageDashboardDropdown = async (req, res) => {
   try {
     const hierarchy = await getHierarchy();
     const scope = await getScopeForUser(req.user, hierarchy);
+    if (!scope.isPrivileged && DASHBOARD_BLOCKED_POSITIONS.has(scope.position)) {
+      return res.status(403).json({
+        success: false,
+        message: "Dashboard is not available for this position. Use timeline view.",
+      });
+    }
     const users = await getUsersByHierarchyScope(scope);
 
     const districts = new Set();
