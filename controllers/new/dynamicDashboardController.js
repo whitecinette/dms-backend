@@ -338,6 +338,7 @@ const tseSoDashboard = (user) => {
     ],
     quickActions: [
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
+      { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" }, // <-- add this
       { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
       { title: "Geotagging", route: "geo_tagging", icon: "map" },
       { title: "Route Plan", route: "route_plan", icon: "route" },

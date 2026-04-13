@@ -1225,7 +1225,7 @@ exports.getMarketCoverageDashboardReport = async (req, res) => {
 
 exports.getMarketCoverageUserTimeline = async (req, res) => {
   try {
-    let { code, startDate, endDate, status = "all" } = req.body || {};
+    let { code, startDate, endDate, status = "all", topOutlet = false } = req.body || {};
 
     if (!code || !startDate || !endDate) {
       return res.status(400).json({
@@ -1257,6 +1257,22 @@ exports.getMarketCoverageUserTimeline = async (req, res) => {
         endDate: { $gte: start },
       }).lean(),
     ]);
+    const topOnly = topOutlet === true;
+    let allowedTopDealerCodes = null;
+    if (topOnly) {
+      const dealerCodesInRange = [...collectDealerCodesFromSchedules(schedules)];
+      if (dealerCodesInRange.length) {
+        const topDealers = await User.find(
+          { code: { $in: dealerCodesInRange }, top_outlet: true },
+          { code: 1, _id: 0 }
+        ).lean();
+        allowedTopDealerCodes = new Set(
+          topDealers.map((d) => String(d.code || "").trim()).filter(Boolean)
+        );
+      } else {
+        allowedTopDealerCodes = new Set();
+      }
+    }
 
     const plannedByCode = new Map();
     const visitedByCode = new Map();
@@ -1272,6 +1288,7 @@ exports.getMarketCoverageUserTimeline = async (req, res) => {
       for (const dealer of doc.schedule || []) {
         const dealerCode = String(dealer?.code || "").trim();
         if (!dealerCode) continue;
+        if (topOnly && !allowedTopDealerCodes?.has(dealerCode)) continue;
 
         const eventStatus = normalize(dealer?.status) === "done" ? "done" : "pending";
 
@@ -1474,6 +1491,7 @@ exports.getMarketCoverageUserTimeline = async (req, res) => {
         startDate,
         endDate,
         status: normalizedStatus,
+        topOutlet: topOnly,
       },
     });
   } catch (error) {
