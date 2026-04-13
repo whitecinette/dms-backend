@@ -5,6 +5,7 @@ const Product = require("../../model/ProductMaster");
 const User = require("../../model/User");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 const ActorTypesHierarchy = require("../../model/ActorTypesHierarchy");
+const { resolveScope, resolveFlowHierarchy } = require("../../services/resolvers");
 
 
 /////////////////////////////
@@ -61,9 +62,28 @@ function cleanUnique(values = []) {
   return [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))].sort();
 }
 
+function parseJsonObject(value) {
+  if (!value) return {};
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
 exports.getExtractionFilterValues = async (req, res) => {
   try {
-    const { type, position } = req.query;
+    const { type, position, flow_name = "default_sales_flow" } = req.query;
+    const subordinate_filters = parseJsonObject(req.query.subordinate_filters);
+    const dealer_filters = parseJsonObject(req.query.dealer_filters);
 
     if (!type) {
       return res.status(400).json({
@@ -81,24 +101,52 @@ exports.getExtractionFilterValues = async (req, res) => {
         });
       }
 
+      const hierarchy = await resolveFlowHierarchy(flow_name);
+      const normalizedPosition = String(position).trim().toLowerCase();
+
+      if (!hierarchy.includes(normalizedPosition)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid actor position: ${position}`,
+        });
+      }
+
+      const scopedCodes = await resolveScope({
+        user: req.user,
+        flow_name,
+        subordinate_filters,
+        dealer_filters,
+        exclude_positions: [],
+      });
+
+      const actorCodes = cleanUnique(scopedCodes?.[normalizedPosition] || []);
+
       const actorUsers = await User.find({
-        position: String(position).trim().toLowerCase(),
+        code: { $in: actorCodes },
         status: "active",
       })
         .select("name code position")
-        .sort({ name: 1 })
         .lean();
+
+      const userMap = new Map(
+        actorUsers.map((user) => [String(user.code || "").trim(), user])
+      );
 
       return res.status(200).json({
         success: true,
         type,
-        values: actorUsers.map((u) => ({
-          label: `${u.name} (${u.code})`,
-          name: u.name,
-          code: u.code,
-          position: u.position,
-          value: u.code,
-        })),
+        values: actorCodes.map((code) => {
+          const user = userMap.get(code);
+          const displayName = user?.name || code;
+
+          return {
+            label: `${displayName} (${code})`,
+            name: displayName,
+            code,
+            position: user?.position || normalizedPosition,
+            value: code,
+          };
+        }),
       });
     }
 
@@ -107,6 +155,17 @@ exports.getExtractionFilterValues = async (req, res) => {
       role: "dealer",
       status: "active",
     };
+
+    const scopedCodes = await resolveScope({
+      user: req.user,
+      flow_name,
+      subordinate_filters,
+      dealer_filters,
+      exclude_positions: [],
+    });
+
+    const dealerCodes = cleanUnique(scopedCodes?.dealer || []);
+    dealerQuery.code = { $in: dealerCodes };
 
     let projection = "";
     if (type === "zone") projection = "zone";

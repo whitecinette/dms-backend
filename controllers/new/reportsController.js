@@ -1,11 +1,12 @@
 const ActivationData = require("../../model/ActivationData");
 const SecondaryData = require("../../model/SecondaryData");
 const TertiaryData = require("../../model/TertiaryData");
+const DealerHierarchy = require("../../model/DealerHierarchy");
 const moment = require("moment");
-const { getDealerCodesFromFilters } = require("../../services/dealerFilterService");
 const momentTz = require("moment-timezone");
 const ProductMaster = require("../../model/ProductMaster");
 const { PRICE_SEGMENTS } = require("../../config/price_segment_config");
+const { resolveScope } = require("../../services/resolvers");
 const {
   getPriceSegmentSummaryActivation,
   getPrice40kSplitSummaryActivation, // (if you created this)
@@ -22,10 +23,150 @@ const {
   getAllActualYtdReports,
 } = require("../../services/reports/ytdActual.service");
 
+function normalizeFilterArray(values) {
+  if (!Array.isArray(values)) return [];
+
+  return values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateDashboardSummaryRequest({
+  start_date,
+  end_date,
+  flow_name,
+  filters,
+  subordinate_filters,
+  dealer_filters,
+}) {
+  const allowedReportTypes = new Set([
+    "activation",
+    "tertiary",
+    "secondary",
+    "wod",
+    "price_segment",
+    "price_segment_40k",
+    "activation_value_ytd",
+    "activation_vol_ytd",
+    "tertiary_value_ytd",
+    "tertiary_vol_ytd",
+    "ytd_all",
+    "activation_value_ytd_actual",
+    "activation_vol_ytd_actual",
+    "tertiary_value_ytd_actual",
+    "tertiary_vol_ytd_actual",
+    "ytd_actual_all",
+  ]);
+
+  if (start_date && !moment(start_date, "YYYY-MM-DD", true).isValid()) {
+    return "start_date must be in YYYY-MM-DD format";
+  }
+
+  if (end_date && !moment(end_date, "YYYY-MM-DD", true).isValid()) {
+    return "end_date must be in YYYY-MM-DD format";
+  }
+
+  if (start_date && end_date) {
+    const startDate = moment(start_date, "YYYY-MM-DD", true);
+    const endDate = moment(end_date, "YYYY-MM-DD", true);
+
+    if (startDate.isAfter(endDate)) {
+      return "start_date cannot be after end_date";
+    }
+  }
+
+  if (flow_name !== undefined && typeof flow_name !== "string") {
+    return "flow_name must be a string";
+  }
+
+  if (!isPlainObject(filters)) {
+    return "filters must be an object";
+  }
+
+  if (!allowedReportTypes.has(filters.report_type)) {
+    return "filters.report_type is invalid";
+  }
+
+  if (subordinate_filters !== undefined && !isPlainObject(subordinate_filters)) {
+    return "subordinate_filters must be an object";
+  }
+
+  if (dealer_filters !== undefined && !isPlainObject(dealer_filters)) {
+    return "dealer_filters must be an object";
+  }
+
+  return null;
+}
+
+function mergeLegacySubordinateFilters(filters = {}, subordinateFilters = {}) {
+  const mergedFilters = { ...subordinateFilters };
+  const subordinateKeys = ["sh", "zsm", "asm", "mdd", "tse", "dealer"];
+
+  subordinateKeys.forEach((key) => {
+    if (Array.isArray(mergedFilters[key]) && mergedFilters[key].length) return;
+
+    const legacyValues = normalizeFilterArray(filters[key]);
+    if (legacyValues.length) {
+      mergedFilters[key] = legacyValues;
+    }
+  });
+
+  return mergedFilters;
+}
+
+async function resolveDashboardReportScope({
+  user,
+  flow_name = "default_sales_flow",
+  subordinate_filters = {},
+  dealer_filters = {},
+}) {
+  const scope = await resolveScope({
+    user,
+    flow_name,
+    subordinate_filters,
+    dealer_filters,
+    exclude_positions: [],
+  });
+
+  const dealerCodes = Array.isArray(scope?.dealer) ? scope.dealer : [];
+
+  const secondaryMappings = dealerCodes.length
+    ? await DealerHierarchy.find({
+        dealer_code: { $in: dealerCodes },
+      })
+        .select("beat_code")
+        .lean()
+    : [];
+
+  const mddCodes = [
+    ...new Set(
+      secondaryMappings
+        .map((entry) => String(entry?.beat_code || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+
+  return {
+    scope,
+    dealerCodes,
+    mddCodes,
+  };
+}
 
 exports.getDashboardSummary = async (req, res) => {
   try {
-    let { start_date, end_date, filters = {} } = req.body;
+    let {
+      start_date,
+      end_date,
+      flow_name = "default_sales_flow",
+      filters = {},
+      subordinate_filters = {},
+      dealer_filters = {},
+    } = req.body;
     const user = req.user;
 
     const reportType = filters?.report_type;
@@ -33,6 +174,22 @@ exports.getDashboardSummary = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "filters.report_type is required",
+      });
+    }
+
+    const validationError = validateDashboardSummaryRequest({
+      start_date,
+      end_date,
+      flow_name,
+      filters,
+      subordinate_filters,
+      dealer_filters,
+    });
+
+    if (validationError) {
+      return res.status(400).json({
+        success: false,
+        message: validationError,
       });
     }
 
@@ -45,8 +202,25 @@ exports.getDashboardSummary = async (req, res) => {
       end_date = yesterday.format("YYYY-MM-DD");
     }
 
-    const { dealerCodes = [], mddCodes = [] } =
-      await getDealerCodesFromFilters(filters, user);
+    const effectiveSubordinateFilters = mergeLegacySubordinateFilters(
+      filters,
+      subordinate_filters
+    );
+
+    const effectiveDealerFilters =
+      dealer_filters && typeof dealer_filters === "object" && !Array.isArray(dealer_filters)
+        ? dealer_filters
+        : {};
+
+    const {
+      dealerCodes = [],
+      mddCodes = [],
+    } = await resolveDashboardReportScope({
+      user,
+      flow_name,
+      subordinate_filters: effectiveSubordinateFilters,
+      dealer_filters: effectiveDealerFilters,
+    });
 
     const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
     const endDate = moment(end_date, "YYYY-MM-DD").endOf("day");
@@ -73,6 +247,10 @@ exports.getDashboardSummary = async (req, res) => {
     ];
 
     const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+    const hasScopeFilters =
+      Object.keys(effectiveSubordinateFilters).length > 0 ||
+      Object.keys(effectiveDealerFilters).length > 0;
+    const allowAdminBypass = isAdmin && !hasScopeFilters;
 
     let data;
 
@@ -92,7 +270,7 @@ exports.getDashboardSummary = async (req, res) => {
           lmtdEnd,
           ftdRawDate,
           true,
-          isAdmin
+          allowAdminBypass
         );
         break;
 
@@ -111,7 +289,7 @@ exports.getDashboardSummary = async (req, res) => {
           lmtdEnd,
           ftdRawDate,
           true,
-          isAdmin
+          allowAdminBypass
         );
         break;
 
@@ -130,7 +308,7 @@ exports.getDashboardSummary = async (req, res) => {
           lmtdEnd,
           ftdRawDate,
           false,
-          isAdmin
+          allowAdminBypass
         );
         break;
 
@@ -143,7 +321,7 @@ exports.getDashboardSummary = async (req, res) => {
           lmtdEnd,
           ftdRawDate,
           lastThreeMonths,
-          isAdmin
+          allowAdminBypass
         );
         break;
 
@@ -156,7 +334,7 @@ exports.getDashboardSummary = async (req, res) => {
           lmtdEnd,
           ftdRawDate,
           lastThreeMonths,
-          isAdmin
+          allowAdminBypass
         );
         break;
 
@@ -180,7 +358,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getActivationPaceYtdReports({
           ActivationData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).activationValueYtd;
         break;
 
@@ -188,7 +366,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getActivationPaceYtdReports({
           ActivationData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).activationVolYtd;
         break;
 
@@ -196,7 +374,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getTertiaryPaceYtdReports({
           TertiaryData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).tertiaryValueYtd;
         break;
 
@@ -204,7 +382,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getTertiaryPaceYtdReports({
           TertiaryData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).tertiaryVolYtd;
         break;
 
@@ -213,7 +391,7 @@ exports.getDashboardSummary = async (req, res) => {
           ActivationData,
           TertiaryData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         });
         break;
 
@@ -224,7 +402,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getActivationActualYtdReports({
           ActivationData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).activationValueYtdActual;
         break;
 
@@ -232,7 +410,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getActivationActualYtdReports({
           ActivationData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).activationVolYtdActual;
         break;
 
@@ -240,7 +418,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getTertiaryActualYtdReports({
           TertiaryData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).tertiaryValueYtdActual;
         break;
 
@@ -248,7 +426,7 @@ exports.getDashboardSummary = async (req, res) => {
         data = (await getTertiaryActualYtdReports({
           TertiaryData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         })).tertiaryVolYtdActual;
         break;
 
@@ -257,7 +435,7 @@ exports.getDashboardSummary = async (req, res) => {
           ActivationData,
           TertiaryData,
           dealerCodes,
-          isAdmin,
+          allowAdminBypass,
         });
         break;
 
@@ -271,7 +449,12 @@ exports.getDashboardSummary = async (req, res) => {
 
     return res.json({
       success: true,
+      flow_name,
       report_type: reportType,
+      applied_filters: {
+        subordinate_filters: effectiveSubordinateFilters,
+        dealer_filters: effectiveDealerFilters,
+      },
       [reportType]: data,
     });
   } catch (error) {
