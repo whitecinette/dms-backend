@@ -65,6 +65,28 @@ function parseDumpFile(buffer, originalname) {
   });
 }
 
+function parseCsvRowsWithHeaders(buffer) {
+  const text = buffer.toString("utf8").replace(/^\uFEFF/, "");
+  const rows = parse(text, {
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+    delimiter: text.includes("\t") ? "\t" : ",",
+  });
+
+  if (!rows.length) {
+    return { headers: [], rows: [] };
+  }
+
+  const headers = (rows[0] || []).map((header) => String(header || "").trim());
+  const body = rows.slice(1);
+
+  return {
+    headers,
+    rows: body.map((row) => headers.map((_, index) => row?.[index] ?? "")),
+  };
+}
+
 // ---------- helpers ----------
 function toNumber(val) {
   if (val === null || val === undefined) return 0;
@@ -94,6 +116,33 @@ function cleanCode(v) {
 }
 function cleanName(v) {
   return String(v || "").trim();
+}
+
+function normalizeTagValue(value) {
+  return String(value || "").trim();
+}
+
+function normalizeTagKey(value) {
+  return normalizeTagValue(value).toLowerCase();
+}
+
+function dedupeTagsCaseInsensitive(tags = []) {
+  const seen = new Set();
+  const output = [];
+
+  tags.forEach((tag) => {
+    const cleaned = normalizeTagValue(tag);
+    const key = normalizeTagKey(cleaned);
+
+    if (!cleaned || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    output.push(cleaned);
+  });
+
+  return output;
 }
 
 // bucket from numeric price (preferred)
@@ -199,16 +248,18 @@ exports.uploadSamsungDumpProducts = async (req, res) => {
     // find existing
     const existing = await Product.find(
       { brand, product_code: { $in: uniqueCodes } },
-      { product_code: 1 }
+      { product_code: 1, price: 1, segment: 1 }
     ).lean();
 
+    const existingMap = new Map(
+      existing.map((p) => [String(p.product_code), p])
+    );
     const existingSet = new Set(existing.map((p) => String(p.product_code)));
 
-    // build docs to insert (only missing)
+    // build docs to insert/update
     const toInsert = [];
+    const toUpdate = [];
     for (const code of uniqueCodes) {
-      if (existingSet.has(code)) continue;
-
       const r = map.get(code);
 
       const product_name = String(r.MarketName || "").trim();
@@ -221,6 +272,23 @@ exports.uploadSamsungDumpProducts = async (req, res) => {
 
       // skip invalid
       if (!product_name || !price) continue;
+
+      const existingProduct = existingMap.get(code);
+      if (existingProduct) {
+        const priceChanged = Number(existingProduct.price || 0) !== Number(price);
+        const segmentChanged = String(existingProduct.segment || "") !== String(segment || "");
+
+        if (priceChanged || segmentChanged) {
+          toUpdate.push({
+            product_code: code,
+            oldPrice: existingProduct.price ?? null,
+            newPrice: price,
+            oldSegment: existingProduct.segment || "",
+            newSegment: segment,
+          });
+        }
+        continue;
+      }
 
       toInsert.push({
         brand,
@@ -246,34 +314,295 @@ exports.uploadSamsungDumpProducts = async (req, res) => {
       uniqueProductsInFile: uniqueCodes.length,
       existingInDb: existingSet.size,
       toInsert: toInsert.length,
+      toUpdate: toUpdate.length,
       inserted: 0,
-      skipped: uniqueCodes.length - toInsert.length,
+      updated: 0,
+      skipped: uniqueCodes.length - toInsert.length - toUpdate.length,
       errors: 0,
     };
 
     if (dryRun) {
-      return res.json({ ...summary, sampleNewProducts: toInsert.slice(0, 20) });
+      return res.json({
+        ...summary,
+        sampleNewProducts: toInsert.slice(0, 20),
+        sampleUpdates: toUpdate.slice(0, 20),
+      });
+    }
+
+    if (!toInsert.length && !toUpdate.length) {
+      return res.json({ ...summary, message: "No product inserts or updates required" });
+    }
+
+    if (toUpdate.length) {
+      const bulkOps = toUpdate.map((item) => ({
+        updateOne: {
+          filter: { brand, product_code: item.product_code },
+          update: {
+            $set: {
+              price: item.newPrice,
+              segment: item.newSegment,
+            },
+          },
+        },
+      }));
+
+      const updateResult = await Product.bulkWrite(bulkOps, { ordered: false });
+      summary.updated = updateResult.modifiedCount || 0;
     }
 
     if (!toInsert.length) {
-      return res.json({ ...summary, message: "No new products to insert" });
+      summary.message = `Updated ${summary.updated} existing products`;
+      return res.json(summary);
     }
 
     try {
       const insertedDocs = await Product.insertMany(toInsert, { ordered: false });
       summary.inserted = insertedDocs.length;
-      summary.message = `Inserted ${summary.inserted} new products`;
+      summary.message = `Inserted ${summary.inserted} new products and updated ${summary.updated} existing products`;
       return res.json(summary);
     } catch (err) {
       const writeErrors = err?.writeErrors || [];
       summary.inserted = Math.max(0, toInsert.length - writeErrors.length);
       summary.errors = writeErrors.length;
-      summary.message = `Inserted ${summary.inserted} new products (some duplicates skipped)`;
+      summary.message = `Inserted ${summary.inserted} new products and updated ${summary.updated} existing products (some duplicates skipped)`;
       return res.json(summary);
     }
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Dump sync failed" });
+  }
+};
+
+exports.uploadSamsungProductTagsFromCsv = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ message: "File is required" });
+    }
+
+    const originalname = String(req.file.originalname || "").toLowerCase();
+    if (!originalname.endsWith(".csv")) {
+      return res.status(400).json({ message: "Only CSV files are allowed" });
+    }
+
+    const dryRun = String(req.query.dryRun || "false").toLowerCase() === "true";
+    const { headers, rows } = parseCsvRowsWithHeaders(req.file.buffer);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "Empty CSV file" });
+    }
+
+    const codeIndex = headers.findIndex(
+      (header) => String(header || "").trim().toLowerCase() === "code"
+    );
+    const tagIndexes = headers.reduce((acc, header, index) => {
+      if (String(header || "").trim().toLowerCase() === "tag") {
+        acc.push(index);
+      }
+      return acc;
+    }, []);
+
+    if (codeIndex === -1) {
+      return res.status(400).json({ message: "Missing required 'code' column" });
+    }
+
+    if (!tagIndexes.length) {
+      return res.status(400).json({ message: "At least one 'tag' column is required" });
+    }
+
+    const normalizedRows = [];
+    const invalidRows = [];
+
+    rows.forEach((row, index) => {
+      const rowNumber = index + 2;
+      const code = cleanCode(row?.[codeIndex]);
+      const tags = dedupeTagsCaseInsensitive(
+        tagIndexes.map((tagIndex) => row?.[tagIndex])
+      );
+
+      if (!code) {
+        invalidRows.push({
+          rowNumber,
+          code: null,
+          reason: "Missing code",
+        });
+        return;
+      }
+
+      if (!tags.length) {
+        invalidRows.push({
+          rowNumber,
+          code,
+          reason: "No tags found in row",
+        });
+        return;
+      }
+
+      normalizedRows.push({
+        rowNumber,
+        code,
+        tags,
+      });
+    });
+
+    if (!normalizedRows.length) {
+      return res.status(400).json({
+        message: "No valid code/tag rows found in CSV",
+        invalidRows,
+      });
+    }
+
+    const fileMap = new Map();
+    normalizedRows.forEach((row) => {
+      const existing = fileMap.get(row.code);
+      if (!existing) {
+        fileMap.set(row.code, {
+          code: row.code,
+          rowNumbers: [row.rowNumber],
+          tags: [...row.tags],
+        });
+        return;
+      }
+
+      existing.rowNumbers.push(row.rowNumber);
+      existing.tags = dedupeTagsCaseInsensitive([...existing.tags, ...row.tags]);
+    });
+
+    const finalRows = Array.from(fileMap.values());
+    const codes = finalRows.map((row) => row.code);
+
+    const existingProducts = await Product.find(
+      { brand: "samsung", product_code: { $in: codes } },
+      {
+        _id: 1,
+        product_code: 1,
+        product_name: 1,
+        model_code: 1,
+        tags: 1,
+        status: 1,
+      }
+    ).lean();
+
+    const productMap = new Map(
+      existingProducts.map((product) => [cleanCode(product.product_code), product])
+    );
+
+    const changedProducts = [];
+    const inactiveProducts = [];
+    const notFoundProducts = [];
+    const unchangedProducts = [];
+
+    finalRows.forEach((row) => {
+      const product = productMap.get(row.code);
+
+      if (!product) {
+        notFoundProducts.push({
+          code: row.code,
+          rowNumbers: row.rowNumbers,
+        });
+        return;
+      }
+
+      const existingTags = Array.isArray(product.tags)
+        ? dedupeTagsCaseInsensitive(product.tags)
+        : [];
+      const existingTagSet = new Set(existingTags.map((tag) => normalizeTagKey(tag)));
+      const newTags = row.tags.filter((tag) => !existingTagSet.has(normalizeTagKey(tag)));
+      const finalTags = [...existingTags, ...newTags];
+
+      if (String(product.status || "").toLowerCase() === "inactive") {
+        inactiveProducts.push({
+          code: row.code,
+          product_name: product.product_name || "",
+          status: product.status || "inactive",
+          rowNumbers: row.rowNumbers,
+        });
+      }
+
+      if (!newTags.length) {
+        unchangedProducts.push({
+          code: row.code,
+          product_name: product.product_name || "",
+          existingTags,
+          requestedTags: row.tags,
+          rowNumbers: row.rowNumbers,
+        });
+        return;
+      }
+
+      changedProducts.push({
+        _id: product._id,
+        code: row.code,
+        product_name: product.product_name || "",
+        model_code: product.model_code || "",
+        existingTags,
+        addedTags: newTags,
+        finalTags,
+        rowNumbers: row.rowNumbers,
+        status: product.status || "",
+      });
+    });
+
+    const summary = {
+      success: true,
+      dryRun,
+      totalRows: rows.length,
+      validRows: normalizedRows.length,
+      invalidRows: invalidRows.length,
+      uniqueCodesInFile: finalRows.length,
+      foundInDb: finalRows.length - notFoundProducts.length,
+      changed: changedProducts.length,
+      updated: 0,
+      unchanged: unchangedProducts.length,
+      inactiveInList: inactiveProducts.length,
+      notFoundInDb: notFoundProducts.length,
+      totalNewTagsAdded: changedProducts.reduce(
+        (count, item) => count + item.addedTags.length,
+        0
+      ),
+      skippedRows: invalidRows,
+      inactiveProducts,
+      notFoundProducts,
+      sampleChangedProducts: changedProducts.slice(0, 25).map((item) => ({
+        code: item.code,
+        product_name: item.product_name,
+        model_code: item.model_code,
+        existingTags: item.existingTags,
+        addedTags: item.addedTags,
+        finalTags: item.finalTags,
+        status: item.status,
+      })),
+      sampleUnchangedProducts: unchangedProducts.slice(0, 25),
+    };
+
+    if (dryRun) {
+      summary.message = "Dry run completed for product tag sync";
+      return res.json(summary);
+    }
+
+    if (!changedProducts.length) {
+      summary.message = "No product tags needed updating";
+      return res.json(summary);
+    }
+
+    const bulkOps = changedProducts.map((item) => ({
+      updateOne: {
+        filter: { _id: item._id },
+        update: {
+          $addToSet: {
+            tags: { $each: item.addedTags },
+          },
+        },
+      },
+    }));
+
+    const bulkResult = await Product.bulkWrite(bulkOps, { ordered: false });
+    summary.updated = bulkResult.modifiedCount || changedProducts.length;
+    summary.message = `Updated tags for ${summary.updated} products`;
+
+    return res.json(summary);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Product tag sync failed", error: err.message });
   }
 };
 

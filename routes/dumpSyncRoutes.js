@@ -4,6 +4,7 @@ const { adminOrSuperAdminAuth } = require("../middlewares/authmiddlewares");
 
 const {
   uploadSamsungDumpProducts,
+  uploadSamsungProductTagsFromCsv,
   syncMddDealerFromDump,
   uploadTopDealerFromCsv,
   uploadSamsungDumpHierarchy,
@@ -19,6 +20,13 @@ router.post(
   upload.single("file"),
   adminOrSuperAdminAuth,
   uploadSamsungDumpProducts
+);
+
+router.post(
+  "/dump-sync/samsung-products/tags/upload",
+  upload.single("file"),
+  adminOrSuperAdminAuth,
+  uploadSamsungProductTagsFromCsv
 );
 
 router.post("/admin/sync-mdd-dealer-from-dump", upload.single("file"), adminOrSuperAdminAuth, syncMddDealerFromDump);

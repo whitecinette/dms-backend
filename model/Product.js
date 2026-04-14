@@ -10,10 +10,14 @@ const productSchema = new mongoose.Schema(
     segment: { type: String, trim: true },      // 6-10...100
     model_code: { type: String, trim: true },   // A066BG etc
 
-    // ✅ add these explicitly
-    product_code: { type: String, trim: true }, // SM-A066BZKG etc
-    category: { type: String, trim: true },     // Sp_mass etc
-    source: { type: String, trim: true },       // "dump"
+    product_code: { type: String, trim: true },
+    category: { type: String, trim: true },
+    source: { type: String, trim: true },
+
+    tags: {
+      type: [String],
+      default: [],
+    },
 
     status: {
       type: String,
@@ -25,7 +29,6 @@ const productSchema = new mongoose.Schema(
   { strict: false, timestamps: true }
 );
 
-// ✅ keep the same index you created in Atlas (optional to keep in schema too)
 productSchema.index(
   { brand: 1, product_code: 1 },
   { unique: true, partialFilterExpression: { product_code: { $type: "string" } } }
