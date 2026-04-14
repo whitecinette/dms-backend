@@ -71,6 +71,7 @@ async function fetchActualBase({
   endTY,
   startLY,
   endLY,
+  extraMatch = null,
   isAdmin = false,
 }) {
   const buildCodeMatch = () => {
@@ -125,6 +126,10 @@ async function fetchActualBase({
 
     if (Object.keys(codeMatch).length > 0) {
       pipeline.push({ $match: codeMatch });
+    }
+
+    if (extraMatch && Object.keys(extraMatch).length > 0) {
+      pipeline.push({ $match: extraMatch });
     }
 
     pipeline.push(
@@ -241,6 +246,7 @@ function buildActualTable({ title, tyYear, lyYear, currentMonth, base, metric })
 async function getActivationActualYtdReports({
   ActivationData,
   dealerCodes,
+  extraMatch = null,
   isAdmin = false,
 }) {
   const {
@@ -264,6 +270,7 @@ async function getActivationActualYtdReports({
     endTY,
     startLY,
     endLY,
+    extraMatch,
     isAdmin,
   });
 
@@ -290,6 +297,7 @@ async function getActivationActualYtdReports({
 async function getTertiaryActualYtdReports({
   TertiaryData,
   dealerCodes,
+  extraMatch = null,
   isAdmin = false,
 }) {
   const {
@@ -313,6 +321,7 @@ async function getTertiaryActualYtdReports({
     endTY,
     startLY,
     endLY,
+    extraMatch,
     isAdmin,
   });
 
@@ -340,11 +349,13 @@ async function getAllActualYtdReports({
   ActivationData,
   TertiaryData,
   dealerCodes,
+  activationExtraMatch = null,
+  tertiaryExtraMatch = null,
   isAdmin = false,
 }) {
   const [a, t] = await Promise.all([
-    getActivationActualYtdReports({ ActivationData, dealerCodes, isAdmin }),
-    getTertiaryActualYtdReports({ TertiaryData, dealerCodes, isAdmin }),
+    getActivationActualYtdReports({ ActivationData, dealerCodes, extraMatch: activationExtraMatch, isAdmin }),
+    getTertiaryActualYtdReports({ TertiaryData, dealerCodes, extraMatch: tertiaryExtraMatch, isAdmin }),
   ]);
 
   return { ...a, ...t };

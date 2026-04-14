@@ -12,5 +12,5 @@ const hierarchyEntrySchema = new mongoose.Schema(
 );
 
 module.exports =
-  mongoose.models.hierarchyentries ||
-  mongoose.model("hierarchyentries", hierarchyEntrySchema);
+  mongoose.models.HierarchyEntries ||
+  mongoose.model("HierarchyEntries", hierarchyEntrySchema);

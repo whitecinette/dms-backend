@@ -1,4 +1,4 @@
-const HierarchyEntries = require("../../model/hierarchyentries");
+const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
 const resolveFlowHierarchy = require("./resolveFlowHierarchy");
 

@@ -77,6 +77,7 @@ async function fetchPaceBase({
   cutoffTY,
   startLY,
   endLYFull,
+  extraMatch = null,
   isAdmin = false,
 }) {
   const buildCodeMatch = () => {
@@ -134,6 +135,10 @@ async function fetchPaceBase({
 
     if (Object.keys(codeMatch).length > 0) {
       pipeline.push({ $match: codeMatch });
+    }
+
+    if (extraMatch && Object.keys(extraMatch).length > 0) {
+      pipeline.push({ $match: extraMatch });
     }
 
     pipeline.push(
@@ -262,6 +267,7 @@ function buildPaceTable({ title, tyYear, lyYear, cutoffMonth, base, metric }) {
 async function getActivationPaceYtdReports({
   ActivationData,
   dealerCodes,
+  extraMatch = null,
   isAdmin = false,
 }) {
   const {
@@ -287,6 +293,7 @@ async function getActivationPaceYtdReports({
     cutoffTY,
     startLY,
     endLYFull,
+    extraMatch,
     isAdmin,
   });
 
@@ -313,6 +320,7 @@ async function getActivationPaceYtdReports({
 async function getTertiaryPaceYtdReports({
   TertiaryData,
   dealerCodes,
+  extraMatch = null,
   isAdmin = false,
 }) {
   const {
@@ -338,6 +346,7 @@ async function getTertiaryPaceYtdReports({
     cutoffTY,
     startLY,
     endLYFull,
+    extraMatch,
     isAdmin,
   });
 
@@ -368,11 +377,13 @@ async function getAllPaceYtdReports({
   ActivationData,
   TertiaryData,
   dealerCodes,
+  activationExtraMatch = null,
+  tertiaryExtraMatch = null,
   isAdmin = false,
 }) {
   const [a, t] = await Promise.all([
-    getActivationPaceYtdReports({ ActivationData, dealerCodes, isAdmin }),
-    getTertiaryPaceYtdReports({ TertiaryData, dealerCodes, isAdmin }),
+    getActivationPaceYtdReports({ ActivationData, dealerCodes, extraMatch: activationExtraMatch, isAdmin }),
+    getTertiaryPaceYtdReports({ TertiaryData, dealerCodes, extraMatch: tertiaryExtraMatch, isAdmin }),
   ]);
 
   return { ...a, ...t };

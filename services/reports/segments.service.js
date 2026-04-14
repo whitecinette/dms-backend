@@ -202,6 +202,7 @@ exports.getPriceSegmentSummaryActivation = async (
   lmtdEnd,
   ftdRawDate,
   lastThreeMonths,
+  extraMatch,
   isAdmin
 ) => {
   const safeDealerCodes = (dealerCodes || []).map(normalizeCode);
@@ -215,6 +216,10 @@ exports.getPriceSegmentSummaryActivation = async (
   const activationMatch = {
     year_month: { $in: [...new Set([...lastThreeMonths, startDate.format("YYYY-MM"), lmtdStart.format("YYYY-MM")])] },
   };
+
+  if (extraMatch && Object.keys(extraMatch).length > 0) {
+    Object.assign(activationMatch, extraMatch);
+  }
 
   if (!isAdmin && safeDealerCodes.length > 0) {
     activationMatch.tertiary_buyer_code = { $in: safeDealerCodes };
@@ -398,6 +403,7 @@ exports.getPrice40kSplitSummaryActivation = async (
   lmtdEnd,
   ftdRawDate,
   lastThreeMonths,
+  extraMatch,
   isAdmin
 ) => {
   const safeDealerCodes = (dealerCodes || []).map(normalizeCode);
@@ -411,6 +417,10 @@ exports.getPrice40kSplitSummaryActivation = async (
   const activationMatch = {
     year_month: { $in: [...new Set([...lastThreeMonths, startDate.format("YYYY-MM"), lmtdStart.format("YYYY-MM")])] },
   };
+
+  if (extraMatch && Object.keys(extraMatch).length > 0) {
+    Object.assign(activationMatch, extraMatch);
+  }
 
   if (!isAdmin && safeDealerCodes.length > 0) {
     activationMatch.tertiary_buyer_code = { $in: safeDealerCodes };
