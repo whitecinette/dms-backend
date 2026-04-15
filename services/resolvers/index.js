@@ -3,6 +3,7 @@ const resolveSubordinatePositions = require("./resolveSubordinatePositions");
 const resolveSubordinates = require("./resolveSubordinates");
 const resolveScope = require("./resolveScope");
 const resolveProductScope = require("./resolveProductScope");
+const resolveDropdownOptions = require("./resolveDropdownOptions");
 
 module.exports = {
   resolveFlowHierarchy,
@@ -10,4 +11,5 @@ module.exports = {
   resolveSubordinates,
   resolveScope,
   resolveProductScope,
+  resolveDropdownOptions
 };

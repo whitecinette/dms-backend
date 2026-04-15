@@ -79,83 +79,206 @@ function parseJsonObject(value) {
   }
 }
 
+// exports.getExtractionFilterValues = async (req, res) => {
+//   try {
+//     const { type, position, flow_name = "default_sales_flow" } = req.query;
+//     const subordinate_filters = parseJsonObject(req.query.subordinate_filters);
+//     const dealer_filters = parseJsonObject(req.query.dealer_filters);
+//     console.log("Extraction subprdinate filter: ", subordinate_filters)
+
+//     if (!type) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "type is required",
+//       });
+//     }
+
+//     // actor dropdown values
+//     if (type === "actor") {
+//       if (!position) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "position is required when type=actor",
+//         });
+//       }
+
+//       const hierarchy = await resolveFlowHierarchy(flow_name);
+//       const normalizedPosition = String(position).trim().toLowerCase();
+
+//       if (!hierarchy.includes(normalizedPosition)) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Invalid actor position: ${position}`,
+//         });
+//       }
+
+//       const scopedCodes = await resolveScope({
+//         user: req.user,
+//         flow_name,
+//         subordinate_filters,
+//         dealer_filters,
+//         exclude_positions: [],
+//       });
+
+//       const actorCodes = cleanUnique(scopedCodes?.[normalizedPosition] || []);
+
+//       const actorUsers = await User.find({
+//         code: { $in: actorCodes },
+//         status: "active",
+//       })
+//         .select("name code position")
+//         .lean();
+
+//       const userMap = new Map(
+//         actorUsers.map((user) => [String(user.code || "").trim(), user])
+//       );
+
+//       return res.status(200).json({
+//         success: true,
+//         type,
+//         values: actorCodes.map((code) => {
+//           const user = userMap.get(code);
+//           const displayName = user?.name || code;
+
+//           return {
+//             label: `${displayName} (${code})`,
+//             name: displayName,
+//             code,
+//             position: user?.position || normalizedPosition,
+//             value: code,
+//           };
+//         }),
+//       });
+//     }
+
+//     // dealer-based filter dropdowns
+//     const dealerQuery = {
+//       role: "dealer",
+//       status: "active",
+//     };
+
+//     const scopedCodes = await resolveScope({
+//       user: req.user,
+//       flow_name,
+//       subordinate_filters,
+//       dealer_filters,
+//       exclude_positions: [],
+//     });
+
+//     const dealerCodes = cleanUnique(scopedCodes?.dealer || []);
+//     dealerQuery.code = { $in: dealerCodes };
+
+//     let projection = "";
+//     if (type === "zone") projection = "zone";
+//     else if (type === "district") projection = "district";
+//     else if (type === "town") projection = "town";
+//     else if (type === "category") projection = "category";
+//     else if (type === "top_outlet") projection = "top_outlet";
+//     else {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid type",
+//       });
+//     }
+
+//     const rows = await User.find(dealerQuery).select(projection).lean();
+
+//     let values = [];
+
+//     if (type === "top_outlet") {
+//       values = [
+//         { label: "Yes", value: true },
+//         { label: "No", value: false },
+//       ];
+//     } else {
+//       const fieldValues = cleanUnique(rows.map((r) => r[type]));
+//       values = fieldValues.map((v) => ({
+//         label: v,
+//         value: v,
+//       }));
+//     }
+
+//     console.log("Ext5action filter res: ", type, values)
+
+//     return res.status(200).json({
+//       success: true,
+//       type,
+//       values,
+//     });
+//   } catch (error) {
+//     console.error("Error in getExtractionFilterValues:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch filter values",
+//     });
+//   }
+// };
+
+
+
+// controllers/extraction/dynamicExtractionReportController.js
+
 exports.getExtractionFilterValues = async (req, res) => {
+  const requestStart = Date.now();
+
+  const logStep = (label, extra = {}) => {
+    console.log(`⏱ [getExtractionFilterValues] ${label}`, {
+      elapsedMs: Date.now() - requestStart,
+      type: req.query.type,
+      position: req.query.position,
+      ...extra,
+    });
+  };
+
+  console.log("🔥 FILTER API HIT:", {
+    time: new Date().toISOString(),
+    type: req.query.type,
+    position: req.query.position,
+    flow_name: req.query.flow_name || "default_sales_flow",
+  });
+
   try {
+    logStep("START");
+
+    const parseStart = Date.now();
     const { type, position, flow_name = "default_sales_flow" } = req.query;
     const subordinate_filters = parseJsonObject(req.query.subordinate_filters);
     const dealer_filters = parseJsonObject(req.query.dealer_filters);
 
+    console.log("⏱ [getExtractionFilterValues] PARSE_DONE", {
+      parseMs: Date.now() - parseStart,
+      elapsedMs: Date.now() - requestStart,
+      type,
+      position,
+      flow_name,
+      subordinateFilterKeys: Object.keys(subordinate_filters || {}),
+      dealerFilterKeys: Object.keys(dealer_filters || {}),
+    });
+
     if (!type) {
+      logStep("EARLY_RETURN_MISSING_TYPE");
       return res.status(400).json({
         success: false,
         message: "type is required",
       });
     }
 
-    // actor dropdown values
-    if (type === "actor") {
-      if (!position) {
-        return res.status(400).json({
-          success: false,
-          message: "position is required when type=actor",
-        });
-      }
 
-      const hierarchy = await resolveFlowHierarchy(flow_name);
-      const normalizedPosition = String(position).trim().toLowerCase();
-
-      if (!hierarchy.includes(normalizedPosition)) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid actor position: ${position}`,
-        });
-      }
-
-      const scopedCodes = await resolveScope({
-        user: req.user,
-        flow_name,
-        subordinate_filters,
-        dealer_filters,
-        exclude_positions: [],
-      });
-
-      const actorCodes = cleanUnique(scopedCodes?.[normalizedPosition] || []);
-
-      const actorUsers = await User.find({
-        code: { $in: actorCodes },
-        status: "active",
-      })
-        .select("name code position")
-        .lean();
-
-      const userMap = new Map(
-        actorUsers.map((user) => [String(user.code || "").trim(), user])
-      );
-
+    if (type === "top_outlet") {
+      logStep("EARLY_RETURN_TOP_OUTLET_STATIC");
       return res.status(200).json({
         success: true,
         type,
-        values: actorCodes.map((code) => {
-          const user = userMap.get(code);
-          const displayName = user?.name || code;
-
-          return {
-            label: `${displayName} (${code})`,
-            name: displayName,
-            code,
-            position: user?.position || normalizedPosition,
-            value: code,
-          };
-        }),
+        values: [
+          { label: "Yes", value: true },
+          { label: "No", value: false },
+        ],
       });
     }
 
-    // dealer-based filter dropdowns
-    const dealerQuery = {
-      role: "dealer",
-      status: "active",
-    };
+    
 
+    const scopeStart = Date.now();
     const scopedCodes = await resolveScope({
       user: req.user,
       flow_name,
@@ -164,38 +287,91 @@ exports.getExtractionFilterValues = async (req, res) => {
       exclude_positions: [],
     });
 
-    const dealerCodes = cleanUnique(scopedCodes?.dealer || []);
-    dealerQuery.code = { $in: dealerCodes };
+    console.log("⏱ [getExtractionFilterValues] RESOLVE_SCOPE_DONE", {
+      resolveScopeMs: Date.now() - scopeStart,
+      elapsedMs: Date.now() - requestStart,
+      scopedKeys: Object.keys(scopedCodes || {}),
+      dealerCount: scopedCodes?.dealer?.length || 0,
+    });
 
-    let projection = "";
-    if (type === "zone") projection = "zone";
-    else if (type === "district") projection = "district";
-    else if (type === "town") projection = "town";
-    else if (type === "category") projection = "category";
-    else if (type === "top_outlet") projection = "top_outlet";
-    else {
+
+
+    const validTypeCheckStart = Date.now();
+    const isValidDealerType = ["zone", "district", "town", "category", "top_outlet"].includes(type);
+
+    console.log("⏱ [getExtractionFilterValues] DEALER_TYPE_CHECK_DONE", {
+      validTypeCheckMs: Date.now() - validTypeCheckStart,
+      elapsedMs: Date.now() - requestStart,
+      isValidDealerType,
+    });
+
+    if (!isValidDealerType) {
+      logStep("EARLY_RETURN_INVALID_TYPE");
       return res.status(400).json({
         success: false,
         message: "Invalid type",
       });
     }
 
-    const rows = await User.find(dealerQuery).select(projection).lean();
+    const dealerCodesStart = Date.now();
+    const dealerCodes = cleanUnique(scopedCodes?.dealer || []);
 
-    let values = [];
+    console.log("⏱ [getExtractionFilterValues] DEALER_CODES_READY", {
+      dealerCodesMs: Date.now() - dealerCodesStart,
+      elapsedMs: Date.now() - requestStart,
+      dealerCount: dealerCodes.length,
+    });
 
-    if (type === "top_outlet") {
-      values = [
-        { label: "Yes", value: true },
-        { label: "No", value: false },
-      ];
-    } else {
-      const fieldValues = cleanUnique(rows.map((r) => r[type]));
-      values = fieldValues.map((v) => ({
+    if (!dealerCodes.length) {
+      logStep("EARLY_RETURN_NO_DEALER_CODES");
+      return res.status(200).json({
+        success: true,
+        type,
+        values: [],
+      });
+    }
+
+    const dealerQueryBuildStart = Date.now();
+    const dealerQuery = {
+      role: "dealer",
+      status: "active",
+      code: { $in: dealerCodes },
+    };
+
+    console.log("⏱ [getExtractionFilterValues] DEALER_QUERY_BUILT", {
+      dealerQueryBuildMs: Date.now() - dealerQueryBuildStart,
+      elapsedMs: Date.now() - requestStart,
+      dealerCount: dealerCodes.length,
+      distinctField: type,
+    });
+
+    const distinctStart = Date.now();
+    const fieldValues = await User.distinct(type, dealerQuery);
+
+    console.log("⏱ [getExtractionFilterValues] DEALER_DISTINCT_DONE", {
+      distinctMs: Date.now() - distinctStart,
+      elapsedMs: Date.now() - requestStart,
+      rawFieldValuesCount: fieldValues.length,
+      distinctField: type,
+    });
+
+    const mapValuesStart = Date.now();
+    const values = fieldValues
+      .filter(Boolean)
+      .map((v) => ({
         label: v,
         value: v,
       }));
-    }
+
+    console.log("⏱ [getExtractionFilterValues] DEALER_VALUES_BUILT", {
+      buildValuesMs: Date.now() - mapValuesStart,
+      elapsedMs: Date.now() - requestStart,
+      valuesCount: values.length,
+    });
+
+    logStep("DEALER_RESPONSE_SENT", {
+      totalMs: Date.now() - requestStart,
+    });
 
     return res.status(200).json({
       success: true,
@@ -203,18 +379,20 @@ exports.getExtractionFilterValues = async (req, res) => {
       values,
     });
   } catch (error) {
-    console.error("Error in getExtractionFilterValues:", error);
+    console.error("❌ Error in getExtractionFilterValues:", {
+      message: error.message,
+      stack: error.stack,
+      elapsedMs: Date.now() - requestStart,
+      type: req.query.type,
+      position: req.query.position,
+    });
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch filter values",
     });
   }
 };
-
-
-
-// controllers/extraction/dynamicExtractionReportController.js
-
 
 
 const ACTOR_LEVELS = ["smd", "zsm", "asm", "mdd", "tse", "dealer"];

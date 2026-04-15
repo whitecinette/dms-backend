@@ -4,7 +4,7 @@ const TertiaryData = require("../../model/TertiaryData");
 const DealerHierarchy = require("../../model/DealerHierarchy");
 const moment = require("moment");
 const momentTz = require("moment-timezone");
-const { resolveScope } = require("../../services/resolvers");
+const { resolveScope, resolveDropdownOptions } = require("../../services/resolvers");
 const {
   getPriceSegmentSummaryActivation,
   getPrice40kSplitSummaryActivation,
@@ -144,6 +144,29 @@ function canGroupByTag(reportType) {
   ]).has(reportType);
 }
 
+async function getBaseScopeData(req) {
+  const {
+    flow_name = "default_sales_flow",
+    subordinate_filters = {},
+    dealer_filters = {},
+    filters = {},
+  } = req.body;
+
+  const effectiveSubordinateFilters = mergeLegacySubordinateFilters(
+    filters,
+    subordinate_filters
+  );
+
+  const effectiveDealerFilters = dealer_filters || {};
+
+  return resolveDashboardReportScope({
+    user: req.user,
+    flow_name,
+    subordinate_filters: effectiveSubordinateFilters,
+    dealer_filters: effectiveDealerFilters,
+  });
+}
+
 async function resolveDashboardReportScope({
   user,
   flow_name = "default_sales_flow",
@@ -182,6 +205,8 @@ async function resolveDashboardReportScope({
     mddCodes,
   };
 }
+
+
 
 exports.getDashboardSummary = async (req, res) => {
   try {
@@ -308,7 +333,7 @@ exports.getDashboardSummary = async (req, res) => {
         isAdmin: allowAdminBypass,
       });
 
-      return res.json({
+      const payload = {
         success: true,
         flow_name,
         report_type: reportType,
@@ -320,7 +345,10 @@ exports.getDashboardSummary = async (req, res) => {
         },
         available_tags: [],
         [reportType]: data,
-      });
+      };
+
+      res.json(payload);
+      return payload;
     }
 
     switch (reportType) {
@@ -534,18 +562,21 @@ exports.getDashboardSummary = async (req, res) => {
         });
     }
 
-    return res.json({
-      success: true,
-      flow_name,
-      report_type: reportType,
-      applied_filters: {
-        subordinate_filters: effectiveSubordinateFilters,
-        dealer_filters: effectiveDealerFilters,
-        tags: selectedTags,
-      },
-      available_tags: [],
-      [reportType]: data,
-    });
+  const payload = {
+  success: true,
+  flow_name,
+  report_type: reportType,
+  applied_filters: {
+    subordinate_filters: effectiveSubordinateFilters,
+    dealer_filters: effectiveDealerFilters,
+    tags: selectedTags,
+  },
+  available_tags: [],
+  [reportType]: data,
+};
+
+res.json(payload);
+return payload;
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message });
@@ -569,6 +600,8 @@ exports.getDashboardSummaryDrilldown = async (req, res) => {
     const groupBy = normalizeGroupBy(filters?.group_by);
     const groupValue = String(drilldown?.group_value || "").trim();
     const sourceKey = String(drilldown?.source_key || "").trim();
+
+    console.log("subordinates in sales DASH: ", subordinate_filters)
 
     if (!reportType) {
       return res.status(400).json({ success: false, message: "filters.report_type is required" });
@@ -682,6 +715,7 @@ exports.getDashboardSummaryDrilldown = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 
 // ============================================
@@ -1338,226 +1372,132 @@ function formatWODResult(data, lastThreeMonths) {
   };
 }
 
-// async function getWODSummary(
-//   dealerCodes,
-//   startDate,
-//   endDate,
-//   lmtdStart,
-//   lmtdEnd,
-//   ftdRawDate,
-//   lastThreeMonths,
-//   isAdmin
-// )
-// {
-//   const sellIn = await buildWODPipeline(
-//     TertiaryData,
-//     "invoice_date_raw",
-//     "dealer_code",
-//     dealerCodes,
-//     startDate,
-//     endDate,
-//     lmtdStart,
-//     lmtdEnd,
-//     ftdRawDate,
-//     lastThreeMonths,
-//     isAdmin
-//   );
+/////////////////////////////////
+///////////////////////////////////////
+// NEW DROPDOWNSSSSS 
+/////////////////////////////////
+///////////////////////////////////////
+exports.getDropdownOptions = async (req, res) => {
+  console.log("NEW⚡️⚡️⚡️⚡️⚡️")
+  try {
+    const {
+      flow_name = "default_sales_flow",
+      target_type,
+      target_key,
+      subordinates = {},
+      dealer = {},
+      product_tags = {},
+    } = req.body || {};
 
-//   const sellOut = await buildWODPipeline(
-//     ActivationData,
-//     "activation_date_raw",
-//     "tertiary_buyer_code",
-//     dealerCodes,
-//     startDate,
-//     endDate,
-//     lmtdStart,
-//     lmtdEnd,
-//     ftdRawDate,
-//     lastThreeMonths
-//   );
+    const values = await resolveDropdownOptions({
+      flow_name,
+      user: req.user,
+      target_type,
+      target_key,
+      subordinates,
+      dealer,
+      product_tags,
+    });
 
-//   return {
-//     sellInWOD: sellIn,
-//     sellOutWOD: sellOut,
-//   };
-// }
+    return res.status(200).json({
+      success: true,
+      flow_name,
+      target_type,
+      target_key,
+      values,
+    });
+  } catch (error) {
+    console.error("Error in getDropdownOptions:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch dropdown options",
+    });
+  }
+};
 
-// async function buildWODPipeline(
-//   Model,
-//   dateField,
-//   dealerField,
-//   dealerCodes,
-//   startDate,
-//   endDate,
-//   lmtdStart,
-//   lmtdEnd,
-//   ftdRawDate,
-//   lastThreeMonths,
-//   isAdmin
-// ) {
-//   console.log("Start date end date WOD: ", startDate, endDate)
-//   console.log("dealer field: ", dealerField);
-//   console.log("dealerCodes: ", dealerCodes.length)
-//   console.log("ftdRawDate, Model", ftdRawDate, Model, lastThreeMonths);
-//   const result = await Model.aggregate([
-//     {
-//       $addFields: {
-//         parsedDate: {
-//           $let: {
-//             vars: { parts: { $split: [`$${dateField}`, "/"] } },
-//             in: {
-//               $dateFromParts: {
-//                 year: {
-//                   $add: [2000, { $toInt: { $arrayElemAt: ["$$parts", 2] } }]
-//                 },
-//                 month: { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-//                 day: { $toInt: { $arrayElemAt: ["$$parts", 1] } }
-//               }
-//             }
-//           }
-//         }
-//       }
-//     },
+/////////////////////////////////
+///////////////////////////////////////
+// NEW DROPDOWNSSSSS 
+/////////////////////////////////
+///////////////////////////////////////
 
-//     {
-//       $match: {
-//         ...(isAdmin
-//           ? {}
-//           : dealerCodes?.length
-//           ? { [dealerField]: { $in: dealerCodes } }
-//           : {})
-//       }
-//     },
 
-//     {
-//       $facet: {
 
-//         // =========================
-//         // LAST THREE MONTHS
-//         // =========================
-//         lastThree: [
-//           { $match: { year_month: { $in: lastThreeMonths } } },
+/////////////////////////////////
+///////////////////////////////////////
+// OPTIMIZED REPORTS 
+/////////////////////////////////
+///////////////////////////////////////
 
-//           {
-//             $group: {
-//               _id: {
-//                 month: "$year_month",
-//                 dealer: `$${dealerField}`
-//               },
-//               totalQty: { $sum: "$qty" }
-//             }
-//           },
+exports.getDashboardSummaryBatch = async (req, res) => {
+  try {
+    const { report_types = [] } = req.body;
 
-//           { $match: { totalQty: { $gt: 0 } } },
+    if (!Array.isArray(report_types) || !report_types.length) {
+      return res.status(400).json({
+        success: false,
+        message: "report_types required",
+      });
+    }
 
-//           {
-//             $group: {
-//               _id: "$_id.month",
-//               dealers: { $sum: 1 }
-//             }
-//           }
-//         ],
+    const result = {};
+    const tagGrouped = {};
 
-//         // =========================
-//         // MTD
-//         // =========================
-//         mtd: [
-//           {
-//             $match: {
-//               parsedDate: {
-//                 $gte: startDate.toDate(),
-//                 $lte: endDate.toDate()
-//               }
-//             }
-//           },
-//           {
-//             $group: {
-//               _id: `$${dealerField}`,
-//               totalQty: { $sum: "$qty" }
-//             }
-//           },
-//           { $match: { totalQty: { $gt: 0 } } },
-//           { $group: { _id: null, count: { $sum: 1 } } }
-//         ],
+    for (const type of report_types) {
+      const fakeReq = {
+        ...req,
+        body: {
+          ...req.body,
+          filters: {
+            ...(req.body.filters || {}),
+            report_type: type,
+          },
+        },
+      };
 
-//         // =========================
-//         // LMTD
-//         // =========================
-//         lmtd: [
-//           {
-//             $match: {
-//               parsedDate: {
-//                 $gte: lmtdStart.toDate(),
-//                 $lte: lmtdEnd.toDate()
-//               }
-//             }
-//           },
-//           {
-//             $group: {
-//               _id: `$${dealerField}`,
-//               totalQty: { $sum: "$qty" }
-//             }
-//           },
-//           { $match: { totalQty: { $gt: 0 } } },
-//           { $group: { _id: null, count: { $sum: 1 } } }
-//         ],
+      let captured = null;
 
-//         // =========================
-//         // FTD
-//         // =========================
-//         ftd: [
-//           { $match: { [dateField]: ftdRawDate } },
-//           {
-//             $group: {
-//               _id: `$${dealerField}`,
-//               totalQty: { $sum: "$qty" }
-//             }
-//           },
-//           { $match: { totalQty: { $gt: 0 } } },
-//           { $group: { _id: null, count: { $sum: 1 } } }
-//         ]
-//       }
-//     }
-//   ]);
-//   console.log("WOD DEBUG -> MTD dealers count:", result[0].mtd.length);
-//   console.log("WOD DEBUG -> first 20 MTD dealers:", result[0].mtd.slice(0, 20));
-//   console.log("WOD DEBUG -> Model:", Model.collection.name);
-//   console.log("WOD DEBUG -> raw mtd facet:", result?.[0]?.mtd);
+      const fakeRes = {
+        json: (data) => {
+          captured = data;
+          return data;
+        },
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+      };
 
-//   return formatWODResult(result[0], lastThreeMonths);
-// }
+      await exports.getDashboardSummary(fakeReq, fakeRes);
 
-// function formatWODResult(data, lastThreeMonths) {
-//   const monthMap = {};
+      result[type] = captured?.[type] || null;
 
-//   lastThreeMonths.forEach((m) => {
-//     monthMap[m] = 0;
-//   });
+      // collect grouped tag data if your single-report endpoint returns it later
+      if (captured?.tag_grouped && typeof captured.tag_grouped === "object") {
+        Object.assign(tagGrouped, captured.tag_grouped);
+      }
+    }
 
-//   (data.lastThree || []).forEach((m) => {
-//     monthMap[m._id] = m.dealers || 0;
-//   });
+    return res.json({
+      success: true,
+      data: {
+        ...result,
+        tag_grouped: tagGrouped,
+      },
+    });
+  } catch (error) {
+    console.error("Batch report error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch reports",
+    });
+  }
+};
 
-//   const mtd = data.mtd?.[0]?.count || 0;
-//   const lmtd = data.lmtd?.[0]?.count || 0;
-//   const ftd = data.ftd?.[0]?.count || 0;
 
-//   // console.log("WOD DEBUG -> MTD:", mtd, "LMTD:", lmtd, "FTD:", ftd);
-//   // console.log("WOD DEBUG -> lastThree:", data.lastThree);
 
-//   const growth =
-//     lmtd === 0 ? 0 : ((mtd - lmtd) / lmtd) * 100;
-
-  
-
-//   return {
-//     [lastThreeMonths[0]]: monthMap[lastThreeMonths[0]],
-//     [lastThreeMonths[1]]: monthMap[lastThreeMonths[1]],
-//     [lastThreeMonths[2]]: monthMap[lastThreeMonths[2]],
-//     MTD: mtd,
-//     LMTD: lmtd,
-//     FTD: ftd,
-//     "G/D%": Number(growth.toFixed(2)),
-//     "Exp.Ach": 0
-//   };
-// }
+/////////////////////////////////
+///////////////////////////////////////
+// OPTIMIZED REPORTS 
+/////////////////////////////////
+///////////////////////////////////////
