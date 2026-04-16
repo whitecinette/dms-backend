@@ -12,6 +12,8 @@ const User = require("../../model/User");
 const ActorCode = require("../../model/ActorCode");
 const HierarchyEntries = require("../../model/HierarchyEntries");
 
+const WeeklyBeatMappingSchedule = require("../../model/WeeklyBeatMappingSchedule");
+
 const { Readable } = require("stream");
 const csv = require("csv-parser");
 
@@ -2112,3 +2114,293 @@ exports.recalculateExtractionSegmentsByDateRange = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+/////////////////////////////////
+// BEAT MAPPINGSSS 
+
+
+function parseBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    return ["true", "1", "yes", "y"].includes(value.trim().toLowerCase());
+  }
+  return false;
+}
+
+function decimalToNumber(value) {
+  if (value === null || value === undefined || value === "") return 0;
+
+  if (typeof value === "number") return value;
+
+  if (typeof value === "object") {
+    if (value.$numberDecimal) return Number(value.$numberDecimal) || 0;
+    if (typeof value.toString === "function") return Number(value.toString()) || 0;
+  }
+
+  return Number(value) || 0;
+}
+
+function normalizeString(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const str = String(value).trim();
+  return str || fallback;
+}
+
+function areSame(a, b) {
+  return String(a ?? "").trim() === String(b ?? "").trim();
+}
+
+function areSameNumber(a, b) {
+  return Number(a || 0) === Number(b || 0);
+}
+
+exports.syncBeatMappingDealerInfo = async (req, res) => {
+  try {
+    const actorCode =
+      req.body.actorCode ||
+      req.query.actorCode ||
+      req.body.code ||
+      req.query.code ||
+      "";
+
+    const dryRun =
+      parseBoolean(req.query.dryRun) || parseBoolean(req.body.dryRun);
+
+    const startDateInput = req.body.startDate || req.query.startDate;
+    const endDateInput = req.body.endDate || req.query.endDate;
+
+    const startDate = startDateInput
+      ? moment.tz(startDateInput, "Asia/Kolkata").startOf("day").toDate()
+      : moment().tz("Asia/Kolkata").startOf("day").toDate();
+
+    const endDate = endDateInput
+      ? moment.tz(endDateInput, "Asia/Kolkata").endOf("day").toDate()
+      : moment().tz("Asia/Kolkata").endOf("day").toDate();
+
+    const scheduleQuery = {
+      startDate: { $gte: startDate },
+      endDate: { $lte: endDate },
+    };
+
+    if (actorCode) {
+      scheduleQuery.code = actorCode;
+    }
+
+    const schedules = await WeeklyBeatMappingSchedule.find(scheduleQuery).lean();
+
+    if (!schedules.length) {
+      return res.status(200).json({
+        success: true,
+        dryRun,
+        message: actorCode
+          ? `No beat mapping schedules found for actor ${actorCode} in selected range.`
+          : "No beat mapping schedules found in selected range.",
+        actorCode: actorCode || null,
+        startDate,
+        endDate,
+        matchedSchedules: 0,
+        updatedSchedules: 0,
+        updatedEntries: 0,
+        skippedEntries: 0,
+        missingUsers: [],
+        preview: [],
+      });
+    }
+
+    const allCodesSet = new Set();
+
+    for (const scheduleDoc of schedules) {
+      for (const entry of scheduleDoc.schedule || []) {
+        if (entry?.code) {
+          allCodesSet.add(String(entry.code).trim());
+        }
+      }
+    }
+
+    const allCodes = Array.from(allCodesSet);
+
+    const users = await User.find(
+      { code: { $in: allCodes } },
+      {
+        code: 1,
+        name: 1,
+        latitude: 1,
+        longitude: 1,
+        district: 1,
+        taluka: 1,
+        town: 1,
+        zone: 1,
+        position: 1,
+      }
+    ).lean();
+
+    const userMap = {};
+    for (const user of users) {
+      userMap[user.code] = user;
+    }
+
+    const missingUsersSet = new Set();
+    const bulkOps = [];
+    const preview = [];
+
+    let updatedSchedules = 0;
+    let updatedEntries = 0;
+    let skippedEntries = 0;
+
+    for (const scheduleDoc of schedules) {
+      let docChanged = false;
+
+      const newSchedule = (scheduleDoc.schedule || []).map((entry) => {
+        const entryCode = normalizeString(entry.code);
+        const user = userMap[entryCode];
+
+        if (!user) {
+          missingUsersSet.add(entryCode);
+          skippedEntries++;
+          return entry;
+        }
+
+        const nextEntry = { ...entry };
+
+        const nextData = {
+          name: normalizeString(user.name, normalizeString(entry.name)),
+          latitude: decimalToNumber(user.latitude),
+          longitude: decimalToNumber(user.longitude),
+          district: normalizeString(user.district),
+          taluka: normalizeString(user.taluka),
+          town: normalizeString(user.town),
+          zone: normalizeString(user.zone),
+          position: normalizeString(user.position),
+        };
+
+        const changes = {};
+
+        if (!areSame(entry.name, nextData.name)) {
+          nextEntry.name = nextData.name;
+          changes.name = { from: entry.name ?? null, to: nextData.name };
+        }
+
+        if (!areSameNumber(decimalToNumber(entry.latitude), nextData.latitude)) {
+          nextEntry.latitude = nextData.latitude;
+          changes.latitude = {
+            from: decimalToNumber(entry.latitude),
+            to: nextData.latitude,
+          };
+        }
+
+        if (!areSameNumber(decimalToNumber(entry.longitude), nextData.longitude)) {
+          nextEntry.longitude = nextData.longitude;
+          changes.longitude = {
+            from: decimalToNumber(entry.longitude),
+            to: nextData.longitude,
+          };
+        }
+
+        if (!areSame(entry.district, nextData.district)) {
+          nextEntry.district = nextData.district;
+          changes.district = { from: entry.district ?? null, to: nextData.district };
+        }
+
+        if (!areSame(entry.taluka, nextData.taluka)) {
+          nextEntry.taluka = nextData.taluka;
+          changes.taluka = { from: entry.taluka ?? null, to: nextData.taluka };
+        }
+
+        if (!areSame(entry.town, nextData.town)) {
+          nextEntry.town = nextData.town;
+          changes.town = { from: entry.town ?? null, to: nextData.town };
+        }
+
+        if (!areSame(entry.zone, nextData.zone)) {
+          nextEntry.zone = nextData.zone;
+          changes.zone = { from: entry.zone ?? null, to: nextData.zone };
+        }
+
+        if (!areSame(entry.position, nextData.position)) {
+          nextEntry.position = nextData.position;
+          changes.position = { from: entry.position ?? null, to: nextData.position };
+        }
+
+        if (Object.keys(changes).length > 0) {
+          docChanged = true;
+          updatedEntries++;
+
+          if (preview.length < 100) {
+            preview.push({
+              scheduleId: scheduleDoc._id,
+              actorCode: scheduleDoc.code,
+              scheduleStartDate: scheduleDoc.startDate,
+              scheduleEndDate: scheduleDoc.endDate,
+              dealerCode: entryCode,
+              dealerName: nextData.name,
+              changes,
+            });
+          }
+        } else {
+          skippedEntries++;
+        }
+
+        return nextEntry;
+      });
+
+      if (docChanged) {
+        updatedSchedules++;
+
+        if (!dryRun) {
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: scheduleDoc._id },
+              update: {
+                $set: {
+                  schedule: newSchedule,
+                },
+              },
+            },
+          });
+        }
+      }
+    }
+
+    let bulkWriteResult = null;
+
+    if (!dryRun && bulkOps.length > 0) {
+      bulkWriteResult = await WeeklyBeatMappingSchedule.bulkWrite(bulkOps);
+    }
+
+    return res.status(200).json({
+      success: true,
+      dryRun,
+      message: dryRun
+        ? "Dry run completed successfully."
+        : "Beat mapping dealer info synced successfully.",
+      actorCode: actorCode || null,
+      startDate,
+      endDate,
+      matchedSchedules: schedules.length,
+      matchedEntries: allCodes.length,
+      updatedSchedules,
+      updatedEntries,
+      skippedEntries,
+      missingUsers: Array.from(missingUsersSet),
+      bulkWriteResult,
+      preview,
+    });
+  } catch (error) {
+    console.error("Error in syncBeatMappingDealerInfo:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+
+// BEAT MAPPINGSSS 
+/////////////////////////////////

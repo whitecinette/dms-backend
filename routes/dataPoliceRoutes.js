@@ -1,6 +1,6 @@
 const express = require("express");
 const { adminOrSuperAdminAuth, superAdminAuth } = require("../middlewares/authmiddlewares");
-const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise, dryRunExtractionDuplicateCleanup, cleanupExtractionDuplicates, uploadUsersDataFromCsvMaster, recalculateExtractionSegmentsByDateRange } = require("../controllers/new/dataPolice");
+const { getUnmappedProducts, getExcludedRawData, getSalesReportFlags, recalculateProductSegmentsByFilter, renameSmartphoneCategoryToSmartPhone, downloadMarketSalesDataDownloadMonthWise, dryRunExtractionDuplicateCleanup, cleanupExtractionDuplicates, uploadUsersDataFromCsvMaster, recalculateExtractionSegmentsByDateRange, syncBeatMappingDealerInfo } = require("../controllers/new/dataPolice");
 const { upload } = require("../services/fileUpload");
 const router = express.Router();
 
@@ -58,6 +58,13 @@ router.post(
   "/recalculate-extraction-segments-by-date-range",
   adminOrSuperAdminAuth,
   recalculateExtractionSegmentsByDateRange
+);
+
+
+router.post(
+  "/admin/beat-mapping/sync-dealer-info",
+  adminOrSuperAdminAuth,
+  syncBeatMappingDealerInfo
 );
 
 module.exports = router;
