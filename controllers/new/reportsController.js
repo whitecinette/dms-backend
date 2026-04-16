@@ -562,21 +562,48 @@ exports.getDashboardSummary = async (req, res) => {
         });
     }
 
-  const payload = {
-  success: true,
-  flow_name,
-  report_type: reportType,
-  applied_filters: {
-    subordinate_filters: effectiveSubordinateFilters,
-    dealer_filters: effectiveDealerFilters,
-    tags: selectedTags,
-  },
-  available_tags: [],
-  [reportType]: data,
-};
+  let groupedTagData = null;
 
-res.json(payload);
-return payload;
+    if (canGroupByTag(reportType)) {
+      groupedTagData = await getGroupedTagReport({
+        reportType,
+        dealerCodes,
+        mddCodes,
+        scopeCodes: reportType === "secondary" ? mddCodes : dealerCodes,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        lastThreeMonths,
+        selectedTags,
+        isAdmin: allowAdminBypass,
+      });
+    }
+
+    const payload = {
+      success: true,
+      flow_name,
+      report_type: reportType,
+      applied_filters: {
+        subordinate_filters: effectiveSubordinateFilters,
+        dealer_filters: effectiveDealerFilters,
+        tags: selectedTags,
+      },
+      available_tags: [],
+      [reportType]: data,
+      ...(groupedTagData
+        ? {
+            tag_grouped: {
+              [reportType]: groupedTagData,
+            },
+          }
+        : {}),
+    };
+
+    res.json(payload);
+    return payload;
+
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message });
