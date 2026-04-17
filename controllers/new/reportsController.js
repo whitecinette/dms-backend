@@ -223,6 +223,7 @@ async function prepareDashboardSummaryContext(req) {
   const reportType = filters?.report_type;
   const selectedTags = [];
   const groupBy = normalizeGroupBy(filters?.group_by);
+  const includeTagGrouped = req.body?.include_tag_grouped !== false;
 
   if (!reportType) {
     throw new Error("filters.report_type is required");
@@ -317,6 +318,7 @@ async function prepareDashboardSummaryContext(req) {
     ftdRawDate,
     lastThreeMonths,
     allowAdminBypass,
+    includeTagGrouped
   };
 }
 
@@ -347,6 +349,19 @@ async function buildDashboardSummaryPayload(req) {
   };
 
   return { ctx, payload };
+}
+
+function shouldIncludeTagGrouped(reportType, includeTagGrouped) {
+  if (!includeTagGrouped) return false;
+
+  const immediateTagReports = new Set([
+    "activation",
+    "tertiary",
+    "secondary",
+    "wod",
+  ]);
+
+  return immediateTagReports.has(reportType);
 }
 // -----------new helpers------------------
 
@@ -606,7 +621,10 @@ async function buildDashboardReportByType(ctx) {
       );
   }
 
-  if (canGroupByTag(reportType)) {
+  if (
+    shouldIncludeTagGrouped(reportType, ctx.includeTagGrouped) &&
+    canGroupByTag(reportType)
+  ) {
     groupedTagData = await getGroupedTagReport({
       reportType,
       dealerCodes,
