@@ -201,6 +201,7 @@ const asmDashboard = (user) => {
     ],
 
     quickActions: [
+      { title: "Sales Dashboard", route: "sales_dashboard_new", icon: "barChart2" },
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
       { title: "Extraction Status", route: "extraction_status_new", icon: "clipboardList" },
       { title: "Coverage Dashboard", route: "market_coverage", icon: "map" },
@@ -334,12 +335,15 @@ const tseSoDashboard = (user) => {
     visibleSections: [
       "hero_header",
       "attendance",
+      "top_kpis",
+      "sales_overview",
       "quick_actions",
       "notifications",
     ],
     quickActions: [
+      { title: "Sales Dashboard", route: "sales_dashboard_new", icon: "barChart2" },
       { title: "Add Extraction", route: "extraction_add", icon: "plusCircle" },
-      { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" }, // <-- add this
+      { title: "Market Coverage", route: "market_coverage_mark", icon: "mapPin" },
       { title: "My Timeline", route: "market_timeline_self", icon: "calendarCheck2" },
       { title: "Geotagging", route: "geo_tagging", icon: "map" },
       { title: "Route Plan", route: "route_plan", icon: "route" },

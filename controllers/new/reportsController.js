@@ -4,7 +4,7 @@ const TertiaryData = require("../../model/TertiaryData");
 const DealerHierarchy = require("../../model/DealerHierarchy");
 const moment = require("moment");
 const momentTz = require("moment-timezone");
-const { resolveScope, resolveDropdownOptions } = require("../../services/resolvers");
+const { resolveScope, resolveDropdownOptions, resolveSubordinatePositions } = require("../../services/resolvers");
 const {
   getPriceSegmentSummaryActivation,
   getPrice40kSplitSummaryActivation,
@@ -1511,6 +1511,32 @@ exports.getDropdownOptions = async (req, res) => {
   }
 };
 
+exports.getSalesDashboardGroupingOptions = async (req, res) => {
+  try {
+    const { flow_name = "default_sales_flow" } = req.query;
+
+    const actorPositions = await resolveSubordinatePositions({
+      flow_name,
+      position: req.user?.position,
+      user_role: req.user?.role,
+    });
+
+    return res.status(200).json({
+      success: true,
+      flow_name,
+      actorPositions: actorPositions.map((p) => ({
+        label: String(p).toUpperCase(),
+        value: p,
+      })),
+    });
+  } catch (error) {
+    console.error("Error in getSalesDashboardGroupingOptions:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch sales dashboard grouping options",
+    });
+  }
+};
 /////////////////////////////////
 ///////////////////////////////////////
 // NEW DROPDOWNSSSSS 

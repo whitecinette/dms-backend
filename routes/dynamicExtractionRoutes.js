@@ -7,7 +7,7 @@ const router = express.Router();
 
 router.get(
   "/grouping-options",
-  adminOrSuperAdminAuth,
+  userAuth,
   getExtractionGroupingOptions
 );
 
