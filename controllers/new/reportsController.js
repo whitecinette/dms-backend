@@ -207,406 +207,453 @@ async function resolveDashboardReportScope({
 }
 
 
+// --------new helpers---------------
+
+async function prepareDashboardSummaryContext(req) {
+  let {
+    start_date,
+    end_date,
+    flow_name = "default_sales_flow",
+    filters = {},
+    subordinate_filters = {},
+    dealer_filters = {},
+  } = req.body;
+
+  const user = req.user;
+  const reportType = filters?.report_type;
+  const selectedTags = [];
+  const groupBy = normalizeGroupBy(filters?.group_by);
+
+  if (!reportType) {
+    throw new Error("filters.report_type is required");
+  }
+
+  const validationError = validateDashboardSummaryRequest({
+    start_date,
+    end_date,
+    flow_name,
+    filters,
+    subordinate_filters,
+    dealer_filters,
+  });
+
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const indiaNow = momentTz().tz("Asia/Kolkata");
+
+  if (!start_date || !end_date) {
+    const yesterday = indiaNow.clone().subtract(1, "day");
+    start_date = yesterday.clone().startOf("month").format("YYYY-MM-DD");
+    end_date = yesterday.format("YYYY-MM-DD");
+  }
+
+  const effectiveSubordinateFilters = mergeLegacySubordinateFilters(
+    filters,
+    subordinate_filters
+  );
+
+  const effectiveDealerFilters =
+    dealer_filters && typeof dealer_filters === "object" && !Array.isArray(dealer_filters)
+      ? dealer_filters
+      : {};
+
+  const {
+    dealerCodes = [],
+    mddCodes = [],
+  } = await resolveDashboardReportScope({
+    user,
+    flow_name,
+    subordinate_filters: effectiveSubordinateFilters,
+    dealer_filters: effectiveDealerFilters,
+  });
+
+  const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
+  const endDate = moment(end_date, "YYYY-MM-DD").endOf("day");
+
+  const isFullMonth =
+    startDate.date() === 1 &&
+    endDate.date() === endDate.daysInMonth();
+
+  let lmtdStart = startDate.clone().subtract(1, "month");
+  let lmtdEnd = endDate.clone().subtract(1, "month");
+
+  if (isFullMonth) {
+    lmtdStart = lmtdStart.startOf("month");
+    lmtdEnd = lmtdStart.clone().endOf("month");
+  }
+
+  const ftdRawDate = endDate.format("M/D/YY");
+
+  const baseMonth = moment(startDate);
+  const lastThreeMonths = [
+    baseMonth.clone().subtract(3, "months").format("YYYY-MM"),
+    baseMonth.clone().subtract(2, "months").format("YYYY-MM"),
+    baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
+  ];
+
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const hasScopeFilters =
+    Object.keys(effectiveSubordinateFilters).length > 0 ||
+    Object.keys(effectiveDealerFilters).length > 0;
+  const allowAdminBypass = isAdmin && !hasScopeFilters;
+
+  return {
+    user,
+    flow_name,
+    filters,
+    reportType,
+    groupBy,
+    selectedTags,
+    effectiveSubordinateFilters,
+    effectiveDealerFilters,
+    dealerCodes,
+    mddCodes,
+    startDate,
+    endDate,
+    lmtdStart,
+    lmtdEnd,
+    ftdRawDate,
+    lastThreeMonths,
+    allowAdminBypass,
+  };
+}
+
+async function buildDashboardSummaryPayload(req) {
+  const ctx = await prepareDashboardSummaryContext(req);
+  const { data, groupedTagData, availableTags, isTagMode } =
+    await buildDashboardReportByType(ctx);
+
+  const payload = {
+    success: true,
+    flow_name: ctx.flow_name,
+    report_type: ctx.reportType,
+    applied_filters: {
+      subordinate_filters: ctx.effectiveSubordinateFilters,
+      dealer_filters: ctx.effectiveDealerFilters,
+      tags: ctx.selectedTags,
+      ...(isTagMode ? { group_by: "tag" } : {}),
+    },
+    available_tags: availableTags,
+    [ctx.reportType]: data,
+    ...(groupedTagData
+      ? {
+          tag_grouped: {
+            [ctx.reportType]: groupedTagData,
+          },
+        }
+      : {}),
+  };
+
+  return { ctx, payload };
+}
+// -----------new helpers------------------
+
+
+// ------------new packer---------------------
+
+async function buildDashboardReportByType(ctx) {
+  const {
+    reportType,
+    groupBy,
+    selectedTags,
+    dealerCodes,
+    mddCodes,
+    startDate,
+    endDate,
+    lmtdStart,
+    lmtdEnd,
+    ftdRawDate,
+    lastThreeMonths,
+    allowAdminBypass,
+  } = ctx;
+
+  const activationTagMatch = null;
+  const sellThroughTagMatch = null;
+
+  let data = null;
+  let groupedTagData = null;
+
+  if (groupBy === "tag") {
+    if (!canGroupByTag(reportType)) {
+      throw new Error(`Tag grouping is not supported for report type ${reportType}`);
+    }
+
+    data = await getGroupedTagReport({
+      reportType,
+      dealerCodes,
+      mddCodes,
+      scopeCodes: reportType === "secondary" ? mddCodes : dealerCodes,
+      startDate,
+      endDate,
+      lmtdStart,
+      lmtdEnd,
+      ftdRawDate,
+      lastThreeMonths,
+      selectedTags,
+      isAdmin: allowAdminBypass,
+    });
+
+    return {
+      data,
+      groupedTagData: null,
+      availableTags: [],
+      isTagMode: true,
+    };
+  }
+
+  switch (reportType) {
+    case "activation":
+      data = await buildReport(
+        ActivationData,
+        "activation_date_raw",
+        "tertiary_buyer_code",
+        dealerCodes,
+        "val",
+        "qty",
+        lastThreeMonths,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        true,
+        activationTagMatch,
+        allowAdminBypass
+      );
+      break;
+
+    case "tertiary":
+      data = await buildReport(
+        TertiaryData,
+        "invoice_date_raw",
+        "dealer_code",
+        dealerCodes,
+        "net_value",
+        "qty",
+        lastThreeMonths,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        true,
+        sellThroughTagMatch,
+        allowAdminBypass
+      );
+      break;
+
+    case "secondary":
+      data = await buildReport(
+        SecondaryData,
+        "invoice_date_raw",
+        "mdd_code",
+        mddCodes,
+        "net_value",
+        "qty",
+        lastThreeMonths,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        false,
+        sellThroughTagMatch,
+        allowAdminBypass
+      );
+      break;
+
+    case "wod":
+      data = await getWODSummary(
+        dealerCodes,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        lastThreeMonths,
+        activationTagMatch,
+        allowAdminBypass
+      );
+      break;
+
+    case "price_segment":
+      data = await getPriceSegmentSummaryActivation(
+        dealerCodes,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        lastThreeMonths,
+        activationTagMatch,
+        allowAdminBypass
+      );
+      break;
+
+    case "price_segment_40k":
+      data = await getPrice40kSplitSummaryActivation(
+        dealerCodes,
+        startDate,
+        endDate,
+        lmtdStart,
+        lmtdEnd,
+        ftdRawDate,
+        lastThreeMonths,
+        activationTagMatch,
+        allowAdminBypass
+      );
+      break;
+
+    case "activation_value_ytd":
+      data = (await getActivationPaceYtdReports({
+        ActivationData,
+        dealerCodes,
+        extraMatch: activationTagMatch,
+        isAdmin: allowAdminBypass,
+      })).activationValueYtd;
+      break;
+
+    case "activation_vol_ytd":
+      data = (await getActivationPaceYtdReports({
+        ActivationData,
+        dealerCodes,
+        extraMatch: activationTagMatch,
+        isAdmin: allowAdminBypass,
+      })).activationVolYtd;
+      break;
+
+    case "tertiary_value_ytd":
+      data = (await getTertiaryPaceYtdReports({
+        TertiaryData,
+        dealerCodes,
+        extraMatch: sellThroughTagMatch,
+        isAdmin: allowAdminBypass,
+      })).tertiaryValueYtd;
+      break;
+
+    case "tertiary_vol_ytd":
+      data = (await getTertiaryPaceYtdReports({
+        TertiaryData,
+        dealerCodes,
+        extraMatch: sellThroughTagMatch,
+        isAdmin: allowAdminBypass,
+      })).tertiaryVolYtd;
+      break;
+
+    case "ytd_all":
+      data = await getAllPaceYtdReports({
+        ActivationData,
+        TertiaryData,
+        dealerCodes,
+        activationExtraMatch: activationTagMatch,
+        tertiaryExtraMatch: sellThroughTagMatch,
+        isAdmin: allowAdminBypass,
+      });
+      break;
+
+    case "activation_value_ytd_actual":
+      data = (await getActivationActualYtdReports({
+        ActivationData,
+        dealerCodes,
+        extraMatch: activationTagMatch,
+        isAdmin: allowAdminBypass,
+      })).activationValueYtdActual;
+      break;
+
+    case "activation_vol_ytd_actual":
+      data = (await getActivationActualYtdReports({
+        ActivationData,
+        dealerCodes,
+        extraMatch: activationTagMatch,
+        isAdmin: allowAdminBypass,
+      })).activationVolYtdActual;
+      break;
+
+    case "tertiary_value_ytd_actual":
+      data = (await getTertiaryActualYtdReports({
+        TertiaryData,
+        dealerCodes,
+        extraMatch: sellThroughTagMatch,
+        isAdmin: allowAdminBypass,
+      })).tertiaryValueYtdActual;
+      break;
+
+    case "tertiary_vol_ytd_actual":
+      data = (await getTertiaryActualYtdReports({
+        TertiaryData,
+        dealerCodes,
+        extraMatch: sellThroughTagMatch,
+        isAdmin: allowAdminBypass,
+      })).tertiaryVolYtdActual;
+      break;
+
+    case "ytd_actual_all":
+      data = await getAllActualYtdReports({
+        ActivationData,
+        TertiaryData,
+        dealerCodes,
+        activationExtraMatch: activationTagMatch,
+        tertiaryExtraMatch: sellThroughTagMatch,
+        isAdmin: allowAdminBypass,
+      });
+      break;
+
+    default:
+      throw new Error(
+        "Invalid filters.report_type. Use: activation | tertiary | secondary | wod | price_segment | price_segment_40k | activation_value_ytd | activation_vol_ytd | tertiary_value_ytd | tertiary_vol_ytd | ytd_all | activation_value_ytd_actual | activation_vol_ytd_actual | tertiary_value_ytd_actual | tertiary_vol_ytd_actual | ytd_actual_all"
+      );
+  }
+
+  if (canGroupByTag(reportType)) {
+    groupedTagData = await getGroupedTagReport({
+      reportType,
+      dealerCodes,
+      mddCodes,
+      scopeCodes: reportType === "secondary" ? mddCodes : dealerCodes,
+      startDate,
+      endDate,
+      lmtdStart,
+      lmtdEnd,
+      ftdRawDate,
+      lastThreeMonths,
+      selectedTags,
+      isAdmin: allowAdminBypass,
+    });
+  }
+
+  return {
+    data,
+    groupedTagData,
+    availableTags: [],
+    isTagMode: false,
+  };
+}
+// -------------new packer-------------------------
 
 exports.getDashboardSummary = async (req, res) => {
   try {
-    let {
-      start_date,
-      end_date,
-      flow_name = "default_sales_flow",
-      filters = {},
-      subordinate_filters = {},
-      dealer_filters = {},
-    } = req.body;
-    const user = req.user;
-
-    const reportType = filters?.report_type;
-    // Product-tag based narrowing is disabled for dashboard summary.
-    // We still allow group_by=tag so tag rows can be shown by default.
-    const selectedTags = [];
-    const groupBy = normalizeGroupBy(filters?.group_by);
-    if (!reportType) {
-      return res.status(400).json({
-        success: false,
-        message: "filters.report_type is required",
-      });
-    }
-
-    const validationError = validateDashboardSummaryRequest({
-      start_date,
-      end_date,
-      flow_name,
-      filters,
-      subordinate_filters,
-      dealer_filters,
-    });
-
-    if (validationError) {
-      return res.status(400).json({
-        success: false,
-        message: validationError,
-      });
-    }
-
-    const indiaNow = momentTz().tz("Asia/Kolkata");
-
-    // If no dates provided → default to real-time safe range
-    if (!start_date || !end_date) {
-      const yesterday = indiaNow.clone().subtract(1, "day");
-      start_date = yesterday.clone().startOf("month").format("YYYY-MM-DD");
-      end_date = yesterday.format("YYYY-MM-DD");
-    }
-
-    const effectiveSubordinateFilters = mergeLegacySubordinateFilters(
-      filters,
-      subordinate_filters
-    );
-
-    const effectiveDealerFilters =
-      dealer_filters && typeof dealer_filters === "object" && !Array.isArray(dealer_filters)
-        ? dealer_filters
-        : {};
-
-    const {
-      dealerCodes = [],
-      mddCodes = [],
-    } = await resolveDashboardReportScope({
-      user,
-      flow_name,
-      subordinate_filters: effectiveSubordinateFilters,
-      dealer_filters: effectiveDealerFilters,
-    });
-
-    const startDate = moment(start_date, "YYYY-MM-DD").startOf("day");
-    const endDate = moment(end_date, "YYYY-MM-DD").endOf("day");
-
-    const isFullMonth =
-      startDate.date() === 1 &&
-      endDate.date() === endDate.daysInMonth();
-
-    let lmtdStart = startDate.clone().subtract(1, "month");
-    let lmtdEnd = endDate.clone().subtract(1, "month");
-
-    if (isFullMonth) {
-      lmtdStart = lmtdStart.startOf("month");
-      lmtdEnd = lmtdStart.clone().endOf("month");
-    }
-
-    const ftdRawDate = endDate.format("M/D/YY");
-
-    const baseMonth = moment(startDate);
-    const lastThreeMonths = [
-      baseMonth.clone().subtract(3, "months").format("YYYY-MM"),
-      baseMonth.clone().subtract(2, "months").format("YYYY-MM"),
-      baseMonth.clone().subtract(1, "months").format("YYYY-MM"),
-    ];
-
-    const isAdmin = user?.role === "admin" || user?.role === "super_admin";
-    const hasScopeFilters =
-      Object.keys(effectiveSubordinateFilters).length > 0 ||
-      Object.keys(effectiveDealerFilters).length > 0;
-    const allowAdminBypass = isAdmin && !hasScopeFilters;
-    const activationTagMatch = null;
-    const sellThroughTagMatch = null;
-    let data;
-
-    if (groupBy === "tag") {
-      if (!canGroupByTag(reportType)) {
-        return res.status(400).json({
-          success: false,
-          message: `Tag grouping is not supported for report type ${reportType}`,
-        });
-      }
-
-      data = await getGroupedTagReport({
-        reportType,
-        dealerCodes,
-        mddCodes,
-        scopeCodes: reportType === "secondary" ? mddCodes : dealerCodes,
-        startDate,
-        endDate,
-        lmtdStart,
-        lmtdEnd,
-        ftdRawDate,
-        lastThreeMonths,
-        selectedTags,
-        isAdmin: allowAdminBypass,
-      });
-
-      const payload = {
-        success: true,
-        flow_name,
-        report_type: reportType,
-        applied_filters: {
-          subordinate_filters: effectiveSubordinateFilters,
-          dealer_filters: effectiveDealerFilters,
-          tags: selectedTags,
-          group_by: "tag",
-        },
-        available_tags: [],
-        [reportType]: data,
-      };
-
-      res.json(payload);
-      return payload;
-    }
-
-    switch (reportType) {
-      case "activation":
-        data = await buildReport(
-          ActivationData,
-          "activation_date_raw",
-          "tertiary_buyer_code",
-          dealerCodes,
-          "val",
-          "qty",
-          lastThreeMonths,
-          startDate,
-          endDate,
-          lmtdStart,
-          lmtdEnd,
-          ftdRawDate,
-          true,
-          activationTagMatch,
-          allowAdminBypass
-        );
-        break;
-
-      case "tertiary":
-        data = await buildReport(
-          TertiaryData,
-          "invoice_date_raw",
-          "dealer_code",
-          dealerCodes,
-          "net_value",
-          "qty",
-          lastThreeMonths,
-          startDate,
-          endDate,
-          lmtdStart,
-          lmtdEnd,
-          ftdRawDate,
-          true,
-          sellThroughTagMatch,
-          allowAdminBypass
-        );
-        break;
-
-      case "secondary":
-        data = await buildReport(
-          SecondaryData,
-          "invoice_date_raw",
-          "mdd_code",
-          mddCodes,
-          "net_value",
-          "qty",
-          lastThreeMonths,
-          startDate,
-          endDate,
-          lmtdStart,
-          lmtdEnd,
-          ftdRawDate,
-          false,
-          sellThroughTagMatch,
-          allowAdminBypass
-        );
-        break;
-
-      case "wod":
-        data = await getWODSummary(
-          dealerCodes,
-          startDate,
-          endDate,
-          lmtdStart,
-          lmtdEnd,
-          ftdRawDate,
-          lastThreeMonths,
-          activationTagMatch,
-          allowAdminBypass
-        );
-        break;
-
-      case "price_segment":
-        data = await getPriceSegmentSummaryActivation(
-          dealerCodes,
-          startDate,
-          endDate,
-          lmtdStart,
-          lmtdEnd,
-          ftdRawDate,
-          lastThreeMonths,
-          activationTagMatch,
-          allowAdminBypass
-        );
-        break;
-
-      case "price_segment_40k":
-        data = await getPrice40kSplitSummaryActivation(
-          dealerCodes,
-          startDate,
-          endDate,
-          lmtdStart,
-          lmtdEnd,
-          ftdRawDate,
-          lastThreeMonths,
-          activationTagMatch,
-          allowAdminBypass
-        );
-        break;
-
-      // =========================
-      // YTD PACE REPORTS
-      // =========================
-      case "activation_value_ytd":
-        data = (await getActivationPaceYtdReports({
-          ActivationData,
-          dealerCodes,
-          extraMatch: activationTagMatch,
-          isAdmin: allowAdminBypass,
-        })).activationValueYtd;
-        break;
-
-      case "activation_vol_ytd":
-        data = (await getActivationPaceYtdReports({
-          ActivationData,
-          dealerCodes,
-          extraMatch: activationTagMatch,
-          isAdmin: allowAdminBypass,
-        })).activationVolYtd;
-        break;
-
-      case "tertiary_value_ytd":
-        data = (await getTertiaryPaceYtdReports({
-          TertiaryData,
-          dealerCodes,
-          extraMatch: sellThroughTagMatch,
-          isAdmin: allowAdminBypass,
-        })).tertiaryValueYtd;
-        break;
-
-      case "tertiary_vol_ytd":
-        data = (await getTertiaryPaceYtdReports({
-          TertiaryData,
-          dealerCodes,
-          extraMatch: sellThroughTagMatch,
-          isAdmin: allowAdminBypass,
-        })).tertiaryVolYtd;
-        break;
-
-      case "ytd_all":
-        data = await getAllPaceYtdReports({
-          ActivationData,
-          TertiaryData,
-          dealerCodes,
-          activationExtraMatch: activationTagMatch,
-          tertiaryExtraMatch: sellThroughTagMatch,
-          isAdmin: allowAdminBypass,
-        });
-        break;
-
-      // =========================
-      // YTD ACTUAL REPORTS
-      // =========================
-      case "activation_value_ytd_actual":
-        data = (await getActivationActualYtdReports({
-          ActivationData,
-          dealerCodes,
-          extraMatch: activationTagMatch,
-          isAdmin: allowAdminBypass,
-        })).activationValueYtdActual;
-        break;
-
-      case "activation_vol_ytd_actual":
-        data = (await getActivationActualYtdReports({
-          ActivationData,
-          dealerCodes,
-          extraMatch: activationTagMatch,
-          isAdmin: allowAdminBypass,
-        })).activationVolYtdActual;
-        break;
-
-      case "tertiary_value_ytd_actual":
-        data = (await getTertiaryActualYtdReports({
-          TertiaryData,
-          dealerCodes,
-          extraMatch: sellThroughTagMatch,
-          isAdmin: allowAdminBypass,
-        })).tertiaryValueYtdActual;
-        break;
-
-      case "tertiary_vol_ytd_actual":
-        data = (await getTertiaryActualYtdReports({
-          TertiaryData,
-          dealerCodes,
-          extraMatch: sellThroughTagMatch,
-          isAdmin: allowAdminBypass,
-        })).tertiaryVolYtdActual;
-        break;
-
-      case "ytd_actual_all":
-        data = await getAllActualYtdReports({
-          ActivationData,
-          TertiaryData,
-          dealerCodes,
-          activationExtraMatch: activationTagMatch,
-          tertiaryExtraMatch: sellThroughTagMatch,
-          isAdmin: allowAdminBypass,
-        });
-        break;
-
-      default:
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid filters.report_type. Use: activation | tertiary | secondary | wod | price_segment | price_segment_40k | activation_value_ytd | activation_vol_ytd | tertiary_value_ytd | tertiary_vol_ytd | ytd_all | activation_value_ytd_actual | activation_vol_ytd_actual | tertiary_value_ytd_actual | tertiary_vol_ytd_actual | ytd_actual_all",
-        });
-    }
-
-  let groupedTagData = null;
-
-    if (canGroupByTag(reportType)) {
-      groupedTagData = await getGroupedTagReport({
-        reportType,
-        dealerCodes,
-        mddCodes,
-        scopeCodes: reportType === "secondary" ? mddCodes : dealerCodes,
-        startDate,
-        endDate,
-        lmtdStart,
-        lmtdEnd,
-        ftdRawDate,
-        lastThreeMonths,
-        selectedTags,
-        isAdmin: allowAdminBypass,
-      });
-    }
-
-    const payload = {
-      success: true,
-      flow_name,
-      report_type: reportType,
-      applied_filters: {
-        subordinate_filters: effectiveSubordinateFilters,
-        dealer_filters: effectiveDealerFilters,
-        tags: selectedTags,
-      },
-      available_tags: [],
-      [reportType]: data,
-      ...(groupedTagData
-        ? {
-            tag_grouped: {
-              [reportType]: groupedTagData,
-            },
-          }
-        : {}),
-    };
-
-    res.json(payload);
-    return payload;
-
+    const { payload } = await buildDashboardSummaryPayload(req);
+    return res.json(payload);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ success: false, message: error.message });
+    const statusCode =
+      error.message &&
+      (
+        error.message.includes("required") ||
+        error.message.includes("invalid") ||
+        error.message.includes("must be") ||
+        error.message.includes("cannot be after") ||
+        error.message.includes("not supported")
+      )
+        ? 400
+        : 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -1467,46 +1514,60 @@ exports.getDashboardSummaryBatch = async (req, res) => {
       });
     }
 
+    // prepare shared context ONCE using first report type temporarily
+    const baseReq = {
+      ...req,
+      body: {
+        ...req.body,
+        filters: {
+          ...(req.body.filters || {}),
+          report_type: report_types[0],
+        },
+      },
+    };
+
+    const sharedCtx = await prepareDashboardSummaryContext(baseReq);
+
     const result = {};
     const tagGrouped = {};
 
-    for (const type of report_types) {
-      const fakeReq = {
-        ...req,
-        body: {
-          ...req.body,
+    const reportEntries = await Promise.all(
+      report_types.map(async (type) => {
+        const perReportCtx = {
+          ...sharedCtx,
+          reportType: type,
           filters: {
-            ...(req.body.filters || {}),
+            ...(sharedCtx.filters || {}),
             report_type: type,
           },
-        },
-      };
+          groupBy: normalizeGroupBy(sharedCtx.filters?.group_by),
+        };
 
-      let captured = null;
+        const { data, groupedTagData } = await buildDashboardReportByType(perReportCtx);
 
-      const fakeRes = {
-        json: (data) => {
-          captured = data;
-          return data;
-        },
-        status(code) {
-          this.statusCode = code;
-          return this;
-        },
-      };
+        return {
+          type,
+          data: data || null,
+          groupedTagData: groupedTagData || null,
+        };
+      })
+    );
 
-      await exports.getDashboardSummary(fakeReq, fakeRes);
-
-      result[type] = captured?.[type] || null;
-
-      // collect grouped tag data if your single-report endpoint returns it later
-      if (captured?.tag_grouped && typeof captured.tag_grouped === "object") {
-        Object.assign(tagGrouped, captured.tag_grouped);
+    for (const entry of reportEntries) {
+      result[entry.type] = entry.data;
+      if (entry.groupedTagData) {
+        tagGrouped[entry.type] = entry.groupedTagData;
       }
     }
 
     return res.json({
       success: true,
+      flow_name: sharedCtx.flow_name,
+      applied_filters: {
+        subordinate_filters: sharedCtx.effectiveSubordinateFilters,
+        dealer_filters: sharedCtx.effectiveDealerFilters,
+        tags: sharedCtx.selectedTags,
+      },
       data: {
         ...result,
         tag_grouped: tagGrouped,
@@ -1514,7 +1575,19 @@ exports.getDashboardSummaryBatch = async (req, res) => {
     });
   } catch (error) {
     console.error("Batch report error:", error);
-    return res.status(500).json({
+    const statusCode =
+      error.message &&
+      (
+        error.message.includes("required") ||
+        error.message.includes("invalid") ||
+        error.message.includes("must be") ||
+        error.message.includes("cannot be after") ||
+        error.message.includes("not supported")
+      )
+        ? 400
+        : 500;
+
+    return res.status(statusCode).json({
       success: false,
       message: error.message || "Failed to fetch reports",
     });
