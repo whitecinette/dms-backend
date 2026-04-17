@@ -11,19 +11,9 @@ async function resolveSubordinatePositions({ flow_name, position, user_role }) {
     normalizedRole === "super_admin" ||
     normalizedRole === "hr";
 
+  // ✅ full bypass for admin-like roles
   if (isAdmin) {
-    if (!normalizedPosition) {
-      return hierarchy;
-    }
-
-    const idx = hierarchy.indexOf(normalizedPosition);
-    if (idx === -1) {
-      throw new Error(
-        `Position "${normalizedPosition}" not found in flow "${flow_name}"`
-      );
-    }
-
-    return hierarchy.slice(idx + 1);
+    return hierarchy;
   }
 
   if (!normalizedPosition) {
