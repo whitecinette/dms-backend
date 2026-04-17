@@ -354,14 +354,18 @@ async function buildDashboardSummaryPayload(req) {
 function shouldIncludeTagGrouped(reportType, includeTagGrouped) {
   if (!includeTagGrouped) return false;
 
-  const immediateTagReports = new Set([
+  const supportedTagReports = new Set([
     "activation",
     "tertiary",
     "secondary",
     "wod",
+    "activation_vol_ytd",
+    "activation_vol_ytd_actual",
+    "tertiary_vol_ytd",
+    "tertiary_vol_ytd_actual",
   ]);
 
-  return immediateTagReports.has(reportType);
+  return supportedTagReports.has(reportType);
 }
 // -----------new helpers------------------
 

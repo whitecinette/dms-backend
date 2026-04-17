@@ -670,9 +670,7 @@ async function buildGroupedYtdTagReport({
 }
 
 async function getGroupedTagReport(params) {
-  const {
-    reportType,
-  } = params;
+  const { reportType } = params;
 
   if (["activation", "tertiary", "secondary"].includes(reportType)) {
     return buildGroupedMonthlyTagReport(params);
@@ -680,9 +678,13 @@ async function getGroupedTagReport(params) {
 
   if (
     [
+      "activation_value_ytd",
       "activation_vol_ytd",
-      "activation_vol_ytd_actual",
+      "tertiary_value_ytd",
       "tertiary_vol_ytd",
+      "activation_value_ytd_actual",
+      "activation_vol_ytd_actual",
+      "tertiary_value_ytd_actual",
       "tertiary_vol_ytd_actual",
     ].includes(reportType)
   ) {
@@ -694,6 +696,7 @@ async function getGroupedTagReport(params) {
       ...params,
       reportType: "tertiary",
     });
+
     const sellOut = await buildGroupedMonthlyTagReport({
       ...params,
       reportType: "activation",
