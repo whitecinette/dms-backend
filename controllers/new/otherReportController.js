@@ -11,6 +11,7 @@ exports.getTopSellingBySegment = async (req, res) => {
       endDate,
       productCategory,
       tags,
+      groupBy = "product_code",
     } = req.query;
 
     const user = req.user;
@@ -19,9 +20,6 @@ exports.getTopSellingBySegment = async (req, res) => {
 
     const hasCustomDateFilter = Boolean(startDate || endDate);
 
-    // ---------------------------------
-    // DATE RANGE
-    // ---------------------------------
     const start = hasCustomDateFilter
       ? (startDate
           ? moment(startDate, "YYYY-MM-DD").startOf("day")
@@ -37,9 +35,6 @@ exports.getTopSellingBySegment = async (req, res) => {
     const prevStart = moment(start).subtract(1, "month").startOf("month");
     const prevEnd = moment(start).subtract(1, "month").endOf("month");
 
-    // Default behavior:
-    // - no manual date selected => FTD = yesterday
-    // - manual date selected => FTD = selected end date
     const ftdDate = hasCustomDateFilter
       ? moment(end).startOf("day")
       : moment().subtract(1, "day").startOf("day");
@@ -47,9 +42,6 @@ exports.getTopSellingBySegment = async (req, res) => {
     const ftdDateStart = moment(ftdDate).startOf("day");
     const ftdDateEnd = moment(ftdDate).endOf("day");
 
-    // ---------------------------------
-    // TAG ARRAY
-    // ---------------------------------
     const tagArray = Array.isArray(tags)
       ? tags.filter(Boolean)
       : typeof tags === "string" && tags.trim()
@@ -59,9 +51,6 @@ exports.getTopSellingBySegment = async (req, res) => {
           .filter(Boolean)
       : [];
 
-    // ---------------------------------
-    // FETCH DEALERS (ROLE BASED)
-    // ---------------------------------
     let dealerFilter = {};
 
     if (!["admin", "super_admin", "hr"].includes(user.role)) {
@@ -77,16 +66,8 @@ exports.getTopSellingBySegment = async (req, res) => {
       };
     }
 
-    // ---------------------------------
-    // PRODUCT FILTER
-    // ---------------------------------
-    const baseSamsungFilter = {
-      brand: "samsung",
-    };
-
-    const productFilter = {
-      ...baseSamsungFilter,
-    };
+    const baseSamsungFilter = { brand: "samsung" };
+    const productFilter = { ...baseSamsungFilter };
 
     if (productCategory) {
       productFilter.product_category = productCategory;
@@ -96,10 +77,7 @@ exports.getTopSellingBySegment = async (req, res) => {
       productFilter.tags = { $in: tagArray };
     }
 
-    // For actual report rows
     const filteredProducts = await Product.find(productFilter).lean();
-
-    // For dynamic filter options
     const allSamsungProducts = await Product.find(baseSamsungFilter).lean();
 
     const allCategories = [
@@ -118,9 +96,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       ),
     ].sort((a, b) => String(a).localeCompare(String(b)));
 
-    // ---------------------------------
-    // PRODUCT MAPS
-    // ---------------------------------
     const productMap = {};
     const allowedProductCodes = new Set();
     const allowedModelCodes = new Set();
@@ -136,9 +111,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       }
     });
 
-    // ---------------------------------
-    // FETCH ACTIVATIONS
-    // ---------------------------------
     const activations = await ActivationData.find({
       ...dealerFilter,
     }).lean();
@@ -148,7 +120,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       return m.isValid() ? m.toDate() : null;
     }
 
-    // Restrict activations to selected products
     const filteredActivations = activations.filter((a) => {
       return (
         allowedProductCodes.has(a.product_code) ||
@@ -156,9 +127,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       );
     });
 
-    // ---------------------------------
-    // SEGMENT FUNCTION
-    // ---------------------------------
     function getSegment(price) {
       if (price < 6000) return "0-6";
       if (price < 10000) return "6-10";
@@ -171,9 +139,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       return "120";
     }
 
-    // ---------------------------------
-    // DEALER MAP
-    // ---------------------------------
     const dealerCodes = [
       ...new Set(
         filteredActivations
@@ -192,9 +157,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       dealerMap[d.code] = d;
     });
 
-    // ---------------------------------
-    // AGGREGATION
-    // ---------------------------------
     const result = {};
 
     filteredActivations.forEach((a) => {
@@ -202,7 +164,6 @@ exports.getTopSellingBySegment = async (req, res) => {
       if (!invoiceDate) return;
 
       const product = productMap[a.product_code] || productMap[a.model_no];
-
       const qty = safeNum(a.qty);
       const val = safeNum(a.val);
 
@@ -210,13 +171,21 @@ exports.getTopSellingBySegment = async (req, res) => {
 
       const price = product?.price ? safeNum(product.price) : val / qty;
       const segment = product?.segment || getSegment(price);
-      const key = a.model_no || a.product_code || product?.model_code || product?.product_code || "UNKNOWN_MODEL";
+      const key =
+        a.product_code ||
+        product?.product_code ||
+        a.model_no ||
+        product?.model_code ||
+        "UNKNOWN_PRODUCT";
 
       if (!result[segment]) result[segment] = {};
 
       if (!result[segment][key]) {
         result[segment][key] = {
+          rowType: "item",
+          product_code: a.product_code || product?.product_code || "-",
           model: a.model_no || product?.model_code || "-",
+          model_code: product?.model_code || a.model_no || "UNKNOWN_MODEL",
           name: product?.product_name || a.model_no || a.product_code || "-",
           product_category: product?.product_category || "",
           category: product?.category || "",
@@ -241,7 +210,6 @@ exports.getTopSellingBySegment = async (req, res) => {
         };
       }
 
-      // Current selected range
       if (invoiceDate >= start.toDate() && invoiceDate <= end.toDate()) {
         result[segment][key].MTD += qty;
         result[segment][key].total += qty;
@@ -265,26 +233,25 @@ exports.getTopSellingBySegment = async (req, res) => {
         result[segment][key].dealerStats[dealerCode].totalValue += val;
       }
 
-      // Previous month window
       if (invoiceDate >= prevStart.toDate() && invoiceDate <= prevEnd.toDate()) {
         result[segment][key].LM += qty;
         result[segment][key].LMValue += val;
       }
 
-      // FTD date
       if (invoiceDate >= ftdDateStart.toDate() && invoiceDate <= ftdDateEnd.toDate()) {
         result[segment][key].FTD += qty;
       }
     });
 
-    // ---------------------------------
-    // FORMAT SEGMENT DATA
-    // ---------------------------------
+    const selectedRangeDays = Math.max(
+      1,
+      end.clone().startOf("day").diff(start.clone().startOf("day"), "days") + 1
+    );
+
     const finalData = {};
-    const selectedRangeDays = Math.max(1, end.clone().startOf("day").diff(start.clone().startOf("day"), "days") + 1);
 
     Object.keys(result).forEach((segment) => {
-      finalData[segment] = Object.values(result[segment])
+      const itemRows = Object.values(result[segment])
         .map((row) => {
           const dealers = Object.values(row.dealerStats || {});
 
@@ -309,31 +276,99 @@ exports.getTopSellingBySegment = async (req, res) => {
             ...row,
             ADS: Number(ads.toFixed(2)),
             GR: Number(gr.toFixed(2)),
-            WOS: 0, // stock pending later
+            WOS: 0,
             topDealersByVolume,
             topDealersByValue,
           };
         })
-        .sort((a, b) => safeNum(b.total) - safeNum(a.total));
+        .sort((a, b) => safeNum(b.MTD) - safeNum(a.MTD));
+
+      if (groupBy === "model") {
+        const groupedMap = {};
+
+        itemRows.forEach((row) => {
+          const modelKey = row.model_code || row.model || "UNKNOWN_MODEL";
+
+          if (!groupedMap[modelKey]) {
+            groupedMap[modelKey] = {
+              rowType: "group",
+              model_code: modelKey,
+              model: modelKey,
+              name: modelKey,
+              segment,
+              product_category: "",
+              category: "",
+              tags: [],
+              dp: 0,
+              LM: 0,
+              MTD: 0,
+              FTD: 0,
+              GR: 0,
+              ADS: 0,
+              WOS: 0,
+              total: 0,
+              totalValue: 0,
+              variantCount: 0,
+              children: [],
+            };
+          }
+
+          groupedMap[modelKey].children.push(row);
+          groupedMap[modelKey].LM += safeNum(row.LM);
+          groupedMap[modelKey].MTD += safeNum(row.MTD);
+          groupedMap[modelKey].FTD += safeNum(row.FTD);
+          groupedMap[modelKey].total += safeNum(row.total);
+          groupedMap[modelKey].totalValue += safeNum(row.totalValue);
+          groupedMap[modelKey].variantCount += 1;
+          groupedMap[modelKey].dp = Math.max(groupedMap[modelKey].dp, safeNum(row.dp));
+        });
+
+        finalData[segment] = Object.values(groupedMap)
+          .map((group) => {
+            const ads = selectedRangeDays > 0 ? group.MTD / selectedRangeDays : 0;
+
+            let gr = 0;
+            if (group.LM > 0) {
+              gr = ((group.MTD - group.LM) / group.LM) * 100;
+            } else if (group.MTD > 0) {
+              gr = 100;
+            }
+
+            const tagSet = new Set();
+            group.children.forEach((child) => {
+              (child.tags || []).forEach((tag) => tagSet.add(tag));
+            });
+
+            return {
+              ...group,
+              ADS: Number(ads.toFixed(2)),
+              GR: Number(gr.toFixed(2)),
+              tags: [...tagSet],
+              children: group.children.sort((a, b) => safeNum(b.MTD) - safeNum(a.MTD)),
+            };
+          })
+          .sort((a, b) => safeNum(b.MTD) - safeNum(a.MTD));
+      } else {
+        finalData[segment] = itemRows;
+      }
     });
 
-    // ---------------------------------
-    // FLAT DATA
-    // ---------------------------------
-    const flatRows = Object.values(finalData).flat();
+    const flatRowsForSummary =
+      groupBy === "model"
+        ? Object.values(finalData).flatMap((groups) =>
+            groups.flatMap((group) => group.children || [])
+          )
+        : Object.values(finalData).flat();
 
-    const top3ByVolume = [...flatRows]
+    const top3ByVolume = [...flatRowsForSummary]
       .sort((a, b) => safeNum(b.total) - safeNum(a.total))
       .slice(0, 3);
 
-    const top3ByValue = [...flatRows]
+    const top3ByValue = [...flatRowsForSummary]
       .sort((a, b) => safeNum(b.totalValue) - safeNum(a.totalValue))
       .slice(0, 3);
 
-    // ---------------------------------
-    // SUMMARY
-    // ---------------------------------
-    const summary = flatRows.reduce(
+    const summary = flatRowsForSummary.reduce(
       (acc, row) => {
         acc.segments = Object.keys(finalData).length;
         acc.models += 1;
@@ -371,9 +406,11 @@ exports.getTopSellingBySegment = async (req, res) => {
           endDate: end.format("YYYY-MM-DD"),
           productCategory: productCategory || null,
           tags: tagArray,
+          groupBy,
         },
         ftdDate: ftdDate.format("YYYY-MM-DD"),
         usedDefaultDateRange: !hasCustomDateFilter,
+        groupBy,
       },
     });
   } catch (err) {
