@@ -15,6 +15,10 @@ const secondarySchema = new mongoose.Schema(
 
     qty: Number,
     net_value: Number,
+
+    // Snapshot fields
+    unit_price_snapshot: Number,
+    segment_snapshot: String,
   },
   {
     timestamps: true,
@@ -24,5 +28,8 @@ const secondarySchema = new mongoose.Schema(
 
 secondarySchema.index({ year_month: 1 });
 secondarySchema.index({ mdd_code: 1 });
+secondarySchema.index({ sku: 1 });
+secondarySchema.index({ model: 1 });
+secondarySchema.index({ year_month: 1, segment_snapshot: 1 });
 
 module.exports = mongoose.model("SecondaryData", secondarySchema);

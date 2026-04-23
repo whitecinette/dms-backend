@@ -2404,3 +2404,263 @@ exports.syncBeatMappingDealerInfo = async (req, res) => {
 
 // BEAT MAPPINGSSS 
 /////////////////////////////////
+
+
+
+// sales price buckets calculate
+
+
+
+function normalizeCode(v) {
+  return String(v || "").trim().toUpperCase();
+}
+
+function bucketFromPrice(price) {
+  price = Number(price) || 0;
+
+  if (!price || price <= 0) return "";
+  if (price <= 6000) return "0-6";
+  if (price <= 10000) return "6-10";
+  if (price <= 20000) return "10-20";
+  if (price <= 30000) return "20-30";
+  if (price <= 40000) return "30-40";
+  if (price <= 70000) return "40-70";
+  if (price <= 100000) return "70-100";
+  if (price <= 120000) return "100-120";
+  return "120";
+}
+
+function resolveMonthKey({ month, year, monthKey }) {
+  if (monthKey && /^\d{4}-\d{2}$/.test(String(monthKey))) {
+    return String(monthKey);
+  }
+
+  const m = Number(month);
+  const y = Number(year);
+
+  if (!m || !y || m < 1 || m > 12) return null;
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+
+exports.recalculateSalesSnapshotsByMonth = async (req, res) => {
+  try {
+    const {
+      month,
+      year,
+      monthKey,
+      dryRun = false,
+    } = req.body || {};
+
+    const resolvedMonth = resolveMonthKey({ month, year, monthKey });
+
+    if (!resolvedMonth) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide month/year or monthKey in YYYY-MM format",
+      });
+    }
+
+    const [activationRows, tertiaryRows, secondaryRows] = await Promise.all([
+      ActivationData.find({ year_month: resolvedMonth }).lean(),
+      TertiaryData.find({ year_month: resolvedMonth }).lean(),
+      SecondaryData.find({ year_month: resolvedMonth }).lean(),
+    ]);
+
+    const productCodes = new Set();
+    const modelCodes = new Set();
+
+    activationRows.forEach((row) => {
+      if (row.product_code) productCodes.add(normalizeCode(row.product_code));
+      if (row.model_no) modelCodes.add(normalizeCode(row.model_no));
+    });
+
+    tertiaryRows.forEach((row) => {
+      if (row.sku) productCodes.add(normalizeCode(row.sku));
+      if (row.model) modelCodes.add(normalizeCode(row.model));
+    });
+
+    secondaryRows.forEach((row) => {
+      if (row.sku) productCodes.add(normalizeCode(row.sku));
+      if (row.model) modelCodes.add(normalizeCode(row.model));
+    });
+
+    const products = await Product.find({
+      brand: { $regex: /^samsung$/i },
+      $or: [
+        { product_code: { $in: [...productCodes] } },
+        { model_code: { $in: [...modelCodes] } },
+      ],
+    }).lean();
+
+    const productByCode = new Map();
+    const productByModel = new Map();
+
+    products.forEach((p) => {
+      if (p.product_code) productByCode.set(normalizeCode(p.product_code), p);
+      if (p.model_code) productByModel.set(normalizeCode(p.model_code), p);
+    });
+
+    const processRows = (rows, type) => {
+      const bulkOps = [];
+      const preview = [];
+      let changedCount = 0;
+      let matchedProductCount = 0;
+      let derivedPriceCount = 0;
+      let unchangedCount = 0;
+      let blankSegmentCount = 0;
+
+      for (const row of rows) {
+        let qty = 0;
+        let val = 0;
+        let product = null;
+        let displayCode = "";
+        let displayModel = "";
+
+        if (type === "activation") {
+          qty = Number(row.qty) || 0;
+          val = Number(row.val) || 0;
+          displayCode = row.product_code || "";
+          displayModel = row.model_no || "";
+
+          product =
+            productByCode.get(normalizeCode(row.product_code)) ||
+            productByModel.get(normalizeCode(row.model_no));
+        } else {
+          qty = Number(row.qty) || 0;
+          val = Number(row.net_value) || 0;
+          displayCode = row.sku || "";
+          displayModel = row.model || "";
+
+          product =
+            productByCode.get(normalizeCode(row.sku)) ||
+            productByModel.get(normalizeCode(row.model));
+        }
+
+        if (product) matchedProductCount += 1;
+
+        const unitPrice = product?.price
+          ? Number(product.price) || 0
+          : qty > 0
+          ? val / qty
+          : 0;
+
+        if (!product?.price) derivedPriceCount += 1;
+
+        const segment = product?.segment || bucketFromPrice(unitPrice);
+
+        if (!segment) blankSegmentCount += 1;
+
+        const oldPrice = Number(row.unit_price_snapshot) || 0;
+        const oldSegment = String(row.segment_snapshot || "");
+        const newPrice = Number(unitPrice) || 0;
+        const newSegment = String(segment || "");
+
+        const changed =
+          oldPrice !== newPrice || oldSegment !== newSegment;
+
+        if (changed) {
+          changedCount += 1;
+
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: row._id },
+              update: {
+                $set: {
+                  unit_price_snapshot: newPrice,
+                  segment_snapshot: newSegment,
+                },
+              },
+            },
+          });
+
+          if (preview.length < 25) {
+            preview.push({
+              _id: row._id,
+              type,
+              code: displayCode,
+              model: displayModel,
+              qty,
+              value: val,
+              oldUnitPrice: oldPrice,
+              newUnitPrice: newPrice,
+              oldSegment,
+              newSegment,
+              matchedFromProduct: Boolean(product),
+            });
+          }
+        } else {
+          unchangedCount += 1;
+        }
+      }
+
+      return {
+        bulkOps,
+        stats: {
+          totalRows: rows.length,
+          changedCount,
+          unchangedCount,
+          matchedProductCount,
+          derivedPriceCount,
+          blankSegmentCount,
+        },
+        preview,
+      };
+    };
+
+    const activationResult = processRows(activationRows, "activation");
+    const tertiaryResult = processRows(tertiaryRows, "tertiary");
+    const secondaryResult = processRows(secondaryRows, "secondary");
+
+    if (!dryRun) {
+      if (activationResult.bulkOps.length) {
+        await ActivationData.bulkWrite(activationResult.bulkOps);
+      }
+      if (tertiaryResult.bulkOps.length) {
+        await TertiaryData.bulkWrite(tertiaryResult.bulkOps);
+      }
+      if (secondaryResult.bulkOps.length) {
+        await SecondaryData.bulkWrite(secondaryResult.bulkOps);
+      }
+    }
+
+    const totalChanged =
+      activationResult.stats.changedCount +
+      tertiaryResult.stats.changedCount +
+      secondaryResult.stats.changedCount;
+
+    return res.json({
+      success: true,
+      dryRun: Boolean(dryRun),
+      month: resolvedMonth,
+      message: dryRun
+        ? "Dry run completed successfully"
+        : "Snapshots recalculated successfully",
+      stats: {
+        totalRows:
+          activationResult.stats.totalRows +
+          tertiaryResult.stats.totalRows +
+          secondaryResult.stats.totalRows,
+        totalChanged,
+      },
+      activation: {
+        ...activationResult.stats,
+        preview: activationResult.preview,
+      },
+      tertiary: {
+        ...tertiaryResult.stats,
+        preview: tertiaryResult.preview,
+      },
+      secondary: {
+        ...secondaryResult.stats,
+        preview: secondaryResult.preview,
+      },
+    });
+  } catch (error) {
+    console.error("recalculateSalesSnapshotsByMonth error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to recalculate sales snapshots",
+    });
+  }
+};
+// sales price buckets calculate
