@@ -163,23 +163,27 @@ exports.getTopSellingBySegment = async (req, res) => {
     }
 
     const filteredActivations = activations.filter((a) => {
-      return (
+      const hasProductMatch =
         allowedProductCodes.has(a.product_code) ||
-        allowedModelCodes.has(a.model_no)
-      );
+        allowedModelCodes.has(a.model_no);
+
+      const hasSnapshot =
+        a.segment_snapshot || a.unit_price_snapshot;
+
+      return hasProductMatch || hasSnapshot;
     });
 
-    function getSegment(price) {
-      if (price < 6000) return "0-6";
-      if (price < 10000) return "6-10";
-      if (price < 20000) return "10-20";
-      if (price < 30000) return "20-30";
-      if (price < 40000) return "30-40";
-      if (price < 70000) return "40-70";
-      if (price < 100000) return "70-100";
-      if (price < 120000) return "100-120";
-      return "120";
-    }
+  function getSegment(price) {
+    if (price <= 6000) return "0-6";
+    if (price <= 10000) return "6-10";
+    if (price <= 20000) return "10-20";
+    if (price <= 30000) return "20-30";
+    if (price <= 40000) return "30-40";
+    if (price <= 70000) return "40-70";
+    if (price <= 100000) return "70-100";
+    if (price <= 120000) return "100-120";
+    return "120";
+  }
 
     const dealerCodes = [
       ...new Set(
@@ -205,14 +209,43 @@ exports.getTopSellingBySegment = async (req, res) => {
       const invoiceDate = parseDate(a.activation_date_raw);
       if (!invoiceDate) return;
 
-      const product = productMap[a.product_code] || productMap[a.model_no];
-      const qty = safeNum(a.qty);
-      const val = safeNum(a.val);
+const product = productMap[a.product_code] || productMap[a.model_no];
+const qty = safeNum(a.qty);
+const val = safeNum(a.val);
 
-      if (qty <= 0) return;
+if (qty <= 0) return;
 
-      const price = product?.price ? safeNum(product.price) : val / qty;
-      const segment = product?.segment || getSegment(price);
+// ==============================
+// SNAPSHOT FIRST (NEW SYSTEM)
+// ==============================
+let price = safeNum(a.unit_price_snapshot);
+let segment = a.segment_snapshot;
+
+// ==============================
+// FALLBACK FOR OLD DATA
+// ==============================
+if (!price || price <= 0) {
+  price = product?.price
+    ? safeNum(product.price)
+    : qty > 0
+    ? val / qty
+    : 0;
+}
+
+      if (!segment) {
+        segment = product?.segment || getSegment(price);
+      }
+
+      // ==============================
+      // FINAL SAFETY (VERY IMPORTANT)
+      // ==============================
+      if (!segment) {
+        segment = "UNMAPPED";
+      }
+
+      // ==============================
+      // SAFE KEY RESOLUTION
+      // ==============================
       const key =
         a.product_code ||
         product?.product_code ||
@@ -220,6 +253,9 @@ exports.getTopSellingBySegment = async (req, res) => {
         product?.model_code ||
         "UNKNOWN_PRODUCT";
 
+      // ==============================
+      // INIT ROW
+      // ==============================
       if (!result[segment]) result[segment] = {};
 
       if (!result[segment][key]) {
@@ -233,7 +269,7 @@ exports.getTopSellingBySegment = async (req, res) => {
           category: product?.category || "",
           tags: Array.isArray(product?.tags) ? product.tags : [],
           segment,
-          dp: price,
+          dp: Number(price) || 0, // 🔥 FIXED
 
           LM: 0,
           MTD: 0,
