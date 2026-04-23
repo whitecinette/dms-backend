@@ -22,6 +22,8 @@ exports.getTopSellingBySegment = async (req, res) => {
       dealer_filters = {},
     } = input;
 
+    console.log("Start date end date top selling: ", startDate, endDate)
+
     const user = req.user;
 
     const safeNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -40,8 +42,12 @@ exports.getTopSellingBySegment = async (req, res) => {
           : moment().endOf("day"))
       : moment().endOf("day");
 
+    console.log("Default Start date end date top selling: ", start, end)
+
     const prevStart = moment(start).subtract(1, "month").startOf("month");
     const prevEnd = moment(start).subtract(1, "month").endOf("month");
+
+    console.log("Prev Start date end date top selling: ", prevStart, prevEnd)
 
     const ftdDate = hasCustomDateFilter
       ? moment(end).startOf("day")

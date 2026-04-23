@@ -1,5 +1,6 @@
 const ActivationData = require("../../model/ActivationData");
 const ProductMaster = require("../../model/ProductMaster");
+const Product = require("../../model/Product");
 const moment = require("moment");
 
 // segment order for output
@@ -260,7 +261,7 @@ exports.getPriceSegmentSummaryActivation = async (
     ...new Set(filteredRows.map((r) => normalizeCode(r.model_no)).filter(Boolean)),
   ];
 
-  const products = await ProductMaster.find({
+  const products = await Product.find({
     brand: { $regex: /^samsung$/i },
     $or: [
       { product_code: { $in: productCodes } },
@@ -326,15 +327,15 @@ exports.getPriceSegmentSummaryActivation = async (
       productByCode.get(normalizeCode(row.product_code)) ||
       productByModel.get(normalizeCode(row.model_no));
 
-    let resolvedSegment = "";
-    if (matchedProduct?.price) {
-      resolvedSegment = bucketFromPrice(Number(matchedProduct.price));
-    } else if (matchedProduct?.segment) {
-      resolvedSegment = normalizeSegment(matchedProduct.segment);
-    } else {
-      const derivedPrice = qty > 0 ? val / qty : 0;
-      resolvedSegment = bucketFromPrice(derivedPrice);
-    }
+    const resolvedPrice = matchedProduct?.price
+      ? safeNum(matchedProduct.price)
+      : qty > 0
+      ? val / qty
+      : 0;
+
+    const resolvedSegment = normalizeSegment(
+      matchedProduct?.segment || bucketFromPrice(resolvedPrice)
+    );
 
     if (!resolvedSegment || !PRICE_SEGMENTS.includes(resolvedSegment)) {
       if (inMtd) {
