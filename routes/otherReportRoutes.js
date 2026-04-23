@@ -4,6 +4,16 @@ const { getTopSellingBySegment } = require("../controllers/new/otherReportContro
 
 const router = express.Router();
 
-router.get("/other-reports/samsung/top-selling-products", userAuth, getTopSellingBySegment);
+router.get(
+  "/other-reports/samsung/top-selling-products",
+  userAuth,
+  getTopSellingBySegment
+);
+
+router.post(
+  "/other-reports/samsung/top-selling-products",
+  userAuth,
+  getTopSellingBySegment
+);
 
 module.exports = router;

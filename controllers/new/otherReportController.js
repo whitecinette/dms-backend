@@ -1,18 +1,26 @@
 const moment = require("moment");
 const ActivationData = require("../../model/ActivationData");
 const Product = require("../../model/Product");
-const HierarchyEntries = require("../../model/HierarchyEntries");
 const User = require("../../model/User");
+const resolveScope = require("../../services/resolvers/resolveScope");
 
 exports.getTopSellingBySegment = async (req, res) => {
   try {
+    const input = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
+
     const {
       startDate,
       endDate,
       productCategory,
       tags,
       groupBy = "product_code",
-    } = req.query;
+      flow_name = "default_sales_flow",
+      subordinate_filters = {},
+      dealer_filters = {},
+    } = input;
 
     const user = req.user;
 
@@ -51,18 +59,46 @@ exports.getTopSellingBySegment = async (req, res) => {
           .filter(Boolean)
       : [];
 
+    const isAdmin =
+      user?.role === "admin" ||
+      user?.role === "super_admin" ||
+      user?.role === "hr";
+
+    const normalizedSubordinateFilters =
+      subordinate_filters &&
+      typeof subordinate_filters === "object" &&
+      !Array.isArray(subordinate_filters)
+        ? subordinate_filters
+        : {};
+
+    const normalizedDealerFilters =
+      dealer_filters &&
+      typeof dealer_filters === "object" &&
+      !Array.isArray(dealer_filters)
+        ? dealer_filters
+        : {};
+
+    const hasScopeFilters =
+      Object.keys(normalizedSubordinateFilters).length > 0 ||
+      Object.keys(normalizedDealerFilters).length > 0;
+
+    const scope = await resolveScope({
+      user,
+      flow_name,
+      subordinate_filters: normalizedSubordinateFilters,
+      dealer_filters: normalizedDealerFilters,
+      exclude_positions: [],
+    });
+
+    const scopedDealerCodes = Array.isArray(scope?.dealer) ? scope.dealer : [];
+
     let dealerFilter = {};
 
-    if (!["admin", "super_admin", "hr"].includes(user.role)) {
-      const hierarchy = await HierarchyEntries.find({
-        hierarchy_name: "default_sales_flow",
-        [String(user.position || "").toLowerCase()]: user.code,
-      }).lean();
-
-      const dealers = hierarchy.map((h) => h.dealer).filter(Boolean);
-
+    // Non-admins should always be restricted to scope
+    // Admins/super_admin/hr should see all data when no scope filters are applied
+    if (!isAdmin || hasScopeFilters) {
       dealerFilter = {
-        tertiary_buyer_code: { $in: dealers },
+        tertiary_buyer_code: { $in: scopedDealerCodes },
       };
     }
 
@@ -407,6 +443,9 @@ exports.getTopSellingBySegment = async (req, res) => {
           productCategory: productCategory || null,
           tags: tagArray,
           groupBy,
+          flow_name,
+          subordinate_filters: normalizedSubordinateFilters,
+          dealer_filters: normalizedDealerFilters,
         },
         ftdDate: ftdDate.format("YYYY-MM-DD"),
         usedDefaultDateRange: !hasCustomDateFilter,
