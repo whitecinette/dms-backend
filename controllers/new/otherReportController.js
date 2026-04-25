@@ -39,13 +39,15 @@ exports.getTopSellingBySegment = async (req, res) => {
     const end = hasCustomDateFilter
       ? (endDate
           ? moment(endDate, "YYYY-MM-DD").endOf("day")
-          : moment().endOf("day"))
-      : moment().endOf("day");
+          : moment().subtract(1, "day").endOf("day"))
+      : moment().subtract(1, "day").endOf("day");
 
     console.log("Default Start date end date top selling: ", start, end)
 
-    const prevStart = moment(start).subtract(1, "month").startOf("month");
-    const prevEnd = moment(start).subtract(1, "month").endOf("month");
+    // LMTD = same selected/current date range, shifted one month back
+    // Default: current month 1st → today, so LM becomes last month 1st → same day
+    const prevStart = moment(start).subtract(1, "month").startOf("day");
+    const prevEnd = moment(end).subtract(1, "month").endOf("day");
 
     console.log("Prev Start date end date top selling: ", prevStart, prevEnd)
 
