@@ -689,11 +689,11 @@ const analyzeExtractionDuplicates = (records = []) => {
 };
 
 exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
-    console.log("DOWNLOAD HIT");
-    console.log("BODY:", req.body);
-    console.log("USER:", req.user);
-  try {
+  console.log("DOWNLOAD HIT");
+  console.log("BODY:", req.body);
+  console.log("USER:", req.user);
 
+  try {
     let {
       month,
       year,
@@ -738,7 +738,14 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       .startOf("day")
       .toDate();
 
-    const end = moment.utc(start).add(1, "month").toDate();
+    const extractionStart = moment
+      .utc(start)
+      .add(1, "month")
+      .startOf("month")
+      .toDate();
+
+    const extractionEnd = moment.utc(extractionStart).add(1, "month").toDate();
+
     const yearMonth = `${year}-${String(month).padStart(2, "0")}`;
 
     const hierarchyFilter = {
@@ -813,6 +820,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
         code: 1,
         name: 1,
         category: 1,
+        labels: 1,
         top_outlet: 1,
         extraction_active: 1,
         latitude: 1,
@@ -856,13 +864,14 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     const [extractionRecords, activationRecords] = await Promise.all([
       ExtractionRecord.find({
         dealer: { $in: filteredDealerCodes },
-        createdAt: { $gte: start, $lt: end },
+        createdAt: { $gte: extractionStart, $lt: extractionEnd },
       })
         .sort({ createdAt: -1 })
         .lean(),
 
       ActivationData.find({
         year_month: yearMonth,
+        tertiary_buyer_code: { $in: filteredDealerCodes },
       })
         .sort({ createdAt: -1 })
         .lean(),
@@ -870,17 +879,21 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
     const productCodes = [
       ...new Set(
-        activationRecords
-          .map((item) => item.product_code)
-          .filter(Boolean)
+        [
+          ...activationRecords.map((item) => item.product_code),
+          ...extractionRecords.map((item) => item.product_code),
+        ].filter(Boolean)
       ),
     ];
 
     const modelCodes = [
       ...new Set(
-        activationRecords
-          .map((item) => item.model_no)
-          .filter(Boolean)
+        [
+          ...activationRecords.map((item) => item.model_no),
+          ...activationRecords.map((item) => item.model_code),
+          ...extractionRecords.map((item) => item.model_no),
+          ...extractionRecords.map((item) => item.model_code),
+        ].filter(Boolean)
       ),
     ];
 
@@ -899,6 +912,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
         segment: 1,
         model_code: 1,
         product_code: 1,
+        tags: 1,
         _id: 0,
       }
     ).lean();
@@ -914,9 +928,29 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     if (!extractionRecords.length && !activationRecords.length) {
       return res.status(404).json({
         success: false,
-        message: "No extraction or activation records found for selected month/year",
+        message:
+          "No extraction or activation records found for selected month/year",
       });
     }
+
+    const getArrayValues = (value, max = 5) => {
+      const clean = Array.isArray(value)
+        ? value.map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+
+      return Array.from({ length: max }).map((_, index) => clean[index] || "");
+    };
+
+    const buildSplitFields = (prefix, arr, max = 5) => {
+      const values = getArrayValues(arr, max);
+      const obj = {};
+
+      values.forEach((value, index) => {
+        obj[`${prefix}_${index + 1}`] = value;
+      });
+
+      return obj;
+    };
 
     const extractionRows = extractionRecords.map((record) => {
       const hierarchy = hierarchyMap[record.dealer] || {};
@@ -929,17 +963,30 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       const tseCode = hierarchy.tse || "";
       const dealerCode = hierarchy.dealer || record.dealer || "";
 
+      const matchedProduct =
+        productByCodeMap[record.product_code] ||
+        productByModelMap[record.model_code] ||
+        productByModelMap[record.model_no] ||
+        {};
+
       return {
         source: "Extraction",
         uploaded_by: record.uploaded_by || "",
         seller_code: "",
-        sale_date: record.createdAt ? moment(record.createdAt).format("DD-MM-YYYY") : "",
-        sale_time: record.createdAt ? moment(record.createdAt).format("HH:mm:ss") : "",
-        month: record.month || String(month),
+        sale_date: record.createdAt
+          ? moment(record.createdAt).format("DD-MM-YYYY")
+          : "",
+        sale_time: record.createdAt
+          ? moment(record.createdAt).format("HH:mm:ss")
+          : "",
+
+        month: String(month),
 
         dealer_code: dealerCode,
         dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
         dealer_category: dealerUser.category || "",
+        ...buildSplitFields("dealer_label", dealerUser.labels, 5),
+
         top_outlet:
           dealerUser.top_outlet === true
             ? "Yes"
@@ -974,13 +1021,16 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
         tse_code: tseCode,
         tse_name: actorCodeMap[tseCode]?.name || "",
 
-        brand: record.brand || "",
-        model_code: "",
-        product_code: record.product_code || "",
-        product_name: record.product_name || "",
-        product_category: record.product_category || "",
-        segment: record.segment || "",
-        price: record.price || 0,
+        brand: matchedProduct.brand || record.brand || "",
+        model_code:
+          matchedProduct.model_code || record.model_code || record.model_no || "",
+        product_code: record.product_code || matchedProduct.product_code || "",
+        product_name: matchedProduct.product_name || record.product_name || "",
+        product_category:
+          matchedProduct.product_category || record.product_category || "",
+        ...buildSplitFields("product_tag", matchedProduct.tags, 5),
+        segment: matchedProduct.segment || record.segment || "",
+        price: matchedProduct.price || record.price || 0,
         quantity: record.quantity || 0,
         amount: record.amount || 0,
       };
@@ -1000,6 +1050,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       const matchedProduct =
         productByCodeMap[record.product_code] ||
         productByModelMap[record.model_no] ||
+        productByModelMap[record.model_code] ||
         {};
 
       return {
@@ -1012,7 +1063,9 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
         dealer_code: dealerCode,
         dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
-        dealer_category: dealerUser.category || "", // ✅ ADD
+        dealer_category: dealerUser.category || "",
+        ...buildSplitFields("dealer_label", dealerUser.labels, 5),
+
         top_outlet:
           dealerUser.top_outlet === true
             ? "Yes"
@@ -1048,10 +1101,11 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
         tse_name: actorCodeMap[tseCode]?.name || "",
 
         brand: matchedProduct.brand || "samsung",
-        model_code: record.model_no || "",
+        model_code: matchedProduct.model_code || record.model_no || "",
         product_code: record.product_code || "",
         product_name: matchedProduct.product_name || "",
         product_category: matchedProduct.product_category || "",
+        ...buildSplitFields("product_tag", matchedProduct.tags, 5),
         segment: matchedProduct.segment || "",
         price: matchedProduct.price || "",
         quantity: record.qty || 0,
@@ -1100,6 +1154,11 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       { header: "DEALER CODE", key: "dealer_code", width: 18 },
       { header: "DEALER NAME", key: "dealer_name", width: 28 },
       { header: "DEALER CATEGORY", key: "dealer_category", width: 18 },
+      { header: "DEALER LABEL 1", key: "dealer_label_1", width: 18 },
+      { header: "DEALER LABEL 2", key: "dealer_label_2", width: 18 },
+      { header: "DEALER LABEL 3", key: "dealer_label_3", width: 18 },
+      { header: "DEALER LABEL 4", key: "dealer_label_4", width: 18 },
+      { header: "DEALER LABEL 5", key: "dealer_label_5", width: 18 },
       { header: "TOP OUTLET", key: "top_outlet", width: 14 },
       { header: "EXTRACTION ACTIVE", key: "extraction_active", width: 18 },
       { header: "DEALER LATITUDE", key: "dealer_latitude", width: 18 },
@@ -1125,6 +1184,11 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       { header: "PRODUCT CODE", key: "product_code", width: 24 },
       { header: "PRODUCT NAME", key: "product_name", width: 30 },
       { header: "PRODUCT CATEGORY", key: "product_category", width: 20 },
+      { header: "PRODUCT TAG 1", key: "product_tag_1", width: 20 },
+      { header: "PRODUCT TAG 2", key: "product_tag_2", width: 20 },
+      { header: "PRODUCT TAG 3", key: "product_tag_3", width: 20 },
+      { header: "PRODUCT TAG 4", key: "product_tag_4", width: 20 },
+      { header: "PRODUCT TAG 5", key: "product_tag_5", width: 20 },
       { header: "SEGMENT", key: "segment", width: 14 },
       { header: "PRICE", key: "price", width: 12 },
       { header: "QUANTITY", key: "quantity", width: 12 },
@@ -1133,6 +1197,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
     rows.forEach((row) => {
       const worksheetRow = worksheet.addRow(row);
+
       const isDuplicateExtractionRow =
         normalizeDuplicateValue(row.source) === "extraction" &&
         duplicateExtractionKeys.has(buildExtractionDuplicateKey(row));

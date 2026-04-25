@@ -327,15 +327,40 @@ exports.getPriceSegmentSummaryActivation = async (
       productByCode.get(normalizeCode(row.product_code)) ||
       productByModel.get(normalizeCode(row.model_no));
 
-    const resolvedPrice = matchedProduct?.price
-      ? safeNum(matchedProduct.price)
-      : qty > 0
-      ? val / qty
-      : 0;
+    // ==============================
+    // SNAPSHOT FIRST
+    // ==============================
+    let resolvedPrice = safeNum(row.unit_price_snapshot);
+    let resolvedSegment = normalizeSegment(row.segment_snapshot);
 
-    const resolvedSegment = normalizeSegment(
-      matchedProduct?.segment || bucketFromPrice(resolvedPrice)
-    );
+    // ==============================
+    // FALLBACK FOR OLD DATA
+    // ==============================
+    if (!resolvedPrice || resolvedPrice <= 0) {
+      resolvedPrice = matchedProduct?.price
+        ? safeNum(matchedProduct.price)
+        : qty > 0
+        ? val / qty
+        : 0;
+    }
+
+    if (!resolvedSegment) {
+      resolvedSegment = normalizeSegment(
+        matchedProduct?.segment || bucketFromPrice(resolvedPrice)
+      );
+    }
+
+    // ==============================
+    // FINAL SAFETY
+    // ==============================
+    if (!resolvedSegment || !PRICE_SEGMENTS.includes(resolvedSegment)) {
+      if (inMtd) {
+        unmappedProduct.rows += 1;
+        unmappedProduct.totalVal += val;
+        unmappedProduct.totalQty += qty;
+      }
+      continue;
+    }
 
     if (!resolvedSegment || !PRICE_SEGMENTS.includes(resolvedSegment)) {
       if (inMtd) {
