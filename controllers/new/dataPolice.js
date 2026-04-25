@@ -709,6 +709,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
     const { code: userCode, position: userPosition, role: userRole } = req.user;
 
+
     if (!userCode || !userPosition || !userRole) {
       return res.status(400).json({
         success: false,
@@ -726,18 +727,71 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       });
     }
 
-    if (typeof smd === "string") smd = smd ? smd.split(",") : [];
-    if (typeof zsm === "string") zsm = zsm ? zsm.split(",") : [];
-    if (typeof asm === "string") asm = asm ? asm.split(",") : [];
-    if (typeof mdd === "string") mdd = mdd ? mdd.split(",") : [];
-    if (typeof tse === "string") tse = tse ? tse.split(",") : [];
-    if (typeof dealer === "string") dealer = dealer ? dealer.split(",") : [];
+    const toArray = (value) => {
+      if (Array.isArray(value)) return value.filter(Boolean);
+      if (typeof value === "string") {
+        return value
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
+      }
+      return [];
+    };
+
+    smd = toArray(smd);
+    zsm = toArray(zsm);
+    asm = toArray(asm);
+    mdd = toArray(mdd);
+    tse = toArray(tse);
+    dealer = toArray(dealer);
+
+    const safeString = (value) => {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "object") {
+        if (value.$numberDecimal !== undefined) return String(value.$numberDecimal);
+        if (typeof value.toString === "function") return value.toString();
+        return "";
+      }
+      return String(value).trim();
+    };
+
+    const safeNumber = (value) => {
+      if (value === null || value === undefined || value === "") return 0;
+
+      if (typeof value === "object") {
+        if (value.$numberDecimal !== undefined) value = value.$numberDecimal;
+        else if (typeof value.toString === "function") value = value.toString();
+      }
+
+      const num = Number(value);
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const normalizeMongoNumberSafe = (value) => {
+      if (value === null || value === undefined || value === "") return "";
+      const num = safeNumber(value);
+      return Number.isFinite(num) ? num : "";
+    };
 
     const start = moment
       .utc({ year, month: month - 1, day: 1 })
       .startOf("day")
       .toDate();
 
+    const sanitizeCell = (key, value) => {
+      if (["price", "quantity", "amount"].includes(key)) {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      }
+
+      if (value === null || value === undefined) return "";
+
+      return String(value);
+    };
+
+    // IMPORTANT:
+    // March sales report should consider extraction uploaded in April.
+    // So extraction month = selected month + 1.
     const extractionStart = moment
       .utc(start)
       .add(1, "month")
@@ -759,7 +813,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     if (tse.length) hierarchyFilter.tse = { $in: tse };
     if (dealer.length) hierarchyFilter.dealer = { $in: dealer };
 
-    if (userRole !== "admin") {
+    if (userRole !== "admin" && userRole !== "super_admin" && userRole !== "hr") {
       if (userPosition === "smd") hierarchyFilter.smd = userCode;
       if (userPosition === "zsm") hierarchyFilter.zsm = userCode;
       if (userPosition === "asm") hierarchyFilter.asm = userCode;
@@ -787,12 +841,11 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
         dealerCodes.push(entry.dealer);
       }
 
-      if (entry.smd && entry.smd !== "VACANT") actorCodesSet.add(entry.smd);
-      if (entry.zsm && entry.zsm !== "VACANT") actorCodesSet.add(entry.zsm);
-      if (entry.asm && entry.asm !== "VACANT") actorCodesSet.add(entry.asm);
-      if (entry.mdd && entry.mdd !== "VACANT") actorCodesSet.add(entry.mdd);
-      if (entry.tse && entry.tse !== "VACANT") actorCodesSet.add(entry.tse);
-      if (entry.dealer && entry.dealer !== "VACANT") actorCodesSet.add(entry.dealer);
+      ["smd", "zsm", "asm", "mdd", "tse", "dealer"].forEach((key) => {
+        if (entry[key] && entry[key] !== "VACANT") {
+          actorCodesSet.add(entry[key]);
+        }
+      });
     });
 
     const uniqueDealerCodes = [...new Set(dealerCodes)];
@@ -802,14 +855,14 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     };
 
     if (topOutlet === true) dealerUserFilter.top_outlet = true;
-    if (topOutlet === false && req.body.hasOwnProperty("topOutlet")) {
+    if (topOutlet === false && Object.prototype.hasOwnProperty.call(req.body, "topOutlet")) {
       dealerUserFilter.top_outlet = false;
     }
 
     if (extractionActive === true) dealerUserFilter.extraction_active = true;
     if (
       extractionActive === false &&
-      req.body.hasOwnProperty("extractionActive")
+      Object.prototype.hasOwnProperty.call(req.body, "extractionActive")
     ) {
       dealerUserFilter.extraction_active = false;
     }
@@ -856,8 +909,8 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     const actorCodeMap = {};
     actorCodeDocs.forEach((item) => {
       actorCodeMap[item.code] = {
-        name: item.name || "",
-        position: item.position || "",
+        name: safeString(item.name),
+        position: safeString(item.position),
       };
     });
 
@@ -876,6 +929,13 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
         .sort({ createdAt: -1 })
         .lean(),
     ]);
+
+    if (!extractionRecords.length && !activationRecords.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No extraction or activation records found for selected month/year",
+      });
+    }
 
     const productCodes = [
       ...new Set(
@@ -925,17 +985,9 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       if (item.model_code) productByModelMap[item.model_code] = item;
     });
 
-    if (!extractionRecords.length && !activationRecords.length) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "No extraction or activation records found for selected month/year",
-      });
-    }
-
     const getArrayValues = (value, max = 5) => {
       const clean = Array.isArray(value)
-        ? value.map((item) => String(item || "").trim()).filter(Boolean)
+        ? value.map((item) => safeString(item)).filter(Boolean)
         : [];
 
       return Array.from({ length: max }).map((_, index) => clean[index] || "");
@@ -956,12 +1008,12 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       const hierarchy = hierarchyMap[record.dealer] || {};
       const dealerUser = dealerUserMap[record.dealer] || {};
 
-      const smdCode = hierarchy.smd || "";
-      const zsmCode = hierarchy.zsm || "";
-      const asmCode = hierarchy.asm || "";
-      const mddCode = hierarchy.mdd || "";
-      const tseCode = hierarchy.tse || "";
-      const dealerCode = hierarchy.dealer || record.dealer || "";
+      const smdCode = safeString(hierarchy.smd);
+      const zsmCode = safeString(hierarchy.zsm);
+      const asmCode = safeString(hierarchy.asm);
+      const mddCode = safeString(hierarchy.mdd);
+      const tseCode = safeString(hierarchy.tse);
+      const dealerCode = safeString(hierarchy.dealer || record.dealer);
 
       const matchedProduct =
         productByCodeMap[record.product_code] ||
@@ -971,20 +1023,17 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
       return {
         source: "Extraction",
-        uploaded_by: record.uploaded_by || "",
+        uploaded_by: safeString(record.uploaded_by),
         seller_code: "",
         sale_date: record.createdAt
-          ? moment(record.createdAt).format("DD-MM-YYYY")
-          : "",
-        sale_time: record.createdAt
-          ? moment(record.createdAt).format("HH:mm:ss")
-          : "",
-
+        ? moment(record.createdAt).format("YYYY-MM-DD")
+        : "",
+        sale_time: record.createdAt ? moment(record.createdAt).format("HH:mm:ss") : "",
         month: String(month),
 
         dealer_code: dealerCode,
-        dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
-        dealer_category: dealerUser.category || "",
+        dealer_name: safeString(dealerUser.name || actorCodeMap[dealerCode]?.name),
+        dealer_category: safeString(dealerUser.category),
         ...buildSplitFields("dealer_label", dealerUser.labels, 5),
 
         top_outlet:
@@ -999,53 +1048,50 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
             : dealerUser.extraction_active === false
             ? "No"
             : "",
-        dealer_latitude: normalizeMongoNumber(dealerUser.latitude),
-        dealer_longitude: normalizeMongoNumber(dealerUser.longitude),
-        district: dealerUser.district || "",
-        taluka: dealerUser.taluka || "",
-        zone: dealerUser.zone || "",
-        town: dealerUser.town || "",
+
+        dealer_latitude: normalizeMongoNumberSafe(dealerUser.latitude),
+        dealer_longitude: normalizeMongoNumberSafe(dealerUser.longitude),
+        district: safeString(dealerUser.district),
+        taluka: safeString(dealerUser.taluka),
+        zone: safeString(dealerUser.zone),
+        town: safeString(dealerUser.town),
 
         smd_code: smdCode,
-        smd_name: actorCodeMap[smdCode]?.name || "",
-
+        smd_name: safeString(actorCodeMap[smdCode]?.name),
         zsm_code: zsmCode,
-        zsm_name: actorCodeMap[zsmCode]?.name || "",
-
+        zsm_name: safeString(actorCodeMap[zsmCode]?.name),
         asm_code: asmCode,
-        asm_name: actorCodeMap[asmCode]?.name || "",
-
+        asm_name: safeString(actorCodeMap[asmCode]?.name),
         mdd_code: mddCode,
-        mdd_name: actorCodeMap[mddCode]?.name || "",
-
+        mdd_name: safeString(actorCodeMap[mddCode]?.name),
         tse_code: tseCode,
-        tse_name: actorCodeMap[tseCode]?.name || "",
+        tse_name: safeString(actorCodeMap[tseCode]?.name),
 
-        brand: matchedProduct.brand || record.brand || "",
-        model_code:
-          matchedProduct.model_code || record.model_code || record.model_no || "",
-        product_code: record.product_code || matchedProduct.product_code || "",
-        product_name: matchedProduct.product_name || record.product_name || "",
-        product_category:
-          matchedProduct.product_category || record.product_category || "",
+        brand: safeString(matchedProduct.brand || record.brand),
+        model_code: safeString(matchedProduct.model_code || record.model_code || record.model_no),
+        product_code: safeString(record.product_code || matchedProduct.product_code),
+        product_name: safeString(matchedProduct.product_name || record.product_name),
+        product_category: safeString(matchedProduct.product_category || record.product_category),
         ...buildSplitFields("product_tag", matchedProduct.tags, 5),
-        segment: matchedProduct.segment || record.segment || "",
-        price: matchedProduct.price || record.price || 0,
-        quantity: record.quantity || 0,
-        amount: record.amount || 0,
+
+        segment: safeString(matchedProduct.segment || record.segment),
+        sales_segment: safeString(record.segment_snapshot || record.segment || matchedProduct.segment),
+        price: safeNumber(matchedProduct.price || record.price),
+        quantity: safeNumber(record.quantity),
+        amount: safeNumber(record.amount),
       };
     });
 
     const activationRows = activationRecords.map((record) => {
-      const dealerCode = record.tertiary_buyer_code || "";
+      const dealerCode = safeString(record.tertiary_buyer_code);
       const hierarchy = hierarchyMap[dealerCode] || {};
       const dealerUser = dealerUserMap[dealerCode] || {};
 
-      const smdCode = hierarchy.smd || "";
-      const zsmCode = hierarchy.zsm || "";
-      const asmCode = hierarchy.asm || "";
-      const mddCode = hierarchy.mdd || "";
-      const tseCode = hierarchy.tse || "";
+      const smdCode = safeString(hierarchy.smd);
+      const zsmCode = safeString(hierarchy.zsm);
+      const asmCode = safeString(hierarchy.asm);
+      const mddCode = safeString(hierarchy.mdd);
+      const tseCode = safeString(hierarchy.tse);
 
       const matchedProduct =
         productByCodeMap[record.product_code] ||
@@ -1056,14 +1102,16 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       return {
         source: "Activation",
         uploaded_by: "",
-        seller_code: record.tertiary_seller_code || "",
-        sale_date: record.activation_date_raw || "",
+        seller_code: safeString(record.tertiary_seller_code),
+        sale_date: record.activation_date_raw
+          ? moment(record.activation_date_raw, ["M/D/YY", "M/D/YYYY"]).format("YYYY-MM-DD")
+          : "",
         sale_time: "",
         month: String(month),
 
         dealer_code: dealerCode,
-        dealer_name: dealerUser.name || actorCodeMap[dealerCode]?.name || "",
-        dealer_category: dealerUser.category || "",
+        dealer_name: safeString(dealerUser.name || actorCodeMap[dealerCode]?.name),
+        dealer_category: safeString(dealerUser.category),
         ...buildSplitFields("dealer_label", dealerUser.labels, 5),
 
         top_outlet:
@@ -1078,38 +1126,37 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
             : dealerUser.extraction_active === false
             ? "No"
             : "",
-        dealer_latitude: normalizeMongoNumber(dealerUser.latitude),
-        dealer_longitude: normalizeMongoNumber(dealerUser.longitude),
-        district: dealerUser.district || "",
-        taluka: dealerUser.taluka || "",
-        zone: dealerUser.zone || "",
-        town: dealerUser.town || "",
+
+        dealer_latitude: normalizeMongoNumberSafe(dealerUser.latitude),
+        dealer_longitude: normalizeMongoNumberSafe(dealerUser.longitude),
+        district: safeString(dealerUser.district),
+        taluka: safeString(dealerUser.taluka),
+        zone: safeString(dealerUser.zone),
+        town: safeString(dealerUser.town),
 
         smd_code: smdCode,
-        smd_name: actorCodeMap[smdCode]?.name || "",
-
+        smd_name: safeString(actorCodeMap[smdCode]?.name),
         zsm_code: zsmCode,
-        zsm_name: actorCodeMap[zsmCode]?.name || "",
-
+        zsm_name: safeString(actorCodeMap[zsmCode]?.name),
         asm_code: asmCode,
-        asm_name: actorCodeMap[asmCode]?.name || "",
-
+        asm_name: safeString(actorCodeMap[asmCode]?.name),
         mdd_code: mddCode,
-        mdd_name: actorCodeMap[mddCode]?.name || "",
-
+        mdd_name: safeString(actorCodeMap[mddCode]?.name),
         tse_code: tseCode,
-        tse_name: actorCodeMap[tseCode]?.name || "",
+        tse_name: safeString(actorCodeMap[tseCode]?.name),
 
-        brand: matchedProduct.brand || "samsung",
-        model_code: matchedProduct.model_code || record.model_no || "",
-        product_code: record.product_code || "",
-        product_name: matchedProduct.product_name || "",
-        product_category: matchedProduct.product_category || "",
+        brand: safeString(matchedProduct.brand || "samsung"),
+        model_code: safeString(matchedProduct.model_code || record.model_no || record.model_code),
+        product_code: safeString(record.product_code),
+        product_name: safeString(matchedProduct.product_name),
+        product_category: safeString(matchedProduct.product_category),
         ...buildSplitFields("product_tag", matchedProduct.tags, 5),
-        segment: matchedProduct.segment || "",
-        price: matchedProduct.price || "",
-        quantity: record.qty || 0,
-        amount: record.val || 0,
+
+        segment: safeString(matchedProduct.segment),
+        sales_segment: safeString(record.segment_snapshot || matchedProduct.segment),
+        price: safeNumber(matchedProduct.price),
+        quantity: safeNumber(record.qty),
+        amount: safeNumber(record.val),
       };
     });
 
@@ -1118,31 +1165,15 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       ...item,
     }));
 
-    const duplicateKeyCountMap = new Map();
+    const shouldIncludeColumn = (key) => {
+      if (!key.startsWith("dealer_label_") && !key.startsWith("product_tag_")) {
+        return true;
+      }
 
-    rows.forEach((row) => {
-      if (normalizeDuplicateValue(row.source) !== "extraction") return;
+      return rows.some((row) => safeString(row[key]) !== "");
+    };
 
-      const duplicateKey = buildExtractionDuplicateKey(row);
-      duplicateKeyCountMap.set(
-        duplicateKey,
-        (duplicateKeyCountMap.get(duplicateKey) || 0) + 1
-      );
-    });
-
-    const duplicateExtractionKeys = new Set(
-      [...duplicateKeyCountMap.entries()]
-        .filter(([, count]) => count > 1)
-        .map(([key]) => key)
-    );
-
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = "OpenAI";
-    workbook.created = new Date();
-
-    const worksheet = workbook.addWorksheet("Market Sales Data");
-
-    worksheet.columns = [
+    const allColumns = [
       { header: "SR NO", key: "sr_no", width: 10 },
       { header: "SOURCE", key: "source", width: 14 },
       { header: "UPLOADED BY", key: "uploaded_by", width: 18 },
@@ -1190,13 +1221,51 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
       { header: "PRODUCT TAG 4", key: "product_tag_4", width: 20 },
       { header: "PRODUCT TAG 5", key: "product_tag_5", width: 20 },
       { header: "SEGMENT", key: "segment", width: 14 },
+      { header: "SALES SEGMENT", key: "sales_segment", width: 16 },
       { header: "PRICE", key: "price", width: 12 },
       { header: "QUANTITY", key: "quantity", width: 12 },
       { header: "AMOUNT", key: "amount", width: 14 },
     ];
 
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Siddha Connect";
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet("Market Sales Data", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+
+    worksheet.columns = allColumns.filter((col) => shouldIncludeColumn(col.key));
+
+    const allowedKeys = new Set(worksheet.columns.map((c) => c.key));
+
+    const duplicateKeyCountMap = new Map();
+
     rows.forEach((row) => {
-      const worksheetRow = worksheet.addRow(row);
+      if (normalizeDuplicateValue(row.source) !== "extraction") return;
+
+      const duplicateKey = buildExtractionDuplicateKey(row);
+      duplicateKeyCountMap.set(
+        duplicateKey,
+        (duplicateKeyCountMap.get(duplicateKey) || 0) + 1
+      );
+    });
+
+    const duplicateExtractionKeys = new Set(
+      [...duplicateKeyCountMap.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([key]) => key)
+    );
+
+    rows.forEach((row) => {
+      const cleanRow = {};
+
+      worksheet.columns.forEach((col) => {
+        const key = col.key;
+        cleanRow[key] = sanitizeCell(key, row[key]);
+      });
+
+      const worksheetRow = worksheet.addRow(cleanRow);
 
       const isDuplicateExtractionRow =
         normalizeDuplicateValue(row.source) === "extraction" &&
@@ -1221,14 +1290,17 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
 
     worksheet.eachRow((row) => {
       row.eachCell((cell) => {
-        cell.alignment = { vertical: "middle", horizontal: "left" };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "left",
+          wrapText: false,
+        };
       });
     });
 
-    const fileName = `Market_Sales_Data_${String(month).padStart(
-      2,
-      "0"
-    )}_${year}.xlsx`;
+
+
+    const fileName = `Market_Sales_Data_${String(month).padStart(2, "0")}_${year}.xlsx`;
 
     res.setHeader(
       "Content-Type",
@@ -1243,6 +1315,7 @@ exports.downloadMarketSalesDataDownloadMonthWise = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
+      error: error.message,
     });
   }
 };
