@@ -317,6 +317,7 @@ exports.getCurrentMonthExtractionsForUser = async (req, res) => {
     const tableHeaders = [
       "dealer_code",
       "dealer_name",
+      "brand",
       "product_name",
       "product_code",
       "product_category",
@@ -325,11 +326,11 @@ exports.getCurrentMonthExtractionsForUser = async (req, res) => {
       "total",
       "segment",
     ];
-
     // Convert records to table format
     const tableData = records.map((rec) => ({
       dealer_code: rec.dealer || "",
-      dealer_name: dealerMap[rec.dealer] || "", // ✅ Added dealer name
+      dealer_name: dealerMap[rec.dealer] || "",
+      brand: rec.brand || "",
       product_name: rec.product_name || "",
       product_code: rec.product_code || "",
       product_category: rec.product_category || "",
