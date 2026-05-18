@@ -293,6 +293,7 @@ exports.listMetadata = async (req, res) => {
         firm_code: 1,
         firm_name: "$firmInfo.name",
         attendance: 1,
+        use_payroll_policy: 1,
         createdAt: 1,
         updatedAt: 1,
         role: "$actorInfo.role",
@@ -478,6 +479,7 @@ exports.downloadMetadata = async (req, res) => {
           basic_salary: 1,
           allowed_leaves: 1,
           leaves_balance: 1,
+          use_payroll_policy: 1,
 
           role: "$actor.role",
           position: "$actor.position",
@@ -504,7 +506,8 @@ exports.downloadMetadata = async (req, res) => {
       "attendance",
       "basic_salary",
       "allowed_leaves",
-      "leaves_balance"
+      "leaves_balance",
+      "use_payroll_policy"
     ];
 
     const parser = new Parser({ fields });
@@ -560,6 +563,7 @@ exports.bulkUpdateLeavesConfig = async (req, res) => {
       let setFields = {};
       if (u.allowed_leaves !== undefined) setFields.allowed_leaves = u.allowed_leaves;
       if (u.leaves_balance !== undefined) setFields.leaves_balance = u.leaves_balance;
+      if (u.use_payroll_policy !== undefined) setFields.use_payroll_policy = u.use_payroll_policy;
 
       return {
         updateOne: {
@@ -573,7 +577,7 @@ exports.bulkUpdateLeavesConfig = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Leaves configuration updated for multiple employees",
+      message: "Metadata leave/payroll configuration updated for multiple employees",
       result
     });
   } catch (error) {

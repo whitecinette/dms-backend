@@ -3,7 +3,48 @@ const Notification = require("../../model/Notification");
 const moment = require('moment-timezone');
 const User = require("../../model/User"); // Assuming you have an Employee model
 const Attendance = require("../../model/Attendance"); // Assuming you have an Attendance model
+const MetaData = require("../../model/MetaData");
 const { formatDate } = require("../../helpers/attendanceHelper");
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+const QUOTA_LEAVE_TYPES = new Set(["casual", "sick", "earned"]);
+
+const atMidnight = (dateInput) => {
+  const d = new Date(dateInput);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const getMonthRange = (year, monthIndex) => {
+  const start = new Date(year, monthIndex, 1);
+  const end = new Date(year, monthIndex + 1, 0);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+};
+
+const getMonthKeysBetween = (fromDate, toDate) => {
+  const keys = [];
+  const cursor = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1);
+  const last = new Date(toDate.getFullYear(), toDate.getMonth(), 1);
+
+  while (cursor <= last) {
+    keys.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return keys;
+};
+
+const getOverlappedDays = (fromDate, toDate, rangeStart, rangeEnd, isHalfDay = false) => {
+  const overlapStart = atMidnight(new Date(Math.max(new Date(fromDate), new Date(rangeStart))));
+  const overlapEnd = atMidnight(new Date(Math.min(new Date(toDate), new Date(rangeEnd))));
+
+  if (overlapStart > overlapEnd) return 0;
+  if (isHalfDay) return 0.5;
+
+  return Math.floor((overlapEnd - overlapStart) / DAY_MS) + 1;
+};
 
 exports.requestLeave = async (req, res) => {
  try {
@@ -123,8 +164,46 @@ exports.requestLeave = async (req, res) => {
    }
 
    // 🧮 Calculate total leave days
-   const oneDay = 1000 * 60 * 60 * 24;
-   const totalDays = isHalfDay ? 0.5 : Math.ceil((to - from) / oneDay) + 1;
+   const totalDays = isHalfDay ? 0.5 : Math.floor((atMidnight(to) - atMidnight(from)) / DAY_MS) + 1;
+
+   // ✅ Firm/user leave quota with default fallback
+   // If metadata leaves are missing, default to 1 leave/month as requested.
+   if (QUOTA_LEAVE_TYPES.has(String(leaveType).toLowerCase())) {
+     const userMeta = await MetaData.findOne({ code }).lean();
+     const allowedLeaves = Number.isFinite(Number(userMeta?.allowed_leaves))
+       ? Number(userMeta.allowed_leaves)
+       : 1;
+
+     const monthKeys = getMonthKeysBetween(from, to);
+     const existingQuotaLeaves = await Leave.find({
+       code,
+       leaveType: { $in: Array.from(QUOTA_LEAVE_TYPES) },
+       status: { $in: ["approved", "pending"] },
+       fromDate: { $lte: to },
+       toDate: { $gte: from },
+     }).lean();
+
+     for (const key of monthKeys) {
+       const [year, month] = key.split("-").map(Number);
+       const { start, end } = getMonthRange(year, month - 1);
+
+       const alreadyUsed = existingQuotaLeaves.reduce(
+         (sum, leave) =>
+           sum + getOverlappedDays(leave.fromDate, leave.toDate, start, end, leave.isHalfDay),
+         0
+       );
+
+       const requestedInMonth = getOverlappedDays(from, to, start, end, isHalfDay);
+       const projected = alreadyUsed + requestedInMonth;
+
+       if (requestedInMonth > 0 && projected > allowedLeaves) {
+         return res.status(400).json({
+           success: false,
+           message: `Leave limit exceeded for ${key}. Allowed: ${allowedLeaves}, Requested total: ${projected}`,
+         });
+       }
+     }
+   }
 
    // 📌 Save leave
    const newLeave = new Leave({
@@ -173,7 +252,7 @@ exports.requestLeave = async (req, res) => {
 exports.getRequestLeaveForEmp = async (req, res) => {
   try {
     const { code } = req.user;
-    const { fromDate, toDate, status } = req.query;
+    const { fromDate, toDate, status, type } = req.query;
 
     if (!code) {
       return res.status(400).json({ message: "Employee code is required" });
@@ -192,6 +271,9 @@ exports.getRequestLeaveForEmp = async (req, res) => {
     // Status filter
     if (status) {
       filter.status = status;
+    }
+    if (type) {
+      filter.leaveType = type;
     }
 
     const leaves = await Leave.find(filter).sort({ appliedAt: -1 });
@@ -215,8 +297,11 @@ exports.getLeaveApplications = async (req, res) => {
       fromDate,
       toDate,
       type,
+      position,
+      firmCode,
+      firmCodes,
       page = 1,
-      limit = 10,
+      limit = 50,
     } = req.query;
 
     // Convert page and limit to numbers
@@ -226,14 +311,45 @@ exports.getLeaveApplications = async (req, res) => {
 
     // Build query based on filters
     const query = {};
+    const userQuery = {};
+    const regex = search ? new RegExp(search, "i") : null;
+    const requestedFirmCodes = []
+      .concat(firmCode || [])
+      .concat(firmCodes || [])
+      .join(",")
+      .split(",")
+      .map((code) => code.trim())
+      .filter(Boolean);
 
-    // Add role-based filtering
     if (role === "hr") {
-      // HR can only see employee leave applications
-      const employees = await User.find({ role: "employee" }, "code").lean();
-      const employeeCodes = employees.map((emp) => emp.code);
-      query.code = { $in: employeeCodes };
+      userQuery.role = "employee";
     }
+
+    if (position) {
+      userQuery.position = new RegExp(`^${position}$`, "i");
+    }
+
+    if (regex) {
+      userQuery.$or = [
+        { name: regex },
+        { code: regex },
+        { position: regex },
+      ];
+    }
+
+    const matchedUsers = await User.find(userQuery, "code name role position").lean();
+    const userCodeSet = new Set(matchedUsers.map((u) => u.code));
+
+    let allowedCodes = [...userCodeSet];
+    if (requestedFirmCodes.length > 0) {
+      const metadataList = await MetaData.find(
+        { code: { $in: allowedCodes }, firm_code: { $in: requestedFirmCodes } },
+        "code"
+      ).lean();
+      allowedCodes = metadataList.map((m) => m.code);
+    }
+
+    query.code = { $in: allowedCodes.length > 0 ? allowedCodes : ["__NO_MATCH__"] };
 
     // Add other filters
     if (status) {
@@ -276,30 +392,27 @@ exports.getLeaveApplications = async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Format leaves with employee details
-    let formattedLeaves = await Promise.all(
-      leaves.map(async (leave) => {
-        const employee = await User.findOne(
-          { code: leave.code },
-          "name role"
-        ).lean();
-        return {
-          ...leave,
-          employeeName: employee ? employee.name : "Unknown",
-          employeeCode: leave.code,
-          employeeRole: employee ? employee.role : "Unknown",
-        };
-      })
-    );
+    const leaveCodes = [...new Set(leaves.map((l) => l.code))];
+    const [employeeDetails, metaDetails] = await Promise.all([
+      User.find({ code: { $in: leaveCodes } }, "code name role position").lean(),
+      MetaData.find({ code: { $in: leaveCodes } }, "code firm_code").lean(),
+    ]);
 
-    // Apply search filter after pagination if search term exists
-    if (search) {
-      formattedLeaves = formattedLeaves.filter(
-        (leave) =>
-          leave.employeeName.toLowerCase().includes(search.toLowerCase()) ||
-          leave.employeeCode.toLowerCase().includes(search.toLowerCase())
-      );
-    }
+    const employeeMap = new Map(employeeDetails.map((e) => [e.code, e]));
+    const metaMap = new Map(metaDetails.map((m) => [m.code, m]));
+
+    const formattedLeaves = leaves.map((leave) => {
+      const employee = employeeMap.get(leave.code);
+      const meta = metaMap.get(leave.code);
+      return {
+        ...leave,
+        employeeName: employee?.name || "Unknown",
+        employeeCode: leave.code,
+        employeeRole: employee?.role || "Unknown",
+        employeePosition: employee?.position || "Unknown",
+        firmCode: meta?.firm_code || "",
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -312,6 +425,58 @@ exports.getLeaveApplications = async (req, res) => {
   } catch (error) {
     console.error("Error retrieving leave applications:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+exports.getMyLeavePolicy = async (req, res) => {
+  try {
+    const { code } = req.user;
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee code is required",
+      });
+    }
+
+    const now = moment().tz("Asia/Kolkata");
+    const monthStart = now.clone().startOf("month").toDate();
+    const monthEnd = now.clone().endOf("month").toDate();
+
+    const userMeta = await MetaData.findOne({ code }, "allowed_leaves").lean();
+    const allowedLeaves = Number.isFinite(Number(userMeta?.allowed_leaves))
+      ? Number(userMeta.allowed_leaves)
+      : 1;
+
+    const quotaLeaves = await Leave.find({
+      code,
+      leaveType: { $in: Array.from(QUOTA_LEAVE_TYPES) },
+      status: { $in: ["approved", "pending"] },
+      fromDate: { $lte: monthEnd },
+      toDate: { $gte: monthStart },
+    }).lean();
+
+    const usedLeaves = quotaLeaves.reduce(
+      (sum, leave) =>
+        sum + getOverlappedDays(leave.fromDate, leave.toDate, monthStart, monthEnd, leave.isHalfDay),
+      0
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        code,
+        allowedLeaves,
+        usedLeaves,
+        remainingLeaves: Math.max(0, allowedLeaves - usedLeaves),
+        month: now.format("YYYY-MM"),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching leave policy:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };
 

@@ -8,6 +8,7 @@ const {
   upsertUserDirectoryMetadata,
   updateUserDirectoryStatus,
   getUserDirectory,
+  bulkUpdateUserDirectoryPayrollPolicy,
 } = require("../controllers/admin/superAdminUserDirectoryController");
 
 const { superAdminAuth } = require("../middlewares/authmiddlewares");
@@ -22,6 +23,12 @@ router.get(
   "/super-admin/user-directory/firms",
   superAdminAuth,
   getFirmOptionsForUserDirectory
+);
+
+router.patch(
+  "/super-admin/user-directory/metadata/bulk/payroll-policy",
+  superAdminAuth,
+  bulkUpdateUserDirectoryPayrollPolicy
 );
 
 router.patch(

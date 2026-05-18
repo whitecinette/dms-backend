@@ -41,6 +41,20 @@ const cleanObject = (obj = {}) => {
   return cleaned;
 };
 
+const parsePayrollPolicyFlag = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "yes" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "no" || normalized === "0") {
+      return false;
+    }
+  }
+  return null;
+};
+
 exports.getSuperAdminUserDirectory = async (req, res) => {
   try {
     const {
@@ -468,9 +482,183 @@ exports.updateUserDirectoryStatus = async (req, res) => {
   }
 };
 
+exports.bulkUpdateUserDirectoryPayrollPolicy = async (req, res) => {
+  try {
+    const {
+      codes = [],
+      use_payroll_policy,
+      search,
+      position,
+      role,
+      status,
+      firm_code,
+    } = req.body || {};
+
+    const parsedPolicyFlag = parsePayrollPolicyFlag(use_payroll_policy);
+    if (parsedPolicyFlag === null) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "use_payroll_policy is required and must be true/false (or yes/no)",
+      });
+    }
+
+    let targetCodes = [];
+
+    if (Array.isArray(codes) && codes.length) {
+      targetCodes = codes
+        .map((code) => String(code || "").trim())
+        .filter(Boolean);
+    } else {
+      const actorFilter = {
+        position: { $nin: EXCLUDED_POSITIONS },
+      };
+
+      const userFilter = {
+        position: { $nin: EXCLUDED_POSITIONS },
+      };
+
+      const safeStatus = normalizeStatus(status);
+
+      if (position) {
+        actorFilter.position = String(position).trim().toLowerCase();
+        userFilter.position = String(position).trim().toLowerCase();
+      }
+
+      if (role) {
+        actorFilter.role = String(role).trim().toLowerCase();
+        userFilter.role = String(role).trim().toLowerCase();
+      }
+
+      if (safeStatus) {
+        actorFilter.status = safeStatus;
+        userFilter.status = safeStatus;
+      }
+
+      if (search && String(search).trim()) {
+        const regex = new RegExp(String(search).trim(), "i");
+        actorFilter.$or = [
+          { code: regex },
+          { name: regex },
+          { parent_code: regex },
+        ];
+        userFilter.$or = [
+          { code: regex },
+          { name: regex },
+          { email: regex },
+          { phone: regex },
+        ];
+      }
+
+      const [actorDocs, userDocs] = await Promise.all([
+        ActorCode.find(actorFilter).select("code position").lean(),
+        User.find(userFilter).select("code position").lean(),
+      ]);
+
+      const actorCodes = actorDocs
+        .filter((doc) => !EXCLUDED_POSITIONS.includes(String(doc?.position || "").toLowerCase()))
+        .map((doc) => doc?.code)
+        .filter(Boolean);
+
+      const userCodes = userDocs
+        .filter((doc) => !EXCLUDED_POSITIONS.includes(String(doc?.position || "").toLowerCase()))
+        .map((doc) => doc?.code)
+        .filter(Boolean);
+
+      targetCodes = Array.from(new Set([...actorCodes, ...userCodes]));
+
+      if (firm_code && String(firm_code).trim()) {
+        const normalizedFirmCode = String(firm_code).trim();
+        const firmMetaDocs = await MetaData.find({
+          code: { $in: targetCodes },
+          firm_code: normalizedFirmCode,
+        })
+          .select("code")
+          .lean();
+
+        const firmCodeSet = new Set(
+          firmMetaDocs.map((doc) => doc?.code).filter(Boolean)
+        );
+        targetCodes = targetCodes.filter((code) => firmCodeSet.has(code));
+      }
+    }
+
+    if (!targetCodes.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No users found for bulk payroll policy update",
+      });
+    }
+
+    const [users, actors] = await Promise.all([
+      User.find({ code: { $in: targetCodes } }).select("code name").lean(),
+      ActorCode.find({ code: { $in: targetCodes } }).select("code name").lean(),
+    ]);
+
+    const userNameMap = new Map(
+      users.filter((doc) => doc?.code).map((doc) => [doc.code, doc.name])
+    );
+    const actorNameMap = new Map(
+      actors.filter((doc) => doc?.code).map((doc) => [doc.code, doc.name])
+    );
+
+    const bulkOps = targetCodes.map((code) => ({
+      updateOne: {
+        filter: { code },
+        update: {
+          $set: {
+            code,
+            system_code: code,
+            name: userNameMap.get(code) || actorNameMap.get(code) || "NA",
+            use_payroll_policy: parsedPolicyFlag,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    const bulkResult = await MetaData.bulkWrite(bulkOps, { ordered: false });
+
+    const matched =
+      bulkResult?.matchedCount ??
+      bulkResult?.nMatched ??
+      bulkResult?.result?.nMatched ??
+      0;
+    const modified =
+      bulkResult?.modifiedCount ??
+      bulkResult?.nModified ??
+      bulkResult?.result?.nModified ??
+      0;
+    const upserted =
+      bulkResult?.upsertedCount ??
+      bulkResult?.nUpserted ??
+      bulkResult?.result?.nUpserted ??
+      0;
+
+    return res.status(200).json({
+      success: true,
+      message: "Bulk payroll policy updated successfully",
+      data: {
+        total_targeted: targetCodes.length,
+        matched,
+        modified,
+        upserted,
+        use_payroll_policy: parsedPolicyFlag,
+      },
+    });
+  } catch (error) {
+    console.error("bulkUpdateUserDirectoryPayrollPolicy error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to bulk update payroll policy",
+      error: error.message,
+    });
+  }
+};
+
 exports.getUserDirectory = async (req, res) => {
   try {
-    const { search, position, role, status } = req.query;
+    const { search, position, role, status, firm_code } = req.query;
 
     const actorFilter = {
       position: { $nin: ["dealer", "mdd", "spd", "smd"] },
@@ -516,6 +704,11 @@ exports.getUserDirectory = async (req, res) => {
       ];
     }
 
+    // 🔍 FIRM FILTER
+    if (firm_code && String(firm_code).trim()) {
+      metaFilter.firm_code = String(firm_code).trim();
+    }
+
     const actorCodes = await ActorCode.find(actorFilter).lean();
 
     const codes = actorCodes.map((x) => x.code).filter(Boolean);
@@ -527,6 +720,7 @@ exports.getUserDirectory = async (req, res) => {
       }).lean(),
       MetaData.find({
         code: { $in: codes },
+        ...(Object.keys(metaFilter).length ? metaFilter : {}),
       }).lean(),
     ]);
 
@@ -571,6 +765,14 @@ exports.getUserDirectory = async (req, res) => {
 
       if (status && String(row.is_active) !== String(status).toLowerCase())
         return false;
+
+      if (
+        firm_code &&
+        String(row.firm_code || "").toLowerCase() !==
+          String(firm_code).toLowerCase()
+      ) {
+        return false;
+      }
 
       if (search) {
         const s = search.toLowerCase();

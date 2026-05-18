@@ -5,6 +5,7 @@ const Attendance = require("../../model/Attendance");
 const Leave = require("../../model/Leave");
 const Travel = require("../../model/Travel");
 const Payroll = require("../../model/Payroll");
+const PayrollPolicy = require("../../model/PayrollPolicy");
 const ActorCode = require("../../model/ActorCode");
 const Firm = require("../../model/Firm");
 const csvParser = require("csv-parser");
@@ -220,7 +221,22 @@ exports.bulkGeneratePayroll = async (req, res) => {
 
     const employees = await MetaData.find({ firm_code: { $in: firmCodes } }).lean();
     const firmSettings = await FirmMetaData.find({ firmCode: { $in: firmCodes } }).lean();
+    const payrollPolicies = await PayrollPolicy.find({}).lean();
     const firmMap = new Map(firmSettings.map(f => [f.firmCode, f]));
+    const policyMap = new Map(
+      payrollPolicies.map((p) => [String(p.state || "").trim().toLowerCase(), p])
+    );
+
+    const parseBool = (value, fallback = false) => {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return value === 1;
+      if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+        if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+      }
+      return fallback;
+    };
 
     let payrollDocs = [];
 
@@ -228,6 +244,9 @@ exports.bulkGeneratePayroll = async (req, res) => {
       const code = emp.code;
       const firmCode = emp.firm_code;
       const firmConfig = firmMap.get(firmCode) || {};
+      const paidLeavesAllowed = Number.isFinite(Number(emp.allowed_leaves))
+        ? Number(emp.allowed_leaves)
+        : 1;
 
       const basicSalary = emp.basic_salary || 0;
 
@@ -239,12 +258,38 @@ exports.bulkGeneratePayroll = async (req, res) => {
 
       let daysPresent = 0;
       let hoursWorked = 0;
+      let overtimeHours = 0;
+      const fullDayThresholdHours = Number(firmConfig.fullDayThresholdHours) || 0;
+      const halfDayThresholdHours = Number(firmConfig.halfDayThresholdHours) || 0;
+      const shouldRequirePunchOut = Boolean(firmConfig.punchOutConsidered);
 
       attendanceRecords.forEach(rec => {
-        if (rec.punchIn) {
-          daysPresent++;
+        const hasPunchIn = Boolean(rec.punchIn);
+        const hasPunchOut = Boolean(rec.punchOut);
+        const hasValidDay = shouldRequirePunchOut ? (hasPunchIn && hasPunchOut) : hasPunchIn;
+        const workedHours = Number(rec.hoursWorked || 0);
+
+        if (hasValidDay) {
+          let attendanceUnits = 1;
+
+          if (fullDayThresholdHours > 0 || halfDayThresholdHours > 0) {
+            if (fullDayThresholdHours > 0 && workedHours >= fullDayThresholdHours) {
+              attendanceUnits = 1;
+            } else if (halfDayThresholdHours > 0 && workedHours >= halfDayThresholdHours) {
+              attendanceUnits = 0.5;
+            } else if (workedHours > 0) {
+              attendanceUnits = 0;
+            }
+          }
+
+          daysPresent += attendanceUnits;
+
+          if (Boolean(firmConfig.overtimeEnabled) && fullDayThresholdHours > 0 && workedHours > fullDayThresholdHours) {
+            overtimeHours += workedHours - fullDayThresholdHours;
+          }
         }
-        hoursWorked += rec.hoursWorked || 0;
+
+        hoursWorked += workedHours;
       });
 
       // Leaves
@@ -259,6 +304,7 @@ exports.bulkGeneratePayroll = async (req, res) => {
       leaves.forEach(l => {
         totalLeaves += l.totalDays || 0;
       });
+      const paidLeavesUsed = Math.min(totalLeaves, paidLeavesAllowed);
 
       // ✅ Preserve existing payroll additions & deductions
       const existingPayroll = await Payroll.findOne({ code, month, year }).lean();
@@ -277,16 +323,72 @@ exports.bulkGeneratePayroll = async (req, res) => {
 
       // Salary calc
       const dailyRate = basicSalary / 30;
-      const absentDays = workingDays - daysPresent;
+      const absentDays = Math.max(workingDays - daysPresent - paidLeavesUsed, 0);
       const effectiveLeaves = absentDays + leaveAdjustment;
+
+      // Auto-overtime entry based on firm configuration
+      const overtimeMultiplier = Number(firmConfig.overtimeRateMultiplier) || 1;
+      const hourlyRateBase = fullDayThresholdHours > 0 ? (dailyRate / fullDayThresholdHours) : (dailyRate / 8);
+      const overtimePay = Boolean(firmConfig.overtimeEnabled)
+        ? Number((overtimeHours * hourlyRateBase * overtimeMultiplier).toFixed(2))
+        : 0;
+
+      // Base gross (before policy deductions)
+      const grossSalary = basicSalary - (dailyRate * absentDays);
+
+      additions = (additions || []).filter((item) => item?.name !== "Overtime (Auto)");
+      if (overtimePay > 0) {
+        additions.push({
+          name: "Overtime (Auto)",
+          amount: overtimePay,
+          remark: `Auto-calculated ${Number(overtimeHours.toFixed(2))} hrs`,
+        });
+      }
+
+      // Apply payroll policy deductions only when enabled per-user in metadata
+      const shouldApplyPayrollPolicy = parseBool(emp.use_payroll_policy, false);
+      const employeeStateRaw =
+        emp.state ||
+        emp.work_state ||
+        emp.user_state ||
+        emp.payroll_state ||
+        "";
+      const employeeState = String(employeeStateRaw).trim().toLowerCase();
+      const matchedPolicy = policyMap.get(employeeState);
+
+      deductions = (deductions || []).filter(
+        (item) => !["PF (Auto)", "ESI (Auto)"].includes(item?.name)
+      );
+
+      if (shouldApplyPayrollPolicy && matchedPolicy) {
+        const policyBase = Math.max(grossSalary, 0);
+        const pfRate = Number(matchedPolicy.pf || 0);
+        const esiRate = Number(matchedPolicy.esi || 0);
+        const pfAmount = Number(((policyBase * pfRate) / 100).toFixed(2));
+        const esiAmount = Number(((policyBase * esiRate) / 100).toFixed(2));
+
+        if (pfAmount > 0) {
+          deductions.push({
+            name: "PF (Auto)",
+            amount: pfAmount,
+            remark: `State ${matchedPolicy.state} @ ${pfRate}%`,
+          });
+        }
+
+        if (esiAmount > 0) {
+          deductions.push({
+            name: "ESI (Auto)",
+            amount: esiAmount,
+            remark: `State ${matchedPolicy.state} @ ${esiRate}%`,
+          });
+        }
+      }
 
       const additionsTotal = additions.reduce((a, b) => a + (b.amount || 0), 0);
       const deductionsTotal = deductions.reduce((a, b) => a + (b.amount || 0), 0);
 
       const netSalary =
         basicSalary - dailyRate * effectiveLeaves + additionsTotal - deductionsTotal;
-
-      const grossSalary = basicSalary - (dailyRate * absentDays);
 
       payrollDocs.push({
         updateOne: {
@@ -298,6 +400,11 @@ exports.bulkGeneratePayroll = async (req, res) => {
               basic_salary: basicSalary,
               working_days: workingDays,
               days_present: daysPresent,
+              absent_days: absentDays,
+              paid_leaves_allowed: paidLeavesAllowed,
+              approved_leaves: paidLeavesUsed,
+              use_payroll_policy: shouldApplyPayrollPolicy,
+              payroll_policy_state: matchedPolicy?.state || null,
               leaves: totalLeaves,
               hours_worked: hoursWorked,
               additions, // ✅ preserved
@@ -941,7 +1048,7 @@ exports.getLeavesInfo = async (req, res) => {
       return {
         code: emp.code,
         name: emp.name,
-        allowed_leaves: emp.allowed_leaves || 0,
+        allowed_leaves: Number.isFinite(Number(emp.allowed_leaves)) ? Number(emp.allowed_leaves) : 1,
         leaves_balance: emp.leaves_balance || 0,
         leaves_adjustment: payroll.leaves_adjustment || 0
       };
@@ -989,7 +1096,7 @@ exports.updateLeaveAdjustment = async (req, res) => {
     const deductionsTotal = (payroll.deductions || []).reduce((a, b) => a + (b.amount || 0), 0);
 
     // Final salaries
-    const netSalary = basicSalary - (dailyRate * effectiveLeaves) + additionsTotal + deductionsTotal;
+    const netSalary = basicSalary - (dailyRate * effectiveLeaves) + additionsTotal - deductionsTotal;
     const grossSalary = basicSalary - (dailyRate * absentDays);
 
     payroll.net_salary = Math.round(netSalary);
@@ -1045,7 +1152,7 @@ exports.bulkUpdateLeaves = async (req, res) => {
             const deductionsTotal = (payroll.deductions || []).reduce((a, b) => a + (b.amount || 0), 0);
 
             payroll.net_salary = Math.round(
-              basicSalary - (dailyRate * effectiveLeaves) + additionsTotal + deductionsTotal
+              basicSalary - (dailyRate * effectiveLeaves) + additionsTotal - deductionsTotal
             );
             payroll.gross_salary = Math.round(
               basicSalary - (dailyRate * absentDays)
@@ -1540,11 +1647,6 @@ exports.getPayrollExpenseInsightsForCharts = async (req, res) => {
 //     res.status(500).json({ success: false, message: "Server error", error });
 //   }
 // };
-
-
-
-
-
 
 
 
