@@ -12,6 +12,18 @@ const csvParser = require("csv-parser");
 const { Parser } = require("json2csv");
 const { Readable } = require("stream");
 const User = require("../../model/User");
+const PDFDocument = require("pdfkit");
+
+const formatInr = (amount = 0) =>
+  `${Number(amount || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const monthLabel = (month, year) => {
+  const d = new Date(Number(year), Number(month) - 1, 1);
+  return `${d.toLocaleString("default", { month: "short" })} ${year}`;
+};
 
 // exports.bulkGeneratePayroll = async (req, res) => {
 //   try {
@@ -222,7 +234,16 @@ exports.bulkGeneratePayroll = async (req, res) => {
     const employees = await MetaData.find({ firm_code: { $in: firmCodes } }).lean();
     const firmSettings = await FirmMetaData.find({ firmCode: { $in: firmCodes } }).lean();
     const payrollPolicies = await PayrollPolicy.find({}).lean();
+    const firmsMaster = await Firm.find({ code: { $in: firmCodes } })
+      .select("code address state")
+      .lean();
     const firmMap = new Map(firmSettings.map(f => [f.firmCode, f]));
+    const firmStateMap = new Map(
+      firmsMaster.map((firm) => [
+        firm.code,
+        firm?.address?.state || firm?.state || "",
+      ])
+    );
     const policyMap = new Map(
       payrollPolicies.map((p) => [String(p.state || "").trim().toLowerCase(), p])
     );
@@ -352,6 +373,8 @@ exports.bulkGeneratePayroll = async (req, res) => {
         emp.work_state ||
         emp.user_state ||
         emp.payroll_state ||
+        firmConfig.state ||
+        firmStateMap.get(firmCode) ||
         "";
       const employeeState = String(employeeStateRaw).trim().toLowerCase();
       const matchedPolicy = policyMap.get(employeeState);
@@ -452,52 +475,106 @@ exports.bulkGeneratePayroll = async (req, res) => {
 
 exports.getAllPayrolls = async (req, res) => {
   try {
-    console.log("gen pay")
-    let { firmCodes, month, year, search, page = 1, limit = 20 } = req.query;
-    page = parseInt(page);
-    limit = parseInt(limit);
+    let {
+      firmCodes,
+      month,
+      year,
+      search,
+      status,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    page = Math.max(parseInt(page, 10) || 1, 1);
+    limit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 1000);
 
     const filter = {};
 
-    // Filter by firmCodes if provided
     if (firmCodes) {
-      const codesArray = Array.isArray(firmCodes)
-        ? firmCodes
-        : firmCodes.split(",");
-      filter.firmCode = { $in: codesArray };
+      const codesArray = (Array.isArray(firmCodes) ? firmCodes : firmCodes.split(","))
+        .map((code) => String(code || "").trim())
+        .filter(Boolean);
+      if (codesArray.length) {
+        filter.firmCode = { $in: codesArray };
+      }
     }
 
-    // Filter by month/year if provided
-    if (month) filter.month = parseInt(month);
-    if (year) filter.year = parseInt(year);
+    if (month) filter.month = parseInt(month, 10);
+    if (year) filter.year = parseInt(year, 10);
 
-    // Base query
-    let query = Payroll.find(filter);
+    if (status && String(status).trim()) {
+      const normalizedStatus = String(status).trim().toLowerCase();
+      filter.status = new RegExp(`^${normalizedStatus}$`, "i");
+    }
 
-    // Pagination
     const skip = (page - 1) * limit;
-    query = query.skip(skip).limit(limit);
 
-    // Execute payroll fetch
-    const payrolls = await query.lean();
+    const [payrolls, totalCount, overviewAgg] = await Promise.all([
+      Payroll.find(filter).skip(skip).limit(limit).lean(),
+      Payroll.countDocuments(filter),
+      Payroll.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: "$firmCode",
+            total: { $sum: 1 },
+            amount: { $sum: { $ifNull: ["$net_salary", 0] } },
+            paid: {
+              $sum: {
+                $cond: [
+                  { $eq: [{ $toLower: { $ifNull: ["$status", ""] } }, "paid"] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            pending: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: [{ $toLower: { $ifNull: ["$status", ""] } }, "pending"],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            generated: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: [{ $toLower: { $ifNull: ["$status", ""] } }, "generated"],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+    ]);
 
-    // Collect employee codes & firmCodes for mapping
     const employeeCodes = payrolls.map((p) => p.code);
     const firmCodesList = payrolls.map((p) => p.firmCode);
 
-    // Fetch Actor details
-    const actors = await ActorCode.find({ code: { $in: employeeCodes } })
-      .select("code name position role")
-      .lean();
-    const actorMap = new Map(actors.map((a) => [a.code, a]));
+    const overviewFirmCodes = overviewAgg
+      .map((item) => item?._id)
+      .filter(Boolean);
+    const allFirmCodes = Array.from(
+      new Set([...firmCodesList, ...overviewFirmCodes])
+    );
 
-    // Fetch Firm details
-    const firms = await Firm.find({ code: { $in: firmCodesList } })
-      .select("code name")
-      .lean();
+    const [actors, firms] = await Promise.all([
+      ActorCode.find({ code: { $in: employeeCodes } })
+        .select("code name position role")
+        .lean(),
+      Firm.find({ code: { $in: allFirmCodes } }).select("code name").lean(),
+    ]);
+
+    const actorMap = new Map(actors.map((a) => [a.code, a]));
     const firmMap = new Map(firms.map((f) => [f.code, f.name]));
 
-    // Merge info
     let finalData = payrolls.map((p, idx) => {
       const actor = actorMap.get(p.code) || {};
       return {
@@ -510,9 +587,8 @@ exports.getAllPayrolls = async (req, res) => {
       };
     });
 
-    // Search filter (in-memory after join)
-    if (search) {
-      const s = search.toLowerCase();
+    if (search && String(search).trim()) {
+      const s = String(search).toLowerCase();
       finalData = finalData.filter(
         (p) =>
           p.code?.toLowerCase().includes(s) ||
@@ -524,14 +600,42 @@ exports.getAllPayrolls = async (req, res) => {
       );
     }
 
-    // Total count
-    const totalCount = await Payroll.countDocuments(filter);
-    // console.log("fin data: ", finalData)
+    const overviewByFirm = overviewAgg
+      .map((item) => ({
+        firmCode: item._id || "",
+        firmName: firmMap.get(item._id) || item._id || "N/A",
+        total: Number(item.total || 0),
+        amount: Number(item.amount || 0),
+        paid: Number(item.paid || 0),
+        pending: Number(item.pending || 0),
+        generated: Number(item.generated || 0),
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const kpis = overviewByFirm.reduce(
+      (acc, item) => {
+        acc.totalEmployees += item.total;
+        acc.totalPayroll += item.amount;
+        acc.paid += item.paid;
+        acc.pending += item.pending;
+        acc.generated += item.generated;
+        return acc;
+      },
+      {
+        totalEmployees: 0,
+        totalPayroll: 0,
+        paid: 0,
+        pending: 0,
+        generated: 0,
+      }
+    );
 
     return res.status(200).json({
       success: true,
       message: "Payrolls fetched successfully",
       data: finalData,
+      kpis,
+      overviewByFirm,
       pagination: {
         total: totalCount,
         page,
@@ -544,6 +648,186 @@ exports.getAllPayrolls = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch payrolls",
+      error: error.message,
+    });
+  }
+};
+
+exports.downloadPayslipPdf = async (req, res) => {
+  try {
+    let { code, month, year } = req.query;
+
+    code = String(code || "").trim();
+    month = parseInt(month, 10);
+    year = parseInt(year, 10);
+
+    if (!code || !month || !year) {
+      return res.status(400).json({
+        success: false,
+        message: "code, month and year are required",
+      });
+    }
+
+    const payroll = await Payroll.findOne({ code, month, year }).lean();
+    if (!payroll) {
+      return res.status(404).json({
+        success: false,
+        message: "Payslip record not found",
+      });
+    }
+
+    const [actor, firm] = await Promise.all([
+      ActorCode.findOne({ code }).select("name position role").lean(),
+      Firm.findOne({ code: payroll.firmCode }).select("name code").lean(),
+    ]);
+
+    const additions = Array.isArray(payroll.additions) ? payroll.additions : [];
+    const deductions = Array.isArray(payroll.deductions) ? payroll.deductions : [];
+
+    const additionsTotal = additions.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+    const deductionsTotal = deductions.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+
+    const pfDeduction = deductions.find((d) =>
+      String(d?.name || "").toLowerCase().includes("pf")
+    );
+    const esiDeduction = deductions.find((d) =>
+      String(d?.name || "").toLowerCase().includes("esi")
+    );
+    const otherDeductions = deductions.filter((d) => {
+      const name = String(d?.name || "").toLowerCase();
+      return !name.includes("pf") && !name.includes("esi");
+    });
+
+    const filename = `Payslip_${code}_${month}_${year}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+
+    const doc = new PDFDocument({ size: "A4", margin: 36 });
+    doc.pipe(res);
+
+    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const leftX = doc.page.margins.left;
+
+    const drawBox = (x, y, w, h) => {
+      doc.roundedRect(x, y, w, h, 6).lineWidth(0.8).strokeColor("#d5dee8").stroke();
+    };
+
+    const ensurePageSpace = (minY = 760) => {
+      if (doc.y > minY) {
+        doc.addPage();
+      }
+    };
+
+    doc.font("Helvetica-Bold").fontSize(20).fillColor("#0f172a").text("Salary Slip", leftX, 34);
+    doc.font("Helvetica").fontSize(12).fillColor("#0f766e")
+      .text(firm?.name || "Company", leftX, 62);
+
+    doc.font("Helvetica").fontSize(10).fillColor("#334155")
+      .text(`Pay Period: ${monthLabel(month, year)}`, leftX, 80);
+    doc.font("Helvetica").fontSize(10).fillColor("#334155")
+      .text(`Employee Code: ${code}`, leftX + 360, 62, { width: 180, align: "right" });
+    doc.text(`Status: ${payroll.status || "N/A"}`, leftX + 360, 78, { width: 180, align: "right" });
+
+    let y = 105;
+    drawBox(leftX, y, pageWidth, 98);
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a")
+      .text("Employee Details", leftX + 12, y + 10);
+
+    doc.font("Helvetica").fontSize(10).fillColor("#1f2937");
+    const details = [
+      [`Name: ${actor?.name || "N/A"}`, `Designation: ${actor?.position || "N/A"}`],
+      [`Role: ${actor?.role || "N/A"}`, `Firm: ${firm?.name || "N/A"} (${payroll.firmCode || "N/A"})`],
+      [`Working Days: ${Number(payroll.working_days || 0)}`, `Present Days: ${Number(payroll.days_present || 0)}`],
+      [`Approved Leaves: ${Number(payroll.approved_leaves || 0)}`, `Absent Days: ${Number(payroll.absent_days || 0)}`],
+    ];
+    details.forEach((row, i) => {
+      const rowY = y + 28 + i * 16;
+      doc.text(row[0], leftX + 12, rowY, { width: 250 });
+      doc.text(row[1], leftX + 280, rowY, { width: 250 });
+    });
+
+    y += 118;
+    ensurePageSpace();
+
+    const colGap = 12;
+    const colWidth = (pageWidth - colGap) / 2;
+    const tableHeaderHeight = 22;
+    const rowHeight = 18;
+
+    const earningsRows = [
+      { label: "Basic / Gross (After Attendance)", amount: Number(payroll.gross_salary || 0) },
+      ...additions.map((a) => ({ label: a?.name || "Other Addition", amount: Number(a?.amount || 0) })),
+      { label: "Total Earnings", amount: Number(payroll.gross_salary || 0) + additionsTotal, bold: true },
+    ];
+
+    const deductionRows = [
+      { label: "PF Deduction", amount: Number(pfDeduction?.amount || 0) },
+      { label: "ESI Deduction", amount: Number(esiDeduction?.amount || 0) },
+      ...otherDeductions.map((d) => ({
+        label: d?.name || "Other Deduction",
+        amount: Number(d?.amount || 0),
+      })),
+      { label: "Total Deductions", amount: deductionsTotal, bold: true },
+    ];
+
+    const drawTable = (x, topY, title, rows) => {
+      let cursorY = topY;
+      const tableBodyHeight = rows.reduce((sum, r) => sum + (r?.remark ? 30 : rowHeight), 0);
+      drawBox(x, cursorY, colWidth, tableHeaderHeight + tableBodyHeight + 16);
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(title, x + 10, cursorY + 7);
+      cursorY += tableHeaderHeight;
+
+      doc.moveTo(x + 8, cursorY).lineTo(x + colWidth - 8, cursorY).strokeColor("#e2e8f0").stroke();
+      cursorY += 6;
+
+      rows.forEach((r) => {
+        const currentRowHeight = r?.remark ? 30 : rowHeight;
+        const labelFont = r.bold ? "Helvetica-Bold" : "Helvetica";
+        doc.font(labelFont).fontSize(9.5).fillColor("#1f2937").text(r.label, x + 10, cursorY, { width: colWidth - 120 });
+        doc.font(labelFont).fontSize(9.5).fillColor("#111827")
+          .text(formatInr(r.amount), x + colWidth - 105, cursorY, { width: 95, align: "right" });
+
+        if (r.remark) {
+          doc.font("Helvetica").fontSize(8.2).fillColor("#64748b")
+            .text(r.remark, x + 10, cursorY + 10, { width: colWidth - 120 });
+        }
+        cursorY += currentRowHeight;
+      });
+    };
+
+    const tableTop = y;
+    drawTable(leftX, tableTop, "Earnings", earningsRows);
+    drawTable(leftX + colWidth + colGap, tableTop, "Deductions", deductionRows);
+
+    const earningsHeight = earningsRows.reduce((sum, r) => sum + (r?.remark ? 30 : rowHeight), 0);
+    const deductionsHeight = deductionRows.reduce((sum, r) => sum + (r?.remark ? 30 : rowHeight), 0);
+    const maxTableBodyHeight = Math.max(earningsHeight, deductionsHeight);
+    y = tableTop + tableHeaderHeight + maxTableBodyHeight + 34;
+    ensurePageSpace();
+
+    drawBox(leftX, y, pageWidth, 66);
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#0f172a")
+      .text("Net Salary Payable", leftX + 12, y + 14);
+    doc.font("Helvetica-Bold").fontSize(19).fillColor("#0f766e")
+      .text(formatInr(payroll.net_salary || 0), leftX + pageWidth - 220, y + 10, {
+        width: 200,
+        align: "right",
+      });
+
+    y += 78;
+    doc.font("Helvetica").fontSize(8.5).fillColor("#64748b")
+      .text(
+        `This is a system-generated salary slip. Generated at ${new Date().toLocaleString("en-IN")}.`,
+        leftX,
+        y
+      );
+
+    doc.end();
+  } catch (error) {
+    console.error("Error downloading payslip PDF:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate payslip PDF",
       error: error.message,
     });
   }
@@ -1647,6 +1931,3 @@ exports.getPayrollExpenseInsightsForCharts = async (req, res) => {
 //     res.status(500).json({ success: false, message: "Server error", error });
 //   }
 // };
-
-
-
