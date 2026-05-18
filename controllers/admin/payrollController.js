@@ -755,7 +755,7 @@ exports.downloadPayslipPdf = async (req, res) => {
     const rowHeight = 18;
 
     const earningsRows = [
-      { label: "Basic / Gross (After Attendance)", amount: Number(payroll.gross_salary || 0) },
+      { label: "Basic / Gross", amount: Number(payroll.gross_salary || 0) },
       ...additions.map((a) => ({ label: a?.name || "Other Addition", amount: Number(a?.amount || 0) })),
       { label: "Total Earnings", amount: Number(payroll.gross_salary || 0) + additionsTotal, bold: true },
     ];
