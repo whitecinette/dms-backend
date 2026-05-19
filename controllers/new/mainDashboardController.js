@@ -828,14 +828,34 @@ async function fetchExtractionCharts({
   metric,
   allowAll,
 }) {
-  const query = {
+  const extractionQuery = {
     createdAt: { $gte: start, $lte: end },
+    brand: { $not: /^samsung$/i },
     ...(allowAll ? {} : { dealer: { $in: dealerCodes.length ? dealerCodes : ["__NO_CODES__"] } }),
   };
 
-  const records = await ExtractionRecord.find(query).lean();
+  const records = await ExtractionRecord.find(extractionQuery).lean();
 
-  if (!records.length) {
+  const startMoment = moment(start).tz(IST).startOf("day");
+  const endMoment = moment(end).tz(IST).endOf("day");
+
+  const yearMonths = [];
+  const monthCursor = startMoment.clone().startOf("month");
+  const endMonth = endMoment.clone().endOf("month");
+  while (monthCursor.isSameOrBefore(endMonth)) {
+    yearMonths.push(monthCursor.format("YYYY-MM"));
+    monthCursor.add(1, "month");
+  }
+
+  const samsungActivationQuery = {
+    year_month: { $in: yearMonths },
+    ...(allowAll
+      ? {}
+      : { tertiary_buyer_code: { $in: dealerCodes.length ? dealerCodes : ["__NO_CODES__"] } }),
+  };
+  const samsungActivationRows = await ActivationData.find(samsungActivationQuery).lean();
+
+  if (!records.length && !samsungActivationRows.length) {
     return {
       kpis: {
         totalMarketValue: 0,
@@ -897,6 +917,51 @@ async function fetchExtractionCharts({
     addTrend("month", month, brand, trendValue);
 
     const segment = normalizeString(row.segment) || "Unmapped";
+    if (!segmentMap.has(segment)) {
+      segmentMap.set(segment, {
+        segment,
+        brands: {},
+        totalValue: 0,
+        totalVolume: 0,
+      });
+    }
+
+    const segmentNode = segmentMap.get(segment);
+    segmentNode.brands[brand] = safeNumber(segmentNode.brands[brand]) + trendValue;
+    segmentNode.totalValue += amount;
+    segmentNode.totalVolume += quantity;
+  }
+
+  for (const row of samsungActivationRows) {
+    const parsedDate = parseRawDateToMoment(row.activation_date_raw);
+    if (!parsedDate) continue;
+    if (parsedDate.isBefore(startMoment) || parsedDate.isAfter(endMoment)) continue;
+
+    const brand = "Samsung";
+    const quantity = safeNumber(row.qty);
+    const amount = safeNumber(row.val);
+
+    totalMarketValue += amount;
+    totalMarketVolume += quantity;
+
+    if (!brandTotals.has(brand)) {
+      brandTotals.set(brand, { brand, value: 0, volume: 0 });
+    }
+
+    const brandNode = brandTotals.get(brand);
+    brandNode.value += amount;
+    brandNode.volume += quantity;
+
+    const day = parsedDate.clone().format("YYYY-MM-DD");
+    const week = parsedDate.clone().startOf("isoWeek").format("YYYY-[W]WW");
+    const month = parsedDate.clone().format("YYYY-MM");
+
+    const trendValue = metric === "value" ? amount : quantity;
+    addTrend("day", day, brand, trendValue);
+    addTrend("week", week, brand, trendValue);
+    addTrend("month", month, brand, trendValue);
+
+    const segment = normalizeString(row.segment_snapshot) || "Unmapped";
     if (!segmentMap.has(segment)) {
       segmentMap.set(segment, {
         segment,
@@ -1053,12 +1118,21 @@ async function fetchAttendanceSummaryAndCharts({
 
   const start = startMoment.clone().startOf("day").toDate();
   const end = endMoment.clone().endOf("day").toDate();
-  const selectedDayKey = endMoment.clone().format("YYYY-MM-DD");
+  const selectedDayMoment = moment.tz(IST).startOf("day");
+  const selectedDayKey = selectedDayMoment.format("YYYY-MM-DD");
+  const selectedDayStart = selectedDayMoment.clone().toDate();
+  const selectedDayEnd = selectedDayMoment.clone().endOf("day").toDate();
 
-  const attendanceRows = await Attendance.find({
-    code: { $in: finalCodes },
-    date: { $gte: start, $lte: end },
-  }).lean();
+  const [attendanceRows, selectedDayRows] = await Promise.all([
+    Attendance.find({
+      code: { $in: finalCodes },
+      date: { $gte: start, $lte: end },
+    }).lean(),
+    Attendance.find({
+      code: { $in: finalCodes },
+      date: { $gte: selectedDayStart, $lte: selectedDayEnd },
+    }).lean(),
+  ]);
 
   const recordByCodeDay = new Map();
 
@@ -1092,6 +1166,7 @@ async function fetchAttendanceSummaryAndCharts({
 
   const selectedDayBucket = initStatusBucket(finalCodes.length);
   const firmBuckets = new Map();
+  const selectedDayByCode = new Map();
 
   for (const code of finalCodes) {
     const firmCode = normalizeString(metaMap.get(code)?.firm_code);
@@ -1115,15 +1190,33 @@ async function fetchAttendanceSummaryAndCharts({
       applyAttendanceStatus(trendBucket, row);
     }
 
-    if (day === selectedDayKey) {
-      applyAttendanceStatus(selectedDayBucket, row);
+  }
 
-      const code = normalizeString(row.code);
-      const firmCode = normalizeString(metaMap.get(code)?.firm_code) || "NA";
-      const firmNode = firmBuckets.get(firmCode);
-      if (firmNode) {
-        applyAttendanceStatus(firmNode.bucket, row);
-      }
+  for (const row of selectedDayRows) {
+    const code = normalizeString(row.code);
+    if (!code) continue;
+
+    const prev = selectedDayByCode.get(code);
+    if (!prev) {
+      selectedDayByCode.set(code, row);
+      continue;
+    }
+
+    const prevTime = new Date(prev.updatedAt || prev.date || 0).getTime();
+    const nextTime = new Date(row.updatedAt || row.date || 0).getTime();
+    if (nextTime >= prevTime) {
+      selectedDayByCode.set(code, row);
+    }
+  }
+
+  for (const row of selectedDayByCode.values()) {
+    applyAttendanceStatus(selectedDayBucket, row);
+
+    const code = normalizeString(row.code);
+    const firmCode = normalizeString(metaMap.get(code)?.firm_code) || "NA";
+    const firmNode = firmBuckets.get(firmCode);
+    if (firmNode) {
+      applyAttendanceStatus(firmNode.bucket, row);
     }
   }
 
@@ -1200,7 +1293,10 @@ async function fetchAttendanceSummaryAndCharts({
     .sort((a, b) => b.points - a.points);
 
   return {
-    kpis: statusBucketToSummary(selectedDayBucket),
+    kpis: {
+      ...statusBucketToSummary(selectedDayBucket),
+      asOfDate: selectedDayKey,
+    },
     dailyTrend,
     firmBreakdown,
     geoHeatmap,
