@@ -158,6 +158,7 @@ const adminDashboard = (user) => {
 
     quickActions: [
       { title: "Sales Dashboard", route: "sales_dashboard_new", icon: "barChart2" },
+      { title: "Top Selling", route: "top_selling", icon: "pieChart" },
       {
         title: "Attendance Dashboard",
         route: "attendance_admin_dashboard",
